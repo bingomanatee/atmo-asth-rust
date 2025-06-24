@@ -31,20 +31,29 @@ pub const MAX_DEGRADATION_KM_PER_MYR: f64 = 20.0;
 pub const DEGRADATION_PER_K_ABOVE_PEAK: f64 = 0.1;
 
 // === Global Energy Loss Based on Lithosphere Thickness (J per MIO years) ===
-// Science-based cooling rates that depend on lithosphere insulation effect
-pub const GLOBAL_ENERGY_LOSS_NO_LITHOSPHERE: f64 = 1.07e33; // J per MIO years - maximum heat loss
-pub const GLOBAL_ENERGY_LOSS_1KM_LITHOSPHERE: f64 = 6.03e31; // J per MIO years - 1km insulation  
-pub const GLOBAL_ENERGY_LOSS_5KM_LITHOSPHERE: f64 = 2.7e31; // J per MIO years - 10km insulation
-pub const GLOBAL_ENERGY_LOSS_10KM_LITHOSPHERE: f64 = 6.03e30; // J per MIO years - 10km insulation
-pub const GLOBAL_ENERGY_LOSS_100KM_LITHOSPHERE: f64 = 6.03e29; // J per MIO years - 100km insulation
-pub const GLOBAL_ENERGY_LOSS_200KM_LITHOSPHERE: f64 = 0.0; // full insulation
 
-/// --- the above points of reference are boiled down to the lookup table below
+// Science-based cooling rates that depend on lithosphere insulation effect
+// Units: Joules per year (J/y) across entire planetary surface
+
+pub const MIO: f64 = 1_000_000.0;
+
+pub const GLOBAL_ENERGY_LOSS_0KM_LITHOSPHERE: f64 = 1.5e27/MIO;      // Fully exposed mantle
+pub const GLOBAL_ENERGY_LOSS_1KM_LITHOSPHERE: f64 = 6.03e31/MIO;     // Very thin insulation
+pub const GLOBAL_ENERGY_LOSS_5KM_LITHOSPHERE: f64 = 2.7e31/MIO;      // Thin crust
+pub const GLOBAL_ENERGY_LOSS_10KM_LITHOSPHERE: f64 = 7.5e26/MIO;     // Moderate insulation
+pub const GLOBAL_ENERGY_LOSS_50KM_LITHOSPHERE: f64 = 2.0e26/MIO;     
+pub const GLOBAL_ENERGY_LOSS_100KM_LITHOSPHERE: f64 = 1.0e25/MIO;    // Thick lithosphere
+pub const GLOBAL_ENERGY_LOSS_200KM_LITHOSPHERE: f64 = 0.0;       // Full insulation (no heat loss)
+
 pub const GLOBAL_ENERGY_LOSS_TABLE: &[(f64, f64)] = &[
-    (0.0, 1.07e33),   // No lithosphere
-    (1.0, 6.03e31),   // Thin lithosphere
-    (5.0, 2.7e31),    // Modest insulation
-    (10.0, 6.03e30),  // Thicker crust
-    (100.0, 6.03e29), // Strong insulation
-    (200.0, 0.0),     // Full insulation
+    (0.0, GLOBAL_ENERGY_LOSS_0KM_LITHOSPHERE),       // Exposed mantle
+    (1.0, GLOBAL_ENERGY_LOSS_1KM_LITHOSPHERE),       // 1 km
+    (5.0, GLOBAL_ENERGY_LOSS_5KM_LITHOSPHERE),       // 5 km
+    (10.0, GLOBAL_ENERGY_LOSS_10KM_LITHOSPHERE),     // 10 km
+    (50.0, GLOBAL_ENERGY_LOSS_50KM_LITHOSPHERE),     // 50 km
+    (100.0, GLOBAL_ENERGY_LOSS_100KM_LITHOSPHERE),   // 100 km
+    (200.0, GLOBAL_ENERGY_LOSS_200KM_LITHOSPHERE),   // 200 km
 ];
+
+// yearly radiant heat input to the upper layer of the asthenosphere
+pub const GLOBAL_HEAT_INPUT_ASTHENOSPHERE: f64 = 1.3e21;

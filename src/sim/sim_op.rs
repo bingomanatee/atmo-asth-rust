@@ -1,3 +1,6 @@
+mod sim_op_cooling;
+mod sim_op_radiance;
+
 use crate::sim::Simulation;
 
 pub trait SimOp {

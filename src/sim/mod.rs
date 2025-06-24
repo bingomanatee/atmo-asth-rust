@@ -20,6 +20,7 @@ pub struct Simulation {
     layer_height_km: f64,
     step: i32,
     sim_steps: i32,
+    years_per_step: u32,
 }
 
 pub struct SimProps {
@@ -32,6 +33,7 @@ pub struct SimProps {
     layer_height: f64,
     layer_height_km: f64,
     sim_steps: i32,
+    years_per_step: u32,
 }
 
 impl Simulation {
@@ -54,6 +56,7 @@ impl Simulation {
             layer_height_km: props.layer_height_km,
             step: -1,
             sim_steps: props.sim_steps,
+            years_per_step: props.years_per_step
         };
         sim.make_cells();
         sim
@@ -153,6 +156,7 @@ mod tests {
             layer_height: 10.0,
             layer_height_km: 10.0,
             sim_steps: 500,
+            years_per_step: 1_000_000
         });
 
         assert_eq!(sim.cells.into_iter().len(), 5882);
@@ -167,6 +171,10 @@ mod tests {
         impl CoolingOp {
             fn new(intensity: f64) -> CoolingOp {
                 CoolingOp { intensity }
+            }
+            
+            fn handle(intensity: f64)  -> SimOpHandle{
+                SimOpHandle::new(Box::new(CoolingOp::new(intensity)))
             }
         }
 
@@ -187,7 +195,7 @@ mod tests {
                 radius_km: EARTH_RADIUS_KM as f64,
                 resolution: Resolution::One,
             },
-            step_ops: vec![SimOpHandle::new(Box::new(CoolingOp::new(0.99)))],
+            step_ops: vec![CoolingOp::handle(0.99)],
             start_ops: vec![],
             end_ops: vec![],
             res: Resolution::Two,
@@ -195,6 +203,7 @@ mod tests {
             layer_height: 10.0,
             layer_height_km: 10.0,
             sim_steps: 500,
+            years_per_step: 1_000_000
         });
 
         for (id, cell) in sim.cells.clone() {

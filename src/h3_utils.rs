@@ -114,8 +114,24 @@ impl H3Utils {
         let scale_factor = (planet_radius_km / crate::constants::EARTH_RADIUS_KM as f64).powi(2);
         earth_area_km2 * scale_factor
     }
+
+    /// Get the total number of H3 cells at a given resolution
+    pub fn cell_count_at_resolution(res: Resolution) -> u64 {
+        cell_count_at_resolution(res)
+    }
 }
 
+/// Get the total number of H3 cells at a given resolution
+pub fn cell_count_at_resolution(res: Resolution) -> u64 {
+    // H3 formula: 2 + 120 * 7^(res-1) for res > 0, and 122 for res = 0
+    match res {
+        Resolution::Zero => 122,
+        _ => {
+            let res_num = res as u8;
+            2 + 120 * 7_u64.pow((res_num) as u32)
+        }
+    }
+}
 
 pub fn area_km2_at_resolution(res: Resolution, planet_radius_km2: f64) -> f64 {
     let base_cell = CellIndex::base_cells().next().unwrap();
@@ -290,5 +306,25 @@ mod tests {
         println!("Earth area at res {}: {:.6} km²", res as u8, earth_area);
         println!("Mars area at res {}: {:.6} km²", res as u8, mars_area);
         println!("Scale factor: {:.6}", expected_scale);
+    }
+
+    #[test]
+    fn test_cell_count_at_resolution() {
+        // Test known H3 cell counts for different resolutions
+        assert_eq!(H3Utils::cell_count_at_resolution(Resolution::Zero), 122);
+        assert_eq!(H3Utils::cell_count_at_resolution(Resolution::One), 842);
+        assert_eq!(H3Utils::cell_count_at_resolution(Resolution::Two), 5882);
+        assert_eq!(H3Utils::cell_count_at_resolution(Resolution::Three), 41162);
+
+        // Test the standalone function as well
+        assert_eq!(cell_count_at_resolution(Resolution::Zero), 122);
+        assert_eq!(cell_count_at_resolution(Resolution::One), 842);
+
+        println!("Cell counts:");
+        for res in 0..=5 {
+            let resolution = Resolution::try_from(res).unwrap();
+            let count = H3Utils::cell_count_at_resolution(resolution);
+            println!("Resolution {}: {} cells", res, count);
+        }
     }
 }

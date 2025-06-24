@@ -18,11 +18,31 @@ pub struct AsthCellLayer {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct AsthCellLithosphere {
+    pub height_km :f64,
+    pub volume_km3: f64
+}
+
+impl AsthCellLithosphere {
+    fn new(height: f64) -> AsthCellLithosphere {
+       AsthCellLithosphere {
+           height_km: height, // we assume height is zero 
+           // but if its not we will have to compensate in the future
+           volume_km3: 0.0,
+       }
+    }
+}
+
+/// This is a class that represents a stack of the planet at a specific h3o location
+/// layers projec downwards, layer[0] is at the top
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AsthCellColumn {
     pub energy_joules: f64,
     pub volume_km3: f64,
     pub layers: Vec<AsthCellLayer>,
     pub layers_next: Vec<AsthCellLayer>,
+    pub lithosphere: AsthCellLithosphere ,
+    pub lithosphere_next: AsthCellLithosphere,
     pub layer_height_km: f64,
     pub layer_count: usize,
 
@@ -63,6 +83,8 @@ impl AsthCellColumn {
             layer_height_km: params.layer_height_km,
             layer_count: params.layer_count,
             layers_next: vec![],
+            lithosphere: AsthCellLithosphere::new(0.0),
+            lithosphere_next: AsthCellLithosphere::new(0.0),
         };
 
         cell_column.project(params.layer_count, params.planet_radius)
@@ -70,6 +92,7 @@ impl AsthCellColumn {
     
     pub fn commit_next_layers(&mut self) {
         self.layers.clone_from_slice(&self.layers_next);
+        self.lithosphere = self.lithosphere_next.clone();
     }
     
     fn project(&self, level_count: usize, planet_radius: f64) -> AsthCellColumn {
