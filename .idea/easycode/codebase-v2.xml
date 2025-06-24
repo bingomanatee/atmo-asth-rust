@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="com.obiscr.chatgpt.settings.EasyCodeState">
+    <option name="projectFiles" value="$PROJECT_DIR$/src/asth_cell.rs;/Users/davidedelhart/Documents/rust/atmo-asth-rust/src/main.rs" />
+    <option name="forceFullIndex" value="false" />
+    <option name="fileSummaryMaps" value="{&quot;/Users/davidedelhart/Documents/rust/atmo-asth-rust&quot;:&quot;{\&quot;/src/asth_cell.rs\&quot;:\&quot;This file defines a single struct called `AsthCell` which represents a cell with associated energy, volume, level, and cell index information. The file does not contain any functions, only the definition of the `AsthCell` struct.\\n\\n`AsthCell`: A struct that represents a cell with energy, volume, level, and cell index information.\&quot;,\&quot;/src/main.rs\&quot;:\&quot;This file does not contain any classes. It only contains the following function:\\n\\n`main()`: The `main()` function is the entry point of the program, which simply prints \\\&quot;Hello, world!\\\&quot; to the console.\\n\\nThe file also imports the `asth_cell` module, but there is no further information provided about its contents.\&quot;}&quot;}" />
+    <option name="fileSkeletonMaps" value="{&quot;/Users/davidedelhart/Documents/rust/atmo-asth-rust&quot;:&quot;{\&quot;/src/asth_cell.rs\&quot;:{\&quot;file_path\&quot;:\&quot;/src/asth_cell.rs\&quot;,\&quot;file_name\&quot;:\&quot;asth_cell.rs\&quot;,\&quot;methods\&quot;:[]},\&quot;/src/main.rs\&quot;:{\&quot;file_path\&quot;:\&quot;/src/main.rs\&quot;,\&quot;file_name\&quot;:\&quot;main.rs\&quot;,\&quot;methods\&quot;:[]}}&quot;}" />
+  </component>
+</project>
