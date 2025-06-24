@@ -10,53 +10,53 @@ use h3o::{CellIndex, Resolution};
 use std::collections::HashMap;
 
 pub struct Simulation {
-    planet: Planet,
-    resolution: Resolution,
-    step_ops: Vec<Box<dyn SimOp>>,
-    start_ops: Vec<Box<dyn SimOp>>,
-    end_ops: Vec<Box<dyn SimOp>>,
-    cells: HashMap<CellIndex, AsthCellColumn>,
+    pub planet: Planet,
+    pub resolution: Resolution,
+    ops: Vec<Box<dyn SimOp>>,
+    pub cells: HashMap<CellIndex, AsthCellColumn>,
     layer_count: usize,
     layer_height_km: f64,
     step: i32,
     sim_steps: i32,
-    years_per_step: u32,
+    pub years_per_step: u32,
+    name: String,
+    debug: bool,
+    alert_freq: usize,
+    starting_surface_temp_k: f64
 }
 
 pub struct SimProps {
-    planet: Planet,
-    step_ops: Vec<SimOpHandle>,
-    start_ops: Vec<SimOpHandle>,
-    end_ops: Vec<SimOpHandle>,
-    res: Resolution,
-    layer_count: usize,
-    layer_height: f64,
-    layer_height_km: f64,
-    sim_steps: i32,
-    years_per_step: u32,
+    pub planet: Planet,
+    pub name: &'static str,
+    pub ops: Vec<SimOpHandle>,
+    pub res: Resolution,
+    pub layer_count: usize,
+    pub layer_height: f64,
+    pub layer_height_km: f64,
+    pub sim_steps: i32,
+    pub years_per_step: u32,
+    pub alert_freq: usize,
+    pub starting_surface_temp_k: f64,
+    pub debug: bool,
 }
 
 impl Simulation {
     pub fn new(props: SimProps) -> Simulation {
-        let step_ops = props.step_ops.into_iter().map(|handle| handle.op).collect();
-        let start_ops = props
-            .start_ops
-            .into_iter()
-            .map(|handle| handle.op)
-            .collect();
-        let end_ops = props.end_ops.into_iter().map(|handle| handle.op).collect();
+        let ops = props.ops.into_iter().map(|handle| handle.op).collect();
         let mut sim = Simulation {
             planet: props.planet,
-            step_ops,
-            start_ops,
-            end_ops,
+            ops,
             resolution: props.res,
             cells: HashMap::new(),
             layer_count: props.layer_count,
             layer_height_km: props.layer_height_km,
             step: -1,
             sim_steps: props.sim_steps,
-            years_per_step: props.years_per_step
+            years_per_step: props.years_per_step,
+            name: props.name.to_string(),
+            alert_freq: props.alert_freq,
+            debug: props.debug,
+            starting_surface_temp_k: props.starting_surface_temp_k
         };
         sim.make_cells();
         sim
@@ -73,9 +73,48 @@ impl Simulation {
                 layer_count: self.layer_count,
                 layer_height_km: self.layer_height_km,
                 planet_radius: self.planet.radius_km,
+                surface_temp_k: self.starting_surface_temp_k
             });
             self.cells.insert(cell_index, cell);
         }
+    }
+
+    fn report_step(&self) {
+        if !self.debug {
+            return;
+        }
+
+        match self.alert_freq {
+            0 => {
+                return;
+            }
+            1 => {}
+            _ => {
+                if (self.step % self.alert_freq as i32) > 0  {
+                    return;
+                }
+            }
+        }
+
+        let global_energy = self.energy_at_layer(0);
+        let cells = self.cells.iter().len();
+        println!(
+            "{} STEP {}: surface global energy (J) {:.3e}, per cell {:.3e} J",
+            self.name,
+            self.step,
+            global_energy,
+            global_energy / cells as f64
+        );
+    }
+
+    pub fn energy_at_layer(&self, layer: usize) -> f64 {
+        self.cells
+            .iter()
+            .map(|(_index, cell)| match cell.layers.get(layer) {
+                None => 0.0,
+                Some(layer) => layer.energy_joules,
+            })
+            .sum()
     }
 
     pub fn simulate(&mut self) {
@@ -89,6 +128,8 @@ impl Simulation {
 
             self.simulate_step();
             self.advance();
+
+            self.report_step();
 
             if self.step >= self.sim_steps {
                 break;
@@ -104,59 +145,61 @@ impl Simulation {
     }
 
     fn simulate_init(&mut self) {
-        let mut ops = std::mem::take(&mut self.start_ops);
+        let mut ops = std::mem::take(&mut self.ops);
 
         for op in &mut ops {
-            op.update_sim(self);
+            op.init_sim(self);
         }
-        self.start_ops = ops;
+        self.ops = ops;
     }
 
     fn simulate_end(&mut self) {
-        let mut ops = std::mem::take(&mut self.end_ops);
+        let mut ops = std::mem::take(&mut self.ops);
 
         for op in &mut ops {
-            op.update_sim(self);
+            op.after_sim(self);
         }
-        self.end_ops = ops;
+        self.ops = ops;
     }
 
     fn simulate_step(&mut self) {
-        let mut ops = std::mem::take(&mut self.step_ops);
+        let mut ops = std::mem::take(&mut self.ops);
 
         for op in &mut ops {
             op.update_sim(self);
         }
-        self.step_ops = ops;
+        self.ops = ops;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use approx::assert_abs_diff_eq;
     use crate::asth_cell::AsthCellColumn;
-    use crate::constants::EARTH_RADIUS_KM;
+    use crate::constants::{ASTHENOSPHERE_SURFACE_START_TEMP_K, EARTH_RADIUS_KM};
     use crate::planet::Planet;
     use crate::sim::sim_op::SimOp;
     use crate::sim::{SimProps, Simulation};
+    use approx::assert_abs_diff_eq;
     use h3o::{CellIndex, Resolution};
 
     #[test]
     fn creation() {
         let sim = Simulation::new(SimProps {
+            name: "creation_test",
             planet: Planet {
                 radius_km: EARTH_RADIUS_KM as f64,
                 resolution: Resolution::One,
             },
-            step_ops: vec![],
-            start_ops: vec![],
-            end_ops: vec![],
+            ops: vec![],
             res: Resolution::Two,
             layer_count: 4,
             layer_height: 10.0,
             layer_height_km: 10.0,
             sim_steps: 500,
-            years_per_step: 1_000_000
+            years_per_step: 1_000_000,
+            debug: true,
+            alert_freq: 100,
+            starting_surface_temp_k: ASTHENOSPHERE_SURFACE_START_TEMP_K
         });
 
         assert_eq!(sim.cells.into_iter().len(), 5882);
@@ -164,51 +207,70 @@ mod tests {
 
     #[test]
     fn simple_sim() {
-        pub struct CoolingOp {
+        /// Example operation that demonstrates all three lifecycle methods
+        pub struct ExampleOp {
             pub intensity: f64,
+            pub init_count: usize,
+            pub update_count: usize,
         }
 
-        impl CoolingOp {
-            fn new(intensity: f64) -> CoolingOp {
-                CoolingOp { intensity }
+        impl ExampleOp {
+            fn new(intensity: f64) -> ExampleOp {
+                ExampleOp {
+                    intensity,
+                    init_count: 0,
+                    update_count: 0,
+                }
             }
-            
-            fn handle(intensity: f64)  -> SimOpHandle{
-                SimOpHandle::new(Box::new(CoolingOp::new(intensity)))
+
+            fn handle(intensity: f64) -> SimOpHandle {
+                SimOpHandle::new(Box::new(ExampleOp::new(intensity)))
             }
         }
 
-        impl SimOp for CoolingOp {
+        impl SimOp for ExampleOp {
+            fn init_sim(&mut self, sim: &mut Simulation) {
+                self.init_count += 1;
+                println!("Initializing simulation '{}' with {} cells", sim.name, sim.cells.len());
+            }
+
             fn update_sim(&mut self, sim: &mut Simulation) {
+                self.update_count += 1;
                 for column in sim.cells.values_mut() {
                     if let Some(cell) = column.layers_next.get_mut(0) {
                         cell.energy_joules *= self.intensity;
                     }
                 }
             }
+
+            fn after_sim(&mut self, sim: &mut Simulation) {
+                println!("Simulation '{}' completed after {} updates", sim.name, self.update_count);
+            }
         }
 
         use crate::sim::sim_op::SimOpHandle;
 
         let mut sim = Simulation::new(SimProps {
+            name: "simple_cooling_sim",
             planet: Planet {
                 radius_km: EARTH_RADIUS_KM as f64,
                 resolution: Resolution::One,
             },
-            step_ops: vec![CoolingOp::handle(0.99)],
-            start_ops: vec![],
-            end_ops: vec![],
+            ops: vec![ExampleOp::handle(0.99)],
             res: Resolution::Two,
             layer_count: 4,
             layer_height: 10.0,
             layer_height_km: 10.0,
             sim_steps: 500,
-            years_per_step: 1_000_000
+            years_per_step: 1_000_000,
+            debug: true,
+            alert_freq: 100,
+            starting_surface_temp_k: ASTHENOSPHERE_SURFACE_START_TEMP_K
         });
 
         for (id, cell) in sim.cells.clone() {
             if let Some(layer) = cell.layers.first() {
-                assert_abs_diff_eq!(layer.energy_joules,  5.47e23, epsilon= 5.0e22);
+                assert_abs_diff_eq!(layer.energy_joules, 6.04e23, epsilon = 5.0e22);
             }
         }
 
@@ -216,9 +278,8 @@ mod tests {
 
         for (id, cell) in sim.cells {
             if let Some(layer) = cell.layers.first() {
-                assert_abs_diff_eq!(layer.energy_joules,  3.5e21, epsilon= 5.0e20);
+                assert_abs_diff_eq!(layer.energy_joules, 3.5e21, epsilon = 5.0e20);
             }
         }
-
     }
 }

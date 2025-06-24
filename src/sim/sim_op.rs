@@ -1,10 +1,24 @@
 mod sim_op_cooling;
 mod sim_op_radiance;
+mod sim_op_init_lithosphere;
 
 use crate::sim::Simulation;
 
 pub trait SimOp {
-    fn update_sim(&mut self, sim: &mut Simulation);
+    /// Called once at the beginning of the simulation
+    fn init_sim(&mut self, _sim: &mut Simulation) {
+        // Default implementation does nothing
+    }
+
+    /// Called every simulation step
+    fn update_sim(&mut self, _sim: &mut Simulation) {
+        // Default implementation does nothing
+    }
+
+    /// Called once at the end of the simulation
+    fn after_sim(&mut self, _sim: &mut Simulation) {
+        // Default implementation does nothing
+    }
 }
 
 pub struct SimOpHandle {

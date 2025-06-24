@@ -119,6 +119,29 @@ impl H3Utils {
     pub fn cell_count_at_resolution(res: Resolution) -> u64 {
         cell_count_at_resolution(res)
     }
+
+    /// Convert a cell index to a 3D point on the planet surface
+    /// Returns a Vec3 representing the position in 3D space with the given planet radius
+    pub fn cell_to_3d_point(cell_index: CellIndex, planet_radius_km: f64) -> Vec3 {
+        let lat_lng = LatLng::from(cell_index);
+        let lat_rad = lat_lng.lat_radians();
+        let lng_rad = lat_lng.lng_radians();
+
+        // Convert spherical coordinates to Cartesian coordinates
+        let (cos_lat, sin_lat) = (lat_rad.cos(), lat_rad.sin());
+        let (cos_lng, sin_lng) = (lng_rad.cos(), lng_rad.sin());
+
+        Vec3::new(
+            (planet_radius_km * cos_lat * cos_lng) as f32,
+            (planet_radius_km * cos_lat * sin_lng) as f32,
+            (planet_radius_km * sin_lat) as f32,
+        )
+    }
+
+    /// Get the 3D point for an AsthCellColumn using its cell index and planet radius from the simulation
+    pub fn cell_column_to_3d_point(cell: &crate::asth_cell::AsthCellColumn, planet_radius_km: f64) -> Vec3 {
+        Self::cell_to_3d_point(cell.cell_index, planet_radius_km)
+    }
 }
 
 /// Get the total number of H3 cells at a given resolution
@@ -326,5 +349,38 @@ mod tests {
             let count = H3Utils::cell_count_at_resolution(resolution);
             println!("Resolution {}: {} cells", res, count);
         }
+    }
+
+    #[test]
+    fn test_cell_to_3d_point() {
+        use crate::constants::EARTH_RADIUS_KM;
+
+        // Test with a known cell
+        let first_cell = CellIndex::base_cells().next().unwrap();
+        let earth_radius = EARTH_RADIUS_KM as f64;
+
+        // Get 3D point for Earth
+        let point_earth = H3Utils::cell_to_3d_point(first_cell, earth_radius);
+
+        // The magnitude should be approximately equal to Earth's radius
+        let magnitude = (point_earth.x.powi(2) + point_earth.y.powi(2) + point_earth.z.powi(2)).sqrt();
+        assert!((magnitude - earth_radius as f32).abs() < 1.0,
+                "Point magnitude {} should be close to Earth radius {}", magnitude, earth_radius);
+
+        // Test with Mars radius
+        let mars_radius = 3390.0;
+        let point_mars = H3Utils::cell_to_3d_point(first_cell, mars_radius);
+        let magnitude_mars = (point_mars.x.powi(2) + point_mars.y.powi(2) + point_mars.z.powi(2)).sqrt();
+        assert!((magnitude_mars - mars_radius as f32).abs() < 1.0,
+                "Point magnitude {} should be close to Mars radius {}", magnitude_mars, mars_radius);
+
+        // The direction should be the same, only magnitude should differ
+        let earth_unit = point_earth.normalize();
+        let mars_unit = point_mars.normalize();
+        let dot_product = earth_unit.dot(mars_unit);
+        assert!(dot_product > 0.999, "Unit vectors should be nearly identical, dot product: {}", dot_product);
+
+        println!("Earth point: {:?} (magnitude: {})", point_earth, magnitude);
+        println!("Mars point: {:?} (magnitude: {})", point_mars, magnitude_mars);
     }
 }

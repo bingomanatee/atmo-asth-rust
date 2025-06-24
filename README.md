@@ -4,12 +4,19 @@
 ## Units 
 
 * distance units default to km;
-* steps in the simulation are in MIO Years
+* steps in the simulation are configurable via `years_per_step`. We began with the assumption of
+  1 MIO years/step but are adjusting to 100,000 years as the standard; Years per step varies with each simulation 
 * "Years" in this context are earth years; the planetary orbit time and rotation time aren't part of this model yet
-* The resolution of the simulation is configurable as a property but the default assumption is Resolution::Two
+* The H3o of the simulation is configurable as a property but the default assumption is Resolution::Two; this system is built around resolution 1..3 based systems, performnce is not guaranteed for a finer grained resolution simulation
 * with a variable resolution and planet size constants are either resolution independant like temperature or have the presumption of an earth-sized planet and should be scaled based on the relative radius of earth 
 * cells' heat quotient are in Joules; this is the default energy measurement in the system.
 * Some things like lithosphere generation rates are measured in celsius or Kelvin which are different numerically but the same scale of units. 
+
+## The H30 library 
+
+Resolution and cell ids are based on the h30 library, a variant of Uber's h3 library for planetary location. in H3/o each region of the planet is divided into a subdivided icoseles sphere starting at level 0 with 122 cells and dividing each cell into seven hexagonal sub-cells. 
+
+Cells are identified by a binary string; each cell has one parent, seven children and six neighbors using a hexagonal layout. Even though cells are hexagons, the columns are treated as cylinders for easier math. 
 
 ## Code
 

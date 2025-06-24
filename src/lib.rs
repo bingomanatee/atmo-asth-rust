@@ -1,6 +1,7 @@
 pub mod asth_cell;
 mod h3_utils;
-mod constants;
-mod sim;
-mod planet;
+pub mod constants;
+pub mod sim;
+pub mod planet;
 mod temp_utils;
+mod lithosphere;
