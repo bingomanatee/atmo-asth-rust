@@ -1,13 +1,13 @@
 pub mod sim_op;
 
-use crate::asth_cell::{AsthCellColumn, AsthCellParams};
-use crate::constants::ASTHENOSPHERE_SURFACE_START_TEMP_K;
+use crate::constants::{ASTHENOSPHERE_SURFACE_START_TEMP_K, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K};
 use crate::h3_utils::H3Utils;
 use crate::planet::Planet;
 use crate::sim::sim_op::{SimOp, SimOpHandle};
 use crate::temp_utils::volume_kelvin_to_joules;
 use h3o::{CellIndex, Resolution};
 use std::collections::HashMap;
+use crate::asth_cell::{AsthCellColumn, AsthCellParams};
 
 pub struct Simulation {
     pub planet: Planet,
@@ -65,14 +65,14 @@ impl Simulation {
     pub fn make_cells(&mut self) {
         for (cell_index, _base) in H3Utils::iter_cells_with_base(self.resolution) {
             let volume = H3Utils::cell_area(self.resolution, self.planet.radius_km);
-            let energy = volume_kelvin_to_joules(volume, ASTHENOSPHERE_SURFACE_START_TEMP_K);
+            // Create cells with surface temperature - projection will handle geothermal gradient
             let cell = AsthCellColumn::new(AsthCellParams {
                 cell_index,
                 volume,
-                energy,
+                energy: 0.0, // This will be ignored by the constructor
                 layer_count: self.layer_count,
                 layer_height_km: self.layer_height_km,
-                planet_radius: self.planet.radius_km,
+                planet_radius_km: self.planet.radius_km,
                 surface_temp_k: self.starting_surface_temp_k
             });
             self.cells.insert(cell_index, cell);
@@ -112,7 +112,7 @@ impl Simulation {
             .iter()
             .map(|(_index, cell)| match cell.layers.get(layer) {
                 None => 0.0,
-                Some(layer) => layer.energy_joules,
+                Some(layer) => layer.energy_joules(),
             })
             .sum()
     }
@@ -174,7 +174,7 @@ impl Simulation {
 
 #[cfg(test)]
 mod tests {
-    use crate::asth_cell::AsthCellColumn;
+    use crate::asth_cell::asth_cell_column::AsthCellColumn;
     use crate::constants::{ASTHENOSPHERE_SURFACE_START_TEMP_K, EARTH_RADIUS_KM};
     use crate::planet::Planet;
     use crate::sim::sim_op::SimOp;
@@ -237,9 +237,9 @@ mod tests {
             fn update_sim(&mut self, sim: &mut Simulation) {
                 self.update_count += 1;
                 for column in sim.cells.values_mut() {
-                    if let Some(cell) = column.layers_next.get_mut(0) {
-                        cell.energy_joules *= self.intensity;
-                    }
+                    let (_, next_layer) = column.layer(0);
+                    let current_energy = next_layer.energy_joules();
+                    next_layer.set_energy_joules(current_energy * self.intensity);
                 }
             }
 
@@ -270,7 +270,7 @@ mod tests {
 
         for (id, cell) in sim.cells.clone() {
             if let Some(layer) = cell.layers.first() {
-                assert_abs_diff_eq!(layer.energy_joules, 6.04e23, epsilon = 5.0e22);
+                assert_abs_diff_eq!(layer.energy_joules(), 6.04e23, epsilon = 5.0e22);
             }
         }
 
@@ -278,7 +278,7 @@ mod tests {
 
         for (id, cell) in sim.cells {
             if let Some(layer) = cell.layers.first() {
-                assert_abs_diff_eq!(layer.energy_joules, 3.5e21, epsilon = 5.0e20);
+                assert_abs_diff_eq!(layer.energy_joules(), 3.5e21, epsilon = 5.0e20);
             }
         }
     }

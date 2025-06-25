@@ -20,11 +20,11 @@ impl SimOp for RadianceOp {
     fn update_sim(&mut self, sim: &mut Simulation) {
         for column in sim.cells.values_mut() {
             let lithosphere_height = column.total_lithosphere_height();
-            if let Some(cell) = column.layers_next.get_mut(0) {
-                let radiance_per_year = radiance_per_cell_per_year(sim.resolution, sim.planet.radius_km, lithosphere_height);
-                let radiance = radiance_per_year * sim.years_per_step as f64;
-                cell.energy_joules = (cell.energy_joules + radiance).max(0.0);
-            }
+            let (_, next_layer) = column.layer(0);
+
+            let radiance_per_year = radiance_per_cell_per_year(sim.resolution, sim.planet.radius_km, lithosphere_height);
+            let radiance = radiance_per_year * sim.years_per_step as f64;
+            next_layer.add_energy(radiance);
         }
     }
 }
@@ -60,7 +60,7 @@ mod tests {
 
         for (_id, cell) in sim.cells.clone() {
             if let Some(layer) = cell.layers.first() {
-                assert_abs_diff_eq!(layer.energy_joules,  6.04e23, epsilon= 5.0e22);
+                assert_abs_diff_eq!(layer.energy_joules(),  6.04e23, epsilon= 5.0e22);
             }
         }
 
@@ -68,7 +68,7 @@ mod tests {
 
         for (_id, cell) in sim.cells {
             if let Some(layer) = cell.layers.first() {
-                assert_abs_diff_eq!(layer.energy_joules, 8.25e23, epsilon= 5.0e21);
+                assert_abs_diff_eq!(layer.energy_joules(), 8.25e23, epsilon= 5.0e21);
             }
         }
 

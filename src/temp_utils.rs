@@ -23,14 +23,15 @@ pub fn kelvin_to_celsius(temp_k: f64) -> f64 {
 /// # Arguments
 /// - `temp_k`: Temperature in Kelvin
 /// - `volume_km3`: Volume of the layer in km³
+/// - `specific_heat`: Specific heat capacity in J/(kg·K)
 ///
 /// # Returns
 /// Total thermal energy in Joules
-pub fn energy_from_kelvin(temp_k: f64, volume_km3: f64) -> f64 {
+pub fn energy_from_kelvin(temp_k: f64, volume_km3: f64, specific_heat: f64) -> f64 {
     let volume_m3 = volume_km3 * 1.0e9;
     let mass_kg = volume_m3 * MANTLE_DENSITY_KGM3;
 
-    mass_kg * SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K * temp_k
+    mass_kg * specific_heat * temp_k
 }
 
 /// Computes temperature in Kelvin from energy in Joules and volume in km³.
@@ -41,20 +42,35 @@ pub fn energy_from_kelvin(temp_k: f64, volume_km3: f64) -> f64 {
 ///
 /// # Returns
 /// Mean temperature in Kelvin
-pub fn joules_volume_to_kelvin(energy_j: f64, volume_km3: f64) -> f64 {
+pub fn joules_volume_to_kelvin(energy_j: f64, volume_km3: f64, specific_heat: f64) -> f64 {
     let volume_m3 = volume_km3 * KM3_TO_M3;
     let mass_kg = volume_m3 * MANTLE_DENSITY_KGM3;
 
-    energy_j / (mass_kg * SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K)
+    energy_j / (mass_kg * specific_heat)
 }
 
-pub fn volume_kelvin_to_joules(volume_km3: f64, temp_k: f64) -> f64 {
+/// Convenience function that uses the standard mantle specific heat
+pub fn joules_volume_to_kelvin_mantle(energy_j: f64, volume_km3: f64) -> f64 {
+    joules_volume_to_kelvin(energy_j, volume_km3, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K)
+}
+
+/// Convenience function that uses the standard mantle specific heat
+pub fn energy_from_kelvin_mantle(temp_k: f64, volume_km3: f64) -> f64 {
+    energy_from_kelvin(temp_k, volume_km3, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K)
+}
+
+/// Convenience function that uses the standard mantle specific heat
+pub fn kelvin_volume_to_joules_mantle(temp_k: f64, volume_km3: f64) -> f64 {
+    volume_kelvin_to_joules(volume_km3, temp_k, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K)
+}
+
+pub fn volume_kelvin_to_joules(volume_km3: f64, temp_k: f64, specific_heat: f64) -> f64 {
     const KM3_TO_M3: f64 = 1.0e9;
 
     let volume_m3 = volume_km3 * KM3_TO_M3;
     let mass_kg = volume_m3 * MANTLE_DENSITY_KGM3;
 
-    mass_kg * SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K * temp_k
+    mass_kg * specific_heat * temp_k
 }
 
 fn cooling_j_my_for_thickness(thick_km: f64) -> f64 {
@@ -106,4 +122,131 @@ pub fn radiance_per_cell_per_year(res: Resolution, planet_radius_km: f64, lithos
     let attenuated = GLOBAL_HEAT_INPUT_ASTHENOSPHERE * (-lithosphere_km / D0).exp();
     
     attenuated * planet_scale / cells
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use approx::assert_abs_diff_eq;
+
+    #[test]
+    fn test_celsius_kelvin_conversion() {
+        let test_cases = vec![
+            (0.0, 273.15),    // Freezing point of water
+            (100.0, 373.15),  // Boiling point of water
+            (1400.0, 1673.15), // Silicate peak growth temp
+            (1600.0, 1873.15), // Silicate formation temp
+        ];
+
+        for (celsius, expected_kelvin) in test_cases {
+            let kelvin = celsius_to_kelvin(celsius);
+            let back_to_celsius = kelvin_to_celsius(kelvin);
+
+            assert_abs_diff_eq!(kelvin, expected_kelvin, epsilon = 0.01);
+            assert_abs_diff_eq!(back_to_celsius, celsius, epsilon = 0.01);
+        }
+    }
+
+    #[test]
+    fn test_energy_temperature_conversion_roundtrip() {
+        let specific_heat = SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K;
+        let test_volumes = vec![10.0, 50.0, 100.0, 200.0]; // km³
+        let test_temperatures = vec![1000.0, 1400.0, 1673.15, 1873.15, 2000.0]; // K
+
+        for volume in &test_volumes {
+            for &temperature in &test_temperatures {
+                // Convert temperature to energy
+                let energy = energy_from_kelvin(temperature, *volume, specific_heat);
+
+                // Convert energy back to temperature
+                let recovered_temp = joules_volume_to_kelvin(energy, *volume, specific_heat);
+
+                // Should be very close (within 0.01 K)
+                assert_abs_diff_eq!(recovered_temp, temperature, epsilon = 0.01);
+
+                println!("Volume: {:.1} km³, Temp: {:.2} K -> Energy: {:.2e} J -> Temp: {:.2} K",
+                         volume, temperature, energy, recovered_temp);
+            }
+        }
+    }
+
+    #[test]
+    fn test_convenience_functions_consistency() {
+        let volume = 100.0; // km³
+        let temperature = 1673.15; // K (Silicate peak growth temp)
+
+        // Test that convenience functions give same results as explicit functions
+        let energy1 = energy_from_kelvin(temperature, volume, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K);
+        let energy2 = energy_from_kelvin_mantle(temperature, volume);
+        let energy3 = kelvin_volume_to_joules_mantle(temperature, volume);
+
+        assert_abs_diff_eq!(energy1, energy2, epsilon = 1.0);
+        assert_abs_diff_eq!(energy1, energy3, epsilon = 1.0);
+
+        // Test reverse conversion
+        let temp1 = joules_volume_to_kelvin(energy1, volume, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K);
+        let temp2 = joules_volume_to_kelvin_mantle(energy1, volume);
+
+        assert_abs_diff_eq!(temp1, temperature, epsilon = 0.01);
+        assert_abs_diff_eq!(temp2, temperature, epsilon = 0.01);
+        assert_abs_diff_eq!(temp1, temp2, epsilon = 0.01);
+    }
+
+    #[test]
+    fn test_energy_scales_with_volume() {
+        let temperature = 1500.0; // K
+        let specific_heat = SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K;
+
+        let volume1 = 50.0;  // km³
+        let volume2 = 100.0; // km³ (double)
+
+        let energy1 = energy_from_kelvin(temperature, volume1, specific_heat);
+        let energy2 = energy_from_kelvin(temperature, volume2, specific_heat);
+
+        // Energy should scale linearly with volume
+        assert_abs_diff_eq!(energy2, energy1 * 2.0, epsilon = 1.0);
+
+        // Temperature should be consistent regardless of volume
+        let temp1 = joules_volume_to_kelvin(energy1, volume1, specific_heat);
+        let temp2 = joules_volume_to_kelvin(energy2, volume2, specific_heat);
+
+        assert_abs_diff_eq!(temp1, temperature, epsilon = 0.01);
+        assert_abs_diff_eq!(temp2, temperature, epsilon = 0.01);
+    }
+
+    #[test]
+    fn test_energy_scales_with_temperature() {
+        let volume = 100.0; // km³
+        let specific_heat = SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K;
+
+        let temp1 = 1000.0; // K
+        let temp2 = 2000.0; // K (double)
+
+        let energy1 = energy_from_kelvin(temp1, volume, specific_heat);
+        let energy2 = energy_from_kelvin(temp2, volume, specific_heat);
+
+        // Energy should scale linearly with temperature
+        assert_abs_diff_eq!(energy2, energy1 * 2.0, epsilon = 1.0);
+    }
+
+    #[test]
+    fn test_lithosphere_relevant_temperatures() {
+        let volume = 100.0; // km³
+        let specific_heat = SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K;
+
+        // Test specific temperatures relevant to lithosphere formation
+        let lithosphere_temps = vec![
+            (1673.15, "Silicate peak growth temperature"),
+            (1773.15, "Silicate halfway temperature"),
+            (1873.15, "Silicate formation temperature"),
+        ];
+
+        for (temp, description) in lithosphere_temps {
+            let energy = energy_from_kelvin_mantle(temp, volume);
+            let recovered_temp = joules_volume_to_kelvin_mantle(energy, volume);
+
+            assert_abs_diff_eq!(recovered_temp, temp, epsilon = 0.01);
+            println!("{}: {:.2} K <-> {:.2e} J", description, temp, energy);
+        }
+    }
 }

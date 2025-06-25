@@ -18,12 +18,12 @@ impl SimOp for CoolingOp {
     fn update_sim(&mut self, sim: &mut Simulation) {
         for column in sim.cells.values_mut() {
             let lithosphere_km = column.total_lithosphere_height_next();
-            if let Some(cell) = column.layers_next.get_mut(0) {
-                let cooling_per_year_per_cell = cooling_per_cell_per_year(sim.resolution, sim.planet.radius_km, lithosphere_km);
-                let cooling = cooling_per_year_per_cell * sim.years_per_step as f64;
+            let (_, next_layer) = column.layer(0);
 
-                cell.energy_joules = (cell.energy_joules - cooling).max(0.0);
-            }
+            let cooling_per_year_per_cell = cooling_per_cell_per_year(sim.resolution, sim.planet.radius_km, lithosphere_km);
+            let cooling = cooling_per_year_per_cell * sim.years_per_step as f64;
+
+            next_layer.remove_energy(cooling);
         }
     }
 }
@@ -59,7 +59,7 @@ mod tests {
 
         for (_id, cell) in sim.cells.clone() {
             if let Some(layer) = cell.layers.first() {
-                assert_abs_diff_eq!(layer.energy_joules,  6.04e23, epsilon= 5.0e22);
+                assert_abs_diff_eq!(layer.energy_joules(),  6.04e23, epsilon= 5.0e22);
             }
         }
 
@@ -67,7 +67,7 @@ mod tests {
 
         for (_id, cell) in sim.cells {
             if let Some(layer) = cell.layers.first() {
-                assert_abs_diff_eq!(layer.energy_joules,  3.49e23, epsilon= 5.0e21);
+                assert_abs_diff_eq!(layer.energy_joules(),  3.49e23, epsilon= 5.0e21);
             }
         }
 

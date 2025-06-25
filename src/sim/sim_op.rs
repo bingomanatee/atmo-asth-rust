@@ -1,6 +1,6 @@
 mod sim_op_cooling;
 mod sim_op_radiance;
-mod sim_op_init_lithosphere;
+mod sim_op_lithosphere;
 
 use crate::sim::Simulation;
 

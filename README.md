@@ -27,11 +27,20 @@ Cells are identified by a binary string; each cell has one parent, seven childre
 
 ### AsthCell
 
-AsthCell is short for AsthenosphereCell represents a vertical stack of magma material underneath the lithosphere and the lithosphere material abovve it. 
+AsthCell is short for AsthenosphereCell represents a vertical stack of magma material underneath the lithosphere and the lithosphere material abovve it. it has layers which is a "top to bottom" stack and lithospheres which is a "bottom to top" stack. the reason is that most often you are concerned about the _top layer of the asthenosphere_ and the _bottom layer of the lithosphere_. 
 
-### `.layers`
+### `.layers` (of the Asthenosphere)
 layers start at 0 for the surface to layer `cell.layer_count - 1`; 
-they are all of the same radius and areas; technically they are hexagonal but for all practical purposes they are cylinders.each layer is `.layer_height_km` kilometers high; the heights are maintained with the presumption that teh top and bottom may push out above or below until lithosphere mass levels it down at which point it compresses. So for practical purposes the layers remain parallel to each other. 
+they are all have the same radius and areas; technically they are hexagonal but for all practical purposes they are cylinders. Each layer is `.layer_height_km` kilometers high; the heights are maintained with the presumption that teh top and bottom may push out above or below until lithosphere mass levels it down at which point it compresses. So for practical purposes the layers remain parallel to each other. 
+
+The layer(n) method returns a tuple(current, next) layer data for a given layer. 
+
+### `.lithospheres`
+
+Lithosphere is a "bottom-up" system of lithosphere in a column. _almost all columns won't have more than one entry in the lithospheres /
+lithospheres_next Vecs`. 
+
+The lithosphere() method reutrns a tuple (current, next) of the lithosphere
 
 ## Spatial location h30 and cell indexes
 
