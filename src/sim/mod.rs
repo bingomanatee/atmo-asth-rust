@@ -31,7 +31,6 @@ pub struct SimProps {
     pub ops: Vec<SimOpHandle>,
     pub res: Resolution,
     pub layer_count: usize,
-    pub layer_height: f64,
     pub layer_height_km: f64,
     pub sim_steps: i32,
     pub years_per_step: u32,
@@ -117,6 +116,32 @@ impl Simulation {
             .sum()
     }
 
+    /// Get the current simulation step number
+    pub fn current_step(&self) -> i32 {
+        self.step
+    }
+
+    /// Run a single step with custom operators (for testing)
+    pub fn step_with_ops(&mut self, ops: &mut [&mut dyn SimOp]) {
+        // Copy current to next arrays
+        for column in self.cells.values_mut() {
+            for i in 0..column.layers.len() {
+                column.layers_next[i] = column.layers[i].clone();
+            }
+            column.lithospheres_next = column.lithospheres.clone();
+        }
+
+        // Run operators on next arrays
+        for op in ops {
+            op.update_sim(self);
+        }
+
+        // Commit next to current arrays
+        self.advance();
+
+        self.step += 1;
+    }
+
     pub fn simulate(&mut self) {
         if self.step > -1 {
             panic!("Simulation.simulate can only execute once");
@@ -193,7 +218,6 @@ mod tests {
             ops: vec![],
             res: Resolution::Two,
             layer_count: 4,
-            layer_height: 10.0,
             layer_height_km: 10.0,
             sim_steps: 500,
             years_per_step: 1_000_000,
@@ -229,6 +253,10 @@ mod tests {
         }
 
         impl SimOp for ExampleOp {
+            fn name(&self) -> &str {
+                "ExampleOp"
+            }
+
             fn init_sim(&mut self, sim: &mut Simulation) {
                 self.init_count += 1;
                 println!("Initializing simulation '{}' with {} cells", sim.name, sim.cells.len());
@@ -259,7 +287,6 @@ mod tests {
             ops: vec![ExampleOp::handle(0.99)],
             res: Resolution::Two,
             layer_count: 4,
-            layer_height: 10.0,
             layer_height_km: 10.0,
             sim_steps: 500,
             years_per_step: 1_000_000,

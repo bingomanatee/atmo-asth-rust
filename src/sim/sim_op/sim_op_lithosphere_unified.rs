@@ -77,6 +77,10 @@ impl LithosphereUnifiedOp {
 }
 
 impl SimOp for LithosphereUnifiedOp {
+    fn name(&self) -> &str {
+        "LithosphereUnifiedOp"
+    }
+
     fn init_sim(&mut self, sim: &mut Simulation) {
         let noise = Perlin::new(self.seed);
 
@@ -199,7 +203,6 @@ mod tests {
             ops: vec![],
             res: Resolution::Two,
             layer_count: 4,
-            layer_height: 10.0,
             layer_height_km: 10.0,
             sim_steps: 1,
             years_per_step: 1000,

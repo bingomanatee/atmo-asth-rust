@@ -7,6 +7,27 @@ use crate::constants::{
 };
 use crate::h3_utils::H3Utils;
 use h3o::Resolution;
+use crate::material::{MaterialProfile, MaterialType};
+
+/// Stefan–Boltzmann constant (W·m⁻²·K⁻⁴)
+const STEFAN_BOLTZMANN_CONST: f64 = 5.670374419e-8;
+
+/// Seconds in a year
+const SECONDS_PER_YEAR: f64 = 31_536_000.0;
+
+/// Compute radiated energy from a surface to space in Joules per year.
+/// - `temperature_k`: surface temperature in Kelvin
+/// - `surface_area_km2`: surface area in square kilometers
+/// - `emissivity`: 0–1, defaults to 1.0 for blackbody
+pub fn radiated_joules_per_year(
+    temperature_k: f64,
+    surface_area_km2: f64,
+    emissivity: f64,
+) -> f64 {
+    let surface_area_m2 = surface_area_km2 * 1_000_000.0; // convert km² to m²
+    let power_watts = emissivity * STEFAN_BOLTZMANN_CONST * surface_area_m2 * temperature_k.powi(4);
+    power_watts * SECONDS_PER_YEAR
+}
 
 /// Converts Celsius to Kelvin.
 pub fn celsius_to_kelvin(temp_c: f64) -> f64 {
@@ -120,8 +141,8 @@ pub fn radiance_per_cell_per_year(res: Resolution, planet_radius_km: f64, lithos
     // exponential attenuation through the lithosphere
     const D0: f64 = 50.0; // km  (tunable)
     let attenuated = GLOBAL_HEAT_INPUT_ASTHENOSPHERE * (-lithosphere_km / D0).exp();
-    
-    attenuated * planet_scale / cells
+
+    (attenuated * planet_scale / cells).max(0.0)
 }
 
 #[cfg(test)]
@@ -249,4 +270,15 @@ mod tests {
             println!("{}: {:.2} K <-> {:.2e} J", description, temp, energy);
         }
     }
+}
+
+pub fn conductive_energy_transfer(
+    material: &MaterialProfile,
+    t_upper: f64,
+    t_lower: f64,
+    thickness_m: f64,
+    dt_seconds: f64,
+) -> f64 {
+    let flux = material.thermal_conductivity_w_m_k * (t_lower - t_upper) / thickness_m;
+    flux * dt_seconds // J/m²
 }

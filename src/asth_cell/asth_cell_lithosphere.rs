@@ -52,16 +52,6 @@ impl AsthCellLithosphere {
         }
     }
 
-    /// Get the temperature in Kelvin
-    pub fn temperature(&self) -> f64 {
-        self.energy_mass.temperature()
-    }
-
-    /// Set the temperature in Kelvin
-    pub fn set_temperature(&mut self, temperature_k: f64) {
-        self.energy_mass.set_temperature(temperature_k);
-    }
-
     /// Get the energy in Joules
     pub fn energy(&self) -> f64 {
         self.energy_mass.energy()
@@ -108,5 +98,46 @@ impl AsthCellLithosphere {
     /// Get the specific heat in J/(kg·K)
     pub fn specific_heat(&self) -> f64 {
         self.energy_mass.specific_heat()
+    }
+
+    /// Get the temperature in Kelvin
+    pub fn kelvin(&self) -> f64 {
+        self.energy_mass.kelvin()
+    }
+
+    /// Get mutable reference to the internal EnergyMass for direct thermal operations
+    pub fn energy_mass_mut(&mut self) -> &mut dyn crate::energy_mass::EnergyMass {
+        &mut self.energy_mass
+    }
+
+    /// this is the amount of material that will melt off per year
+    /// based on the temperature of the asthenosphere below it.
+    pub fn  melt_from_below_km_per_year(
+        &self,
+        temp_asth_k: f64,
+    ) -> f64 {
+        
+        let material = self.profile();
+        if temp_asth_k <= material.max_lith_formation_temp_kv {
+            return 0.0;
+        }
+
+        let delta_t = temp_asth_k - material.max_lith_formation_temp_kv;
+
+        let energy_per_m3 = material.specific_heat_capacity_j_per_kg_k
+            * material.density_kg_m3
+            * delta_t;
+        
+        // Joules per year per m²
+        let thickness_m = self.height_km * 1000.0;
+        let flux_w_m2 = material.thermal_conductivity_w_m_k * delta_t / thickness_m; // W/m²
+        let joules_per_year = flux_w_m2 * 31_536_000.0;
+
+
+        // Convert to km/year
+        let melt_m = joules_per_year / energy_per_m3;
+
+        // Return in km/year
+        melt_m / 1000.0
     }
 }

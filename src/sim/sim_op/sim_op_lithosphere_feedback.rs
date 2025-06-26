@@ -83,6 +83,10 @@ impl LithosphereFeedbackOp {
 }
 
 impl SimOp for LithosphereFeedbackOp {
+    fn name(&self) -> &str {
+        "LithosphereFeedbackOp"
+    }
+
     fn update_sim(&mut self, sim: &mut Simulation) {
         if self.use_global_threshold {
             // Global threshold mode: check average lithosphere thickness
@@ -139,7 +143,6 @@ mod tests {
             ops: vec![],
             res: Resolution::Two,
             layer_count: 4,
-            layer_height: 10.0,
             layer_height_km: 10.0,
             sim_steps: 1,
             years_per_step: 1000,

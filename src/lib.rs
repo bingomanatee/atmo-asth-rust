@@ -5,4 +5,5 @@ pub mod energy_mass;
 pub mod material;
 pub mod sim;
 pub mod planet;
-mod temp_utils;
+pub mod temp_utils;
+pub mod thermal_conduction;

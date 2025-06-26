@@ -4,42 +4,228 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 
-/// CSV Writer Operator
-/// 
-/// This operator writes simulation statistics to a CSV file at each step.
-/// It tracks temperature, energy, volume, and lithosphere statistics across all cells.
-/// 
-/// The CSV includes columns for:
-/// - step: simulation step number
-/// - avg_temp_k, min_temp_k, max_temp_k: temperature statistics in Kelvin
-/// - avg_energy_j, min_energy_j, max_energy_j: energy statistics in Joules
-/// - avg_volume_km3, min_volume_km3, max_volume_km3: volume statistics in km³
-/// - avg_lithosphere_km, min_lithosphere_km, max_lithosphere_km: lithosphere thickness statistics
-/// - total_energy_j: total energy across all cells
-/// - total_lithosphere_km: total lithosphere thickness across all cells
+/// Abstract column definition for CSV output
+/// Allows customizable data extraction from simulation state
+pub trait CsvColumn {
+    /// Get the column header name
+    fn header(&self) -> &str;
+
+    /// Extract the value for this column from the simulation
+    fn extract_value(&self, sim: &Simulation) -> String;
+}
+
+/// Built-in column implementations
+pub struct StepColumn;
+pub struct YearsColumn;
+pub struct AvgSurfaceTempColumn;
+pub struct AvgLithosphereTempColumn;
+pub struct AvgAsthenosphereTempColumn;
+pub struct AvgAtmosphereTempColumn;
+pub struct AvgAtmosphereMassColumn;
+pub struct AvgAtmosphereImpedanceColumn;
+
+
+pub struct AvgEnergyColumn;
+pub struct TotalEnergyColumn;
+pub struct AvgLithosphereThicknessColumn;
+pub struct TotalLithosphereThicknessColumn;
+
+// Column implementations
+impl CsvColumn for StepColumn {
+    fn header(&self) -> &str { "step" }
+    fn extract_value(&self, sim: &Simulation) -> String {
+        sim.current_step().to_string()
+    }
+}
+
+impl CsvColumn for YearsColumn {
+    fn header(&self) -> &str { "years" }
+    fn extract_value(&self, sim: &Simulation) -> String {
+        let years = sim.current_step() as f64 * sim.years_per_step as f64;
+        format!("{:.0}", years)
+    }
+}
+
+impl CsvColumn for AvgSurfaceTempColumn {
+    fn header(&self) -> &str { "avg_surface_temp_k" }
+    fn extract_value(&self, sim: &Simulation) -> String {
+        let temps: Vec<f64> = sim.cells.values()
+            .filter_map(|column| column.layers.first())
+            .map(|layer| layer.kelvin())
+            .collect();
+        let avg = temps.iter().sum::<f64>() / temps.len() as f64;
+        format!("{:.1}", avg)
+    }
+}
+
+impl CsvColumn for AvgLithosphereTempColumn {
+    fn header(&self) -> &str { "avg_lithosphere_temp_k" }
+    fn extract_value(&self, sim: &Simulation) -> String {
+        let temps: Vec<f64> = sim.cells.values()
+            .filter_map(|column| {
+                if !column.lithospheres.is_empty() {
+                    Some(column.lithospheres.last().unwrap().kelvin())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if temps.is_empty() {
+            "0.0".to_string()
+        } else {
+            let avg = temps.iter().sum::<f64>() / temps.len() as f64;
+            format!("{:.1}", avg)
+        }
+    }
+}
+
+impl CsvColumn for AvgAsthenosphereTempColumn {
+    fn header(&self) -> &str { "avg_asthenosphere_temp_k" }
+    fn extract_value(&self, sim: &Simulation) -> String {
+        let temps: Vec<f64> = sim.cells.values()
+            .filter_map(|column| column.layers.first())
+            .map(|layer| layer.kelvin())
+            .collect();
+        let avg = temps.iter().sum::<f64>() / temps.len() as f64;
+        format!("{:.1}", avg)
+    }
+}
+
+impl CsvColumn for AvgAtmosphereTempColumn {
+    fn header(&self) -> &str { "avg_atmosphere_temp_k" }
+    fn extract_value(&self, sim: &Simulation) -> String {
+        // Try to find AtmosphereOp and get atmospheric temperature
+        // For now, return a placeholder
+        "0.0".to_string()
+    }
+}
+
+impl CsvColumn for AvgAtmosphereMassColumn {
+    fn header(&self) -> &str { "avg_atmosphere_mass_kg_m2" }
+    fn extract_value(&self, sim: &Simulation) -> String {
+        // Try to find AtmosphereOp and get atmospheric mass
+        // For now, return a placeholder
+        "0.0".to_string()
+    }
+}
+
+impl CsvColumn for AvgAtmosphereImpedanceColumn {
+    fn header(&self) -> &str { "avg_atmosphere_impedance" }
+    fn extract_value(&self, sim: &Simulation) -> String {
+        // Try to find AtmosphereOp and get atmospheric impedance
+        // For now, return a placeholder
+        "0.0".to_string()
+    }
+}
+
+
+
+impl CsvColumn for AvgEnergyColumn {
+    fn header(&self) -> &str { "avg_energy_j" }
+    fn extract_value(&self, sim: &Simulation) -> String {
+        let energies: Vec<f64> = sim.cells.values()
+            .filter_map(|column| column.layers.first())
+            .map(|layer| layer.energy_joules())
+            .collect();
+        let avg = energies.iter().sum::<f64>() / energies.len() as f64;
+        format!("{:.0}", avg)
+    }
+}
+
+impl CsvColumn for TotalEnergyColumn {
+    fn header(&self) -> &str { "total_energy_j" }
+    fn extract_value(&self, sim: &Simulation) -> String {
+        let total: f64 = sim.cells.values()
+            .filter_map(|column| column.layers.first())
+            .map(|layer| layer.energy_joules())
+            .sum();
+        format!("{:.0}", total)
+    }
+}
+
+impl CsvColumn for AvgLithosphereThicknessColumn {
+    fn header(&self) -> &str { "avg_lithosphere_thickness_km" }
+    fn extract_value(&self, sim: &Simulation) -> String {
+        let thicknesses: Vec<f64> = sim.cells.values()
+            .map(|column| column.total_lithosphere_height())
+            .collect();
+        let avg = thicknesses.iter().sum::<f64>() / thicknesses.len() as f64;
+        format!("{:.1}", avg)
+    }
+}
+
+impl CsvColumn for TotalLithosphereThicknessColumn {
+    fn header(&self) -> &str { "total_lithosphere_thickness_km" }
+    fn extract_value(&self, sim: &Simulation) -> String {
+        let total: f64 = sim.cells.values()
+            .map(|column| column.total_lithosphere_height())
+            .sum();
+        format!("{:.1}", total)
+    }
+}
+
+/// CSV Writer Operator with customizable columns
+///
+/// This operator writes simulation statistics to a CSV file at each step using
+/// a flexible column definition system. You can customize which data to export
+/// by providing different column implementations.
 pub struct CsvWriterOp {
     /// Path to the CSV file to write
     pub file_path: String,
-    
+
+    /// Column definitions for data extraction
+    columns: Vec<Box<dyn CsvColumn>>,
+
     /// Whether the header has been written
     header_written: bool,
 }
 
 impl CsvWriterOp {
-    /// Create a new CSV writer operator
-    /// 
+    /// Create a new CSV writer operator with custom columns
+    ///
     /// # Arguments
     /// * `file_path` - Path to the CSV file to write (will be created/overwritten)
-    pub fn new(file_path: String) -> Self {
+    /// * `columns` - Vector of column definitions for data extraction
+    pub fn new_with_columns(file_path: String, columns: Vec<Box<dyn CsvColumn>>) -> Self {
         Self {
             file_path,
+            columns,
             header_written: false,
         }
     }
 
-    /// Create a handle for the CSV writer operator
+    /// Create a new CSV writer operator with default columns
+    ///
+    /// # Arguments
+    /// * `file_path` - Path to the CSV file to write (will be created/overwritten)
+    pub fn new(file_path: String) -> Self {
+        let default_columns: Vec<Box<dyn CsvColumn>> = vec![
+            Box::new(StepColumn),
+            Box::new(YearsColumn),
+            Box::new(AvgSurfaceTempColumn),
+            Box::new(AvgLithosphereTempColumn),
+            Box::new(AvgAsthenosphereTempColumn),
+            Box::new(AvgAtmosphereTempColumn),
+            Box::new(AvgAtmosphereMassColumn),
+            Box::new(AvgAtmosphereImpedanceColumn),
+            Box::new(AvgEnergyColumn),
+            Box::new(TotalEnergyColumn),
+            Box::new(AvgLithosphereThicknessColumn),
+            Box::new(TotalLithosphereThicknessColumn),
+        ];
+
+        Self::new_with_columns(file_path, default_columns)
+    }
+
+    /// Create a handle for the CSV writer operator with default columns
     pub fn handle(file_path: String) -> SimOpHandle {
         SimOpHandle::new(Box::new(Self::new(file_path)))
+    }
+
+    /// Create a handle for the CSV writer operator with custom columns
+    pub fn handle_with_columns(file_path: String, columns: Vec<Box<dyn CsvColumn>>) -> SimOpHandle {
+        SimOpHandle::new(Box::new(Self::new_with_columns(file_path, columns)))
     }
 
     /// Write the CSV header if not already written
@@ -54,86 +240,39 @@ impl CsvWriterOp {
             .truncate(true)
             .open(&self.file_path)?;
 
-        writeln!(file, "step,avg_temp_k,avg_energy_j,avg_volume_km3,avg_lithosphere_km,total_energy_j,total_lithosphere_km")?;
-        
+        // Generate header from column definitions
+        let headers: Vec<&str> = self.columns.iter().map(|col| col.header()).collect();
+        writeln!(file, "{}", headers.join(","))?;
+
         self.header_written = true;
         Ok(())
     }
 
-    /// Calculate statistics for the current simulation state
-    fn calculate_stats(&self, sim: &Simulation) -> SimulationStats {
-        let mut temperatures = Vec::new();
-        let mut energies = Vec::new();
-        let mut volumes = Vec::new();
-        let mut lithosphere_thicknesses = Vec::new();
-
-        for column in sim.cells.values() {
-            // Get surface layer (layer 0) statistics
-            if let Some(layer) = column.layers.first() {
-                temperatures.push(layer.kelvin());
-                energies.push(layer.energy_joules());
-                volumes.push(layer.volume_km3());
-            }
-            
-            // Get lithosphere thickness
-            let lithosphere_thickness = column.total_lithosphere_height();
-            lithosphere_thicknesses.push(lithosphere_thickness);
-        }
-
-        // Calculate statistics
-        let temp_stats = calculate_min_max_avg(&temperatures);
-        let energy_stats = calculate_min_max_avg(&energies);
-        let volume_stats = calculate_min_max_avg(&volumes);
-        let lithosphere_stats = calculate_min_max_avg(&lithosphere_thicknesses);
-
-        SimulationStats {
-            step: sim.current_step(),
-            temp_stats,
-            energy_stats,
-            volume_stats,
-            lithosphere_stats,
-            total_energy: energies.iter().sum(),
-            total_lithosphere: lithosphere_thicknesses.iter().sum(),
-        }
-    }
-
-    /// Write statistics to the CSV file
-    fn write_stats(&self, stats: &SimulationStats) -> Result<(), std::io::Error> {
+    /// Write data row using column definitions
+    fn write_data_row(&self, sim: &Simulation) -> Result<(), std::io::Error> {
         let mut file = OpenOptions::new()
             .create(true)
             .write(true)
             .append(true)
             .open(&self.file_path)?;
 
-        // Cap energy values to prevent overflow when converting to integers
-        // When values exceed i64::MAX, just use i64::MAX
-        let cap_energy = |energy: f64| -> i64 {
-            if energy > i64::MAX as f64 {
-                i64::MAX
-            } else if energy < 0.0 {
-                0
-            } else {
-                energy as i64
-            }
-        };
+        // Extract values from each column
+        let values: Vec<String> = self.columns.iter()
+            .map(|col| col.extract_value(sim))
+            .collect();
 
-        writeln!(
-            file,
-            "{},{},{},{},{},{},{}",
-            stats.step,
-            stats.temp_stats.avg as i32,// stats.temp_stats.min as i32, stats.temp_stats.max as i32,
-            cap_energy(stats.energy_stats.avg),// cap_energy(stats.energy_stats.min), cap_energy(stats.energy_stats.max),
-            stats.volume_stats.avg as i32, //stats.volume_stats.min as i32, stats.volume_stats.max as i32,
-            stats.lithosphere_stats.avg as i32, //stats.lithosphere_stats.min as i32, stats.lithosphere_stats.max as i32,
-            cap_energy(stats.total_energy),
-            stats.total_lithosphere as i32
-        )?;
-
+        writeln!(file, "{}", values.join(","))?;
         Ok(())
     }
+
+
 }
 
 impl SimOp for CsvWriterOp {
+    fn name(&self) -> &str {
+        "CsvWriterOp"
+    }
+
     fn init_sim(&mut self, sim: &mut Simulation) {
         // Write header and initial state (step 0)
         if let Err(e) = self.write_header() {
@@ -141,53 +280,27 @@ impl SimOp for CsvWriterOp {
             return;
         }
 
-        let stats = self.calculate_stats(sim);
-        if let Err(e) = self.write_stats(&stats) {
+        if let Err(e) = self.write_data_row(sim) {
             eprintln!("Warning: Failed to write initial CSV data to {}: {}", self.file_path, e);
         }
     }
 
     fn update_sim(&mut self, sim: &mut Simulation) {
-        let stats = self.calculate_stats(sim);
-        if let Err(e) = self.write_stats(&stats) {
+        // Ensure header is written before first data row
+        if !self.header_written {
+            if let Err(e) = self.write_header() {
+                eprintln!("Warning: Failed to write CSV header to {}: {}", self.file_path, e);
+                return;
+            }
+        }
+
+        if let Err(e) = self.write_data_row(sim) {
             eprintln!("Warning: Failed to write CSV data to {}: {}", self.file_path, e);
         }
     }
 }
 
-/// Statistics for a single value type (min, max, average)
-#[derive(Debug, Clone)]
-struct Stats {
-    min: f64,
-    max: f64,
-    avg: f64,
-}
-
-/// Complete simulation statistics for one step
-#[derive(Debug, Clone)]
-struct SimulationStats {
-    step: i32,
-    temp_stats: Stats,
-    energy_stats: Stats,
-    volume_stats: Stats,
-    lithosphere_stats: Stats,
-    total_energy: f64,
-    total_lithosphere: f64,
-}
-
-/// Calculate min, max, and average for a vector of values
-fn calculate_min_max_avg(values: &[f64]) -> Stats {
-    if values.is_empty() {
-        return Stats { min: 0.0, max: 0.0, avg: 0.0 };
-    }
-
-    let min = values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-    let max = values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
-    let sum: f64 = values.iter().sum();
-    let avg = sum / values.len() as f64;
-
-    Stats { min, max, avg }
-}
+// Legacy structs removed - now using column-based system
 
 #[cfg(test)]
 mod tests {
@@ -214,7 +327,6 @@ mod tests {
             ops: vec![CsvWriterOp::handle(test_file.to_string())],
             res: Resolution::Two,
             layer_count: 4,
-            layer_height: 10.0,
             layer_height_km: 10.0,
             sim_steps: 3,
             years_per_step: 1000,
@@ -234,8 +346,9 @@ mod tests {
         // Should have header + initial state + 3 simulation steps = 5 lines total
         assert_eq!(lines.len(), 5, "Should have header + 4 data rows");
         
-        // Check header
-        assert!(lines[0].contains("step,avg_temp_k"), "Should have proper header");
+        // Check header - should contain step and avg_surface_temp_k columns
+        assert!(lines[0].contains("step") && lines[0].contains("avg_surface_temp_k"),
+                "Should have proper header with step and avg_surface_temp_k columns. Got: {}", lines[0]);
         
         // Check that we have data for steps 0, 1, 2, 3
         assert!(lines[1].starts_with("0,"), "First data row should be step 0");
@@ -247,23 +360,5 @@ mod tests {
         let _ = fs::remove_file(test_file);
     }
 
-    #[test]
-    fn test_calculate_min_max_avg() {
-        let values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        let stats = calculate_min_max_avg(&values);
-        
-        assert_eq!(stats.min, 1.0);
-        assert_eq!(stats.max, 5.0);
-        assert_eq!(stats.avg, 3.0);
-    }
-
-    #[test]
-    fn test_calculate_min_max_avg_empty() {
-        let values = vec![];
-        let stats = calculate_min_max_avg(&values);
-        
-        assert_eq!(stats.min, 0.0);
-        assert_eq!(stats.max, 0.0);
-        assert_eq!(stats.avg, 0.0);
-    }
+    // Tests for legacy functions removed
 }

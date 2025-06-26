@@ -107,6 +107,11 @@ impl AsthCellLayer {
         self.energy_mass.material_type()
     }
 
+    /// Get mutable reference to the internal EnergyMass for direct thermal operations
+    pub fn energy_mass_mut(&mut self) -> &mut dyn crate::energy_mass::EnergyMass {
+        &mut self.energy_mass
+    }
+
     /// Get the material profile
     pub fn material_profile(&self) -> &'static crate::material::MaterialProfile {
         self.energy_mass.material_profile()

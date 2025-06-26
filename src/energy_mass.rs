@@ -51,6 +51,13 @@ pub trait EnergyMass: std::any::Any {
     /// Remove heat energy (temperature will decrease, enforces zero minimum)
     fn remove_heat(&mut self, heat_joules: f64);
 
+    /// Add energy (temperature will increase)
+    fn add_energy(&mut self, energy_joules: f64);
+
+    /// Radiate energy to another EnergyMass using conductive transfer
+    /// Returns the amount of energy transferred (positive = energy flows to other)
+    fn radiate_to(&mut self, other: &mut dyn EnergyMass, distance_km: f64, area_km2: f64, time_years: f64) -> f64;
+
     /// Remove volume (enforces zero minimum, maintains temperature)
     fn remove_volume_internal(&mut self, volume_to_remove: f64);
 
@@ -68,6 +75,48 @@ pub trait EnergyMass: std::any::Any {
     /// Returns a new EnergyMass with the specified fraction, this one keeps the remainder
     /// Both will have the same temperature as the original
     fn split_by_fraction(&mut self, fraction: f64) -> Box<dyn EnergyMass>;
+
+    /// Get the R0 thermal transmission coefficient for this material
+    /// This controls energy transfer efficiency between layers (tunable for equilibrium)
+    fn thermal_transmission_r0(&self) -> f64;
+
+    /// Add core radiance energy influx (2.52e12 J per km² per year)
+    /// Only applies to the bottom-most asthenosphere layer
+    fn add_core_radiance(&mut self, area_km2: f64, years: f64) {
+        // Earth's core radiance: 2.52e12 J per km² per year
+        let core_radiance_per_km2_per_year = 2.52e12;
+        let energy_influx = core_radiance_per_km2_per_year * area_km2 * years;
+
+        // Add energy by calculating new temperature
+        let current_energy = self.energy();
+        let mass_kg = self.mass_kg();
+        let specific_heat = self.specific_heat();
+
+        if mass_kg > 0.0 && specific_heat > 0.0 {
+            let new_temp = (current_energy + energy_influx) / (mass_kg * specific_heat);
+            self.set_kelvin(new_temp);
+        }
+    }
+
+    /// Radiate energy to space based on material thermal properties
+    /// The top layer (lithosphere or asthenosphere) radiates as much as possible
+    /// Returns the amount of energy radiated (J)
+    fn radiate_to_space(&mut self, area_km2: f64, time_years: f64) -> f64 {
+        let conductivity = self.thermal_conductivity();
+        let temp_k = self.kelvin();
+        let r0 = self.thermal_transmission_r0();
+
+        // Maximum radiation based on material properties and temperature
+        // Higher conductivity + higher R0 + higher temperature = more radiation
+        let radiation_coefficient = conductivity * r0 * 1e12; // Scaling factor
+        let radiation_energy = radiation_coefficient * temp_k * area_km2 * time_years;
+
+        // Remove the radiated energy (cooling effect)
+        let actual_radiated = radiation_energy.min(self.energy() * 0.5); // Max 50% per step
+        self.remove_heat(actual_radiated);
+
+        actual_radiated
+    }
 }
 
 /// Standard implementation of EnergyMass using material profiles
@@ -81,6 +130,7 @@ pub struct StandardEnergyMass {
     specific_heat: f64,        // J/(kg·K)
     density: f64,              // kg/m³
     thermal_conductivity: f64, // W/(m·K)
+    thermal_transmission_r0: f64, // R0 thermal transmission coefficient
 }
 
 impl StandardEnergyMass {
@@ -95,6 +145,12 @@ impl StandardEnergyMass {
             material_type
         ));
 
+        // Generate random R0 value within material's range
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let r0_range = profile.thermal_transmission_r0_max - profile.thermal_transmission_r0_min;
+        let random_r0 = profile.thermal_transmission_r0_min + rng.random::<f64>() * r0_range;
+
         let mut energy_mass = Self {
             energy_joules: 0.0,
             volume_km3,
@@ -102,6 +158,7 @@ impl StandardEnergyMass {
             specific_heat: profile.specific_heat_capacity_j_per_kg_k,
             density: profile.density_kg_m3,
             thermal_conductivity: profile.thermal_conductivity_w_m_k,
+            thermal_transmission_r0: random_r0,
         };
         energy_mass.set_temperature(temperature_k);
         energy_mass
@@ -118,6 +175,12 @@ impl StandardEnergyMass {
             material_type
         ));
 
+        // Generate random R0 value within material's range
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        let r0_range = profile.thermal_transmission_r0_max - profile.thermal_transmission_r0_min;
+        let random_r0 = profile.thermal_transmission_r0_min + rng.random::<f64>() * r0_range;
+
         Self {
             energy_joules,
             volume_km3,
@@ -125,6 +188,7 @@ impl StandardEnergyMass {
             specific_heat: profile.specific_heat_capacity_j_per_kg_k,
             density: profile.density_kg_m3,
             thermal_conductivity: profile.thermal_conductivity_w_m_k,
+            thermal_transmission_r0: random_r0,
         }
     }
 }
@@ -200,6 +264,62 @@ impl EnergyMass for StandardEnergyMass {
     /// Remove heat energy (temperature will decrease, enforces zero minimum)
     fn remove_heat(&mut self, heat_joules: f64) {
         self.energy_joules = (self.energy_joules - heat_joules).max(0.0);
+    }
+
+    /// Add energy (temperature will increase)
+    fn add_energy(&mut self, energy_joules: f64) {
+        self.energy_joules += energy_joules;
+    }
+
+    /// Radiate energy to another EnergyMass using conductive transfer (Fourier's law)
+    /// Returns the amount of energy transferred (positive = energy flows to other)
+    fn radiate_to(&mut self, other: &mut dyn EnergyMass, distance_km: f64, area_km2: f64, time_years: f64) -> f64 {
+        let my_temp = self.kelvin();
+        let other_temp = other.kelvin();
+
+        // No transfer if temperatures are equal
+        if (my_temp - other_temp).abs() < 0.1 {
+            return 0.0;
+        }
+
+        // Get thermal conductivities (W/m·K)
+        let my_conductivity = self.thermal_conductivity();
+        let other_conductivity = other.thermal_conductivity();
+
+        // Use harmonic mean for interface conductivity
+        let interface_conductivity = if my_conductivity > 0.0 && other_conductivity > 0.0 {
+            2.0 * my_conductivity * other_conductivity / (my_conductivity + other_conductivity)
+        } else {
+            0.0
+        };
+
+        // Temperature difference (energy flows from hot to cold)
+        let temp_diff = my_temp - other_temp;
+
+        // Convert units: km² to m², km to m, years to seconds
+        let area_m2 = area_km2 * 1e6;  // km² to m²
+        let distance_m = distance_km * 1000.0;  // km to m
+        let time_seconds = time_years * 365.25 * 24.0 * 3600.0;  // years to seconds
+
+        // Fourier's law: Q = k * A * ΔT * t / d
+        let energy_transfer = interface_conductivity * area_m2 * temp_diff * time_seconds / distance_m;
+
+        // Limit transfer to prevent temperature inversion
+        let max_transfer = self.energy() * 0.1; // Max 10% per step
+        let actual_transfer = energy_transfer.abs().min(max_transfer);
+
+        // Apply the transfer
+        if temp_diff > 0.0 {
+            // I'm hotter - I lose energy, other gains energy
+            self.remove_heat(actual_transfer);
+            other.add_energy(actual_transfer);
+            actual_transfer
+        } else {
+            // Other is hotter - other loses energy, I gain energy
+            other.add_energy(-actual_transfer);
+            self.remove_heat(-actual_transfer);  // Remove negative energy = add positive energy
+            -actual_transfer
+        }
     }
 
     /// Remove volume (enforces zero minimum, maintains temperature)
@@ -280,6 +400,12 @@ impl EnergyMass for StandardEnergyMass {
 
         let volume_to_remove = self.volume_km3 * fraction;
         self.remove_volume(volume_to_remove)
+    }
+
+    /// Get the R0 thermal transmission coefficient for this material instance
+    /// This is a randomized value within the material's range, set at creation
+    fn thermal_transmission_r0(&self) -> f64 {
+        self.thermal_transmission_r0
     }
 }
 
