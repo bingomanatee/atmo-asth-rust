@@ -164,7 +164,7 @@ mod tests {
 
         // Record initial energy
         let initial_energy: f64 = sim.cells.values()
-            .map(|column| column.layers[0].energy_joules())
+            .map(|column| column.asth_layers[0].energy_joules())
             .sum();
 
         // Run the operator (should not add heat since no lithosphere exists)
@@ -172,7 +172,7 @@ mod tests {
 
         // Energy should remain the same
         let final_energy: f64 = sim.cells.values()
-            .map(|column| column.layers_next[0].energy_joules())
+            .map(|column| column.asth_layers_next[0].energy_joules())
             .sum();
 
         assert_abs_diff_eq!(initial_energy, final_energy, epsilon = 1e10);
@@ -200,7 +200,7 @@ mod tests {
 
         // Record initial energy
         let initial_energy: f64 = sim.cells.values()
-            .map(|column| column.layers[0].energy_joules())
+            .map(|column| column.asth_layers[0].energy_joules())
             .sum();
 
         // Run the operator (should add heat due to excess lithosphere)
@@ -208,7 +208,7 @@ mod tests {
 
         // Energy should increase
         let final_energy: f64 = sim.cells.values()
-            .map(|column| column.layers_next[0].energy_joules())
+            .map(|column| column.asth_layers_next[0].energy_joules())
             .sum();
 
         assert!(final_energy > initial_energy, 
@@ -236,13 +236,13 @@ mod tests {
         ));
 
         // Record initial energy of the first cell
-        let initial_energy = sim.cells[&first_cell_id].layers[0].energy_joules();
+        let initial_energy = sim.cells[&first_cell_id].asth_layers[0].energy_joules();
 
         // Run the operator
         op.update_sim(&mut sim);
 
         // Energy of the first cell should increase
-        let final_energy = sim.cells[&first_cell_id].layers_next[0].energy_joules();
+        let final_energy = sim.cells[&first_cell_id].asth_layers_next[0].energy_joules();
 
         assert!(final_energy > initial_energy,
                 "Energy should increase in cell with excess lithosphere");

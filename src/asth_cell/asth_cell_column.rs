@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 pub struct AsthCellColumn {
     pub energy_joules: f64,
     pub volume_km3: f64,
-    pub layers: Vec<AsthCellLayer>,
-    pub layers_next: Vec<AsthCellLayer>,
+    pub asth_layers: Vec<AsthCellLayer>,
+    pub asth_layers_next: Vec<AsthCellLayer>,
     pub lithospheres: Vec<AsthCellLithosphere>,
     pub lithospheres_next: Vec<AsthCellLithosphere>,
     pub layer_height_km: f64,
@@ -55,11 +55,11 @@ impl AsthCellColumn {
             volume_km3: 0.0,
             neighbor_cell_ids: H3Utils::neighbors_for(params.cell_index),
             // Create layer 0 at surface temperature - projection will handle geothermal gradient for deeper layers
-            layers: vec![AsthCellLayer::new_with_material(MaterialType::Silicate, params.surface_temp_k, params.volume, 0)],
+            asth_layers: vec![AsthCellLayer::new_with_material(MaterialType::Silicate, params.surface_temp_k, params.volume, 0)],
             cell_index: params.cell_index,
             layer_height_km: params.layer_height_km,
             layer_count: params.layer_count,
-            layers_next: vec![],
+            asth_layers_next: vec![],
             planet_radius_km: params.planet_radius_km,
             lithospheres: vec![
                 crate::asth_cell::asth_cell_lithosphere::AsthCellLithosphere::new(
@@ -119,16 +119,16 @@ impl AsthCellColumn {
         // Ensure the current layer exists (should be created by project method)
         if layer_index >= self.lithospheres.len() {
             panic!(
-                "Current layer {} does not exist. All layers should be created during initialization. Current layers: {}",
+                "Current lithosphere {} does not exist. All layers should be created during initialization. Current layers: {}",
                 layer_index,
-                self.layers.len()
+                self.asth_layers.len()
             );
         }
 
         // Ensure the next layers vector has this layer - clone from current if missing
-        while self.layers_next.len() <= layer_index {
-            let current_layer = &self.layers[self.layers_next.len()];
-            self.layers_next.push(current_layer.clone());
+        while self.asth_layers_next.len() <= layer_index {
+            let current_layer = &self.asth_layers[self.asth_layers_next.len()];
+            self.asth_layers_next.push(current_layer.clone());
         }
 
         // Return references to the layers
@@ -158,29 +158,29 @@ impl AsthCellColumn {
     /// If next layer is absent, clone the current layer into next
     pub fn layer(&mut self, layer_index: usize) -> (&AsthCellLayer, &mut AsthCellLayer) {
         // Ensure the current layer exists (should be created by project method)
-        if layer_index >= self.layers.len() {
+        if layer_index >= self.asth_layers.len() {
             panic!(
                 "Current layer {} does not exist. All layers should be created during initialization. Current layers: {}",
                 layer_index,
-                self.layers.len()
+                self.asth_layers.len()
             );
         }
 
         // Ensure the next layers vector has this layer - clone from current if missing
-        while self.layers_next.len() <= layer_index {
-            let current_layer = &self.layers[self.layers_next.len()];
-            self.layers_next.push(current_layer.clone());
+        while self.asth_layers_next.len() <= layer_index {
+            let current_layer = &self.asth_layers[self.asth_layers_next.len()];
+            self.asth_layers_next.push(current_layer.clone());
         }
 
         // Return references to the layers
         (
-            &self.layers[layer_index],
-            &mut self.layers_next[layer_index],
+            &self.asth_layers[layer_index],
+            &mut self.asth_layers_next[layer_index],
         )
     }
 
     pub fn commit_next_layers(&mut self) {
-        self.layers.clone_from_slice(&self.layers_next);
+        self.asth_layers.clone_from_slice(&self.asth_layers_next);
         self.lithospheres = self.lithospheres_next.clone();
     }
 
@@ -194,8 +194,8 @@ impl AsthCellColumn {
         planet_radius: f64,
         surface_temp_k: f64,
     ) -> AsthCellColumn {
-        let mut layers: Vec<AsthCellLayer> = self.layers.clone();
-        let mut layers_next = self.layers_next.clone();
+        let mut layers: Vec<AsthCellLayer> = self.asth_layers.clone();
+        let mut layers_next = self.asth_layers_next.clone();
 
         // iterate over all the absent _current_ cells
         for index in layers.len()..level_count {
@@ -217,8 +217,8 @@ impl AsthCellColumn {
         layers_next.extend(layers.iter().cloned());
 
         AsthCellColumn {
-            layers,
-            layers_next,
+            asth_layers: layers,
+            asth_layers_next: layers_next,
             layer_count: level_count,
             ..self.clone()
         }
@@ -253,10 +253,10 @@ mod tests {
         });
 
         assert_eq!(cell.neighbor_cell_ids.iter().len(), 6);
-        assert_eq!(cell.layers.iter().len(), LEVEL_COUNT);
-        assert_eq!(cell.layers_next.iter().len(), LEVEL_COUNT);
-        assert_eq!(cell.layers[0].volume_km3(), volume);
-        assert_abs_diff_eq!(cell.layers[0].energy_joules(), 7.08e21, epsilon = 4.0e20);
+        assert_eq!(cell.asth_layers.iter().len(), LEVEL_COUNT);
+        assert_eq!(cell.asth_layers_next.iter().len(), LEVEL_COUNT);
+        assert_eq!(cell.asth_layers[0].volume_km3(), volume);
+        assert_abs_diff_eq!(cell.asth_layers[0].energy_joules(), 7.08e21, epsilon = 4.0e20);
     }
 
     #[test]
@@ -284,7 +284,7 @@ mod tests {
             // Modify the next layer
             next.set_energy_joules(2000.0);
         }
-        assert_eq!(cell.layers_next[0].energy_joules(), 2000.0);
+        assert_eq!(cell.asth_layers_next[0].energy_joules(), 2000.0);
 
         // Test accessing layer 1 (should exist from initialization)
         {
@@ -297,7 +297,7 @@ mod tests {
         }
 
         // Test that the layer method properly clones current to next when needed
-        let initial_next_len = cell.layers_next.len();
+        let initial_next_len = cell.asth_layers_next.len();
 
         // Access a layer that might not be in next yet
         {
@@ -306,8 +306,8 @@ mod tests {
         }
 
         // Should have cloned current layers to next if needed
-        assert!(cell.layers_next.len() >= 2);
-        assert_eq!(cell.layers_next[1].energy_joules(), 1500.0);
+        assert!(cell.asth_layers_next.len() >= 2);
+        assert_eq!(cell.asth_layers_next[1].energy_joules(), 1500.0);
 
         // Test accessing multiple layers separately
         {
@@ -315,8 +315,8 @@ mod tests {
             next_0.set_energy_joules(3000.0);
         }
 
-        assert_eq!(cell.layers_next[0].energy_joules(), 3000.0);
-        assert_eq!(cell.layers_next[1].energy_joules(), 1500.0);
+        assert_eq!(cell.asth_layers_next[0].energy_joules(), 3000.0);
+        assert_eq!(cell.asth_layers_next[1].energy_joules(), 1500.0);
     }
 
     #[test]
@@ -348,17 +348,17 @@ mod tests {
             });
 
             // Check layer 0 (surface layer)
-            let layer_0_temp = cell.layers[0].kelvin();
+            let layer_0_temp = cell.asth_layers[0].kelvin();
             println!("{}: Surface temp {:.2} K -> Layer 0 temp {:.2} K (diff: {:.2} K)",
                      description, surface_temp_k, layer_0_temp, layer_0_temp - surface_temp_k);
 
             // Check layer 1 (deeper layer)
-            let layer_1_temp = cell.layers[1].kelvin();
+            let layer_1_temp = cell.asth_layers[1].kelvin();
             println!("  Layer 1 temp: {:.2} K (diff from surface: {:.2} K)",
                      layer_1_temp, layer_1_temp - surface_temp_k);
 
             // Check layer 2 (deepest layer)
-            let layer_2_temp = cell.layers[2].kelvin();
+            let layer_2_temp = cell.asth_layers[2].kelvin();
             println!("  Layer 2 temp: {:.2} K (diff from surface: {:.2} K)",
                      layer_2_temp, layer_2_temp - surface_temp_k);
 
@@ -397,7 +397,7 @@ mod tests {
                     surface_temp_k: surface_temp,
                 });
 
-                let actual_layer_temp = cell.layers[0].kelvin();
+                let actual_layer_temp = cell.asth_layers[0].kelvin();
                 let diff = (actual_layer_temp - target_temp).abs();
 
                 println!("{} (target {:.2} K): Surface {:.2} K -> Layer {:.2} K (diff: {:.2} K)",

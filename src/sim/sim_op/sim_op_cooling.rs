@@ -68,7 +68,7 @@ mod tests {
         });
 
         for (_id, cell) in sim.cells.clone() {
-            if let Some(layer) = cell.layers.first() {
+            if let Some(layer) = cell.asth_layers.first() {
                 assert_abs_diff_eq!(layer.energy_joules(),  6.04e23, epsilon= 5.0e22);
             }
         }
@@ -76,7 +76,7 @@ mod tests {
         sim.simulate();
 
         for (_id, cell) in sim.cells {
-            if let Some(layer) = cell.layers.first() {
+            if let Some(layer) = cell.asth_layers.first() {
                 assert_abs_diff_eq!(layer.energy_joules(),  3.49e23, epsilon= 5.0e21);
             }
         }
@@ -138,10 +138,10 @@ mod tests {
 
         // Record initial energies
         let initial_energy_no_lith: f64 = sim_no_lithosphere.cells.values()
-            .map(|column| column.layers[0].energy_joules())
+            .map(|column| column.asth_layers[0].energy_joules())
             .sum();
         let initial_energy_thick_lith: f64 = sim_thick_lithosphere.cells.values()
-            .map(|column| column.layers[0].energy_joules())
+            .map(|column| column.asth_layers[0].energy_joules())
             .sum();
 
         // Apply cooling to both simulations
@@ -150,10 +150,10 @@ mod tests {
 
         // Calculate energy loss
         let final_energy_no_lith: f64 = sim_no_lithosphere.cells.values()
-            .map(|column| column.layers_next[0].energy_joules())
+            .map(|column| column.asth_layers_next[0].energy_joules())
             .sum();
         let final_energy_thick_lith: f64 = sim_thick_lithosphere.cells.values()
-            .map(|column| column.layers_next[0].energy_joules())
+            .map(|column| column.asth_layers_next[0].energy_joules())
             .sum();
 
         let energy_loss_no_lith = initial_energy_no_lith - final_energy_no_lith;

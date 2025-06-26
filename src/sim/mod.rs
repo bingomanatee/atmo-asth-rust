@@ -109,7 +109,7 @@ impl Simulation {
     pub fn energy_at_layer(&self, layer: usize) -> f64 {
         self.cells
             .iter()
-            .map(|(_index, cell)| match cell.layers.get(layer) {
+            .map(|(_index, cell)| match cell.asth_layers.get(layer) {
                 None => 0.0,
                 Some(layer) => layer.energy_joules(),
             })
@@ -125,8 +125,8 @@ impl Simulation {
     pub fn step_with_ops(&mut self, ops: &mut [&mut dyn SimOp]) {
         // Copy current to next arrays
         for column in self.cells.values_mut() {
-            for i in 0..column.layers.len() {
-                column.layers_next[i] = column.layers[i].clone();
+            for i in 0..column.asth_layers.len() {
+                column.asth_layers_next[i] = column.asth_layers[i].clone();
             }
             column.lithospheres_next = column.lithospheres.clone();
         }
@@ -296,7 +296,7 @@ mod tests {
         });
 
         for (id, cell) in sim.cells.clone() {
-            if let Some(layer) = cell.layers.first() {
+            if let Some(layer) = cell.asth_layers.first() {
                 assert_abs_diff_eq!(layer.energy_joules(), 6.04e23, epsilon = 5.0e22);
             }
         }
@@ -304,7 +304,7 @@ mod tests {
         sim.simulate();
 
         for (id, cell) in sim.cells {
-            if let Some(layer) = cell.layers.first() {
+            if let Some(layer) = cell.asth_layers.first() {
                 assert_abs_diff_eq!(layer.energy_joules(), 3.5e21, epsilon = 5.0e20);
             }
         }

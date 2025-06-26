@@ -53,7 +53,7 @@ impl AsthCellLithosphere {
     }
 
     /// Get the energy in Joules
-    pub fn energy(&self) -> f64 {
+    pub fn energy_joules(&self) -> f64 {
         self.energy_mass.energy()
     }
 

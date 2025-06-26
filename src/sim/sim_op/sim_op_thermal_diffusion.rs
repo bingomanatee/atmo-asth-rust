@@ -1,4 +1,5 @@
 use crate::asth_cell::AsthCellColumn;
+use crate::constants::{M2_PER_KM2, SECONDS_PER_YEAR, SIGMA_KM2_YEAR};
 use crate::energy_mass::EnergyMass;
 use crate::material::MaterialProfile;
 use crate::sim::Simulation;
@@ -58,98 +59,146 @@ impl ThermalDiffusionOp {
 
     /// Process thermal diffusion for a single cell column
     fn process_cell_thermal_diffusion(&self, column: &mut AsthCellColumn, years: f64) {
+        // First, radiate energy from the top layer to space
+        self.radiate_top_layer_to_space(column, years);
+
         // Create a simplified thermal diffusion between adjacent asthenosphere layers
         // This avoids complex borrowing issues while still providing realistic thermal mixing
 
         let mut columns: Vec<LayerPointer> = Vec::new();
         let mut asth_columns: Vec<LayerPointer> = Vec::new();
         for index in 0..column.lithospheres.iter().len() {
-            let lith = column.lithospheres.get(index).expect("cannot get lithosphere");
-            columns.push(LayerPointer {
-                index,
-                layer_type: LayerType::Lith,
-                energy_j: lith.energy(),
-                volume_km3: lith.volume_km3(),
-                material: lith.profile().clone(),
-                temperature: lith.kelvin(),
-                conductivity: lith.thermal_conductivity()
-            })
+            if let lith = column
+                .lithospheres
+                .get(index)
+                .expect("cannot get lithosphere")
+            {
+                columns.push(LayerPointer {
+                    index,
+                    layer_type: LayerType::Lith,
+                    energy_j: lith.energy_joules(),
+                    volume_km3: lith.volume_km3(),
+                    material: lith.profile().clone(),
+                    temperature: lith.kelvin(),
+                    conductivity: lith.thermal_conductivity(),
+                })
+            }
         }
-        for index in 0..column.layers.iter().len() {
-            let layer = column.layers.get(index).expect("cannot get lithosphere");
-            asth_columns.push(LayerPointer {
-                index,
-                layer_type: LayerType::Asth,
-                energy_j: layer.energy_joules(),
-                volume_km3: layer.volume_km3(),
-                material: layer.profile().clone(),
-                temperature: layer.kelvin(),
-                conductivity: layer.thermal_conductivity()
-            })
+        for index in 0..column.asth_layers.iter().len() {
+            if let layer = column.asth_layers.get(index).expect("cannot get lithosphere") {
+                asth_columns.push(LayerPointer {
+                    index,
+                    layer_type: LayerType::Asth,
+                    energy_j: layer.energy_joules(),
+                    volume_km3: layer.volume_km3(),
+                    material: layer.profile().clone(),
+                    temperature: layer.kelvin(),
+                    conductivity: layer.thermal_conductivity(),
+                })
+            }
         }
-        
+
         columns.extend(asth_columns);
-        
+
         for (index, pointer) in columns.iter().enumerate() {
-            if (index >0 ) {
+            if (index > 0) {
                 let prev_pointer = columns.get(index - 1).unwrap();
                 self.transfer_energy(years, column, pointer, prev_pointer)
             }
         }
-     
     }
-    
-    fn transfer_energy(&self, years: f64,  column: &mut AsthCellColumn, from_pointer: &LayerPointer, to_pointer: &LayerPointer) {
-        let interface_conductivity = 2.0 * from_pointer.conductivity * to_pointer.conductivity /
-            (from_pointer.conductivity + to_pointer.conductivity);
-        
+
+    fn transfer_energy(
+        &self,
+        years: f64,
+        column: &mut AsthCellColumn,
+        from_pointer: &LayerPointer,
+        to_pointer: &LayerPointer,
+    ) {
+        let interface_conductivity = 2.0 * from_pointer.conductivity * to_pointer.conductivity
+            / (from_pointer.conductivity + to_pointer.conductivity);
+
         let temp_diff = from_pointer.temperature - to_pointer.temperature;
         let base_transfer_rate = interface_conductivity * self.diffusion_rate * years * 1e6; // Scaling factor
         let energy_transfer = temp_diff * base_transfer_rate;
 
-            let max_transfer_rate = energy_transfer.max(from_pointer.energy_j * ENERGY_THROTTLE);
-            match from_pointer.layer_type {
-                LayerType::Lith => {
-                    let (_, from_layer) = column.layer(from_pointer.index);
+        let max_transfer_rate = energy_transfer.max(from_pointer.energy_j * ENERGY_THROTTLE);
+        match from_pointer.layer_type {
+            LayerType::Lith => {
+                let (_, from_lith, _) = column.lithosphere(from_pointer.index);
 
-                    if temp_diff > 0.0 {
-                        from_layer.remove_energy(max_transfer_rate);
-                    } else {
-                        from_layer.add_energy(-max_transfer_rate);
-                    }
-                },
-                LayerType::Asth => {
-                    let (_, from_asth, _) = column.lithosphere(from_pointer.index);
-
-                    if temp_diff > 0.0 {
-                        from_asth.remove_energy(max_transfer_rate);
-                    } else {
-                        from_asth.add_energy(-max_transfer_rate);
-                    }
+                if temp_diff > 0.0 {
+                    from_lith.remove_energy(max_transfer_rate);
+                } else {
+                    from_lith.add_energy(-max_transfer_rate);
                 }
             }
+            LayerType::Asth => {
+                let (_, from_asth, _) = column.lithosphere(from_pointer.index);
 
-            match to_pointer.layer_type {
-                LayerType::Lith => {
-                    let (_, to_layer) = column.layer(to_pointer.index);
-
-                    if temp_diff > 0.0 {
-                        to_layer.add_energy(max_transfer_rate);
-                    } else {
-                        to_layer.remove_energy(-max_transfer_rate);
-                    }
-                },
-                LayerType::Asth => {
-                    let (_, to_lith, _) = column.lithosphere(to_pointer.index);
-
-                    if temp_diff > 0.0 {
-                        to_lith.add_energy(max_transfer_rate);
-                    } else {
-                        to_lith.remove_energy(-max_transfer_rate);
-                    }
+                if temp_diff > 0.0 {
+                    from_asth.remove_energy(max_transfer_rate);
+                } else {
+                    from_asth.add_energy(-max_transfer_rate);
                 }
             }
-        
+        }
+
+        match to_pointer.layer_type {
+            LayerType::Lith => {
+                let (_, to_lith, _) = column.lithosphere(to_pointer.index);
+
+                if temp_diff > 0.0 {
+                    to_lith.add_energy(max_transfer_rate);
+                } else {
+                    to_lith.remove_energy(-max_transfer_rate);
+                }
+            }
+            LayerType::Asth => {
+                let (_, to_lith, _) = column.lithosphere(to_pointer.index);
+
+                if temp_diff > 0.0 {
+                    to_lith.add_energy(max_transfer_rate);
+                } else {
+                    to_lith.remove_energy(-max_transfer_rate);
+                }
+            }
+        }
+    }
+
+    /// Radiate energy from the top layer to space using Stefan-Boltzmann law
+    fn radiate_top_layer_to_space(&self, column: &mut AsthCellColumn, years: f64) {
+        // Determine which layer is the surface and remove energy from it
+        if !column.lithospheres_next.is_empty()
+            && column.lithospheres_next.last().unwrap().height_km > 10.0
+        {
+            // Radiate from top lithosphere layer
+            let top_lithosphere = column.lithospheres_next.last().unwrap();
+            let surface_temp = top_lithosphere.kelvin();
+
+            // Calculate radiated energy per km²
+            let radiated_energy_per_km2 = SIGMA_KM2_YEAR * surface_temp.powi(4) * years;
+            let total_radiated_energy = radiated_energy_per_km2 * column.area();
+
+            // Remove from top lithosphere layer
+            let (_, top_lithosphere, _) = column.lithosphere(0);
+            let current_energy = top_lithosphere.energy_joules();
+            let energy_to_remove = total_radiated_energy.min(current_energy * 0.9); // Max 90% per step
+            top_lithosphere.remove_energy(energy_to_remove);
+        } else {
+            // Radiate from top asthenosphere layer
+            let surface_temp = column.asth_layers_next[0].kelvin();
+
+            // Calculate radiated energy per km²
+            let radiated_energy_per_km2 = SIGMA_KM2_YEAR * surface_temp.powi(4) * years;
+            let total_radiated_energy = radiated_energy_per_km2 * column.area();
+
+            // Remove from top asthenosphere layer
+            let (_, top_layer_next) = column.layer(0);
+            let current_energy = top_layer_next.energy_joules();
+            let energy_to_remove = total_radiated_energy.min(current_energy * ENERGY_THROTTLE); // Max 20% per step
+            top_layer_next.remove_energy(energy_to_remove);
+        }
     }
 }
 
@@ -206,14 +255,14 @@ mod tests {
         // Create temperature gradient: hot bottom, cool top
         {
             let cell = sim.cells.values_mut().next().unwrap();
-            cell.layers_next[0].set_temp_kelvin(1000.0); // Cool surface
-            cell.layers_next[1].set_temp_kelvin(1500.0); // Medium
-            cell.layers_next[2].set_temp_kelvin(2000.0); // Hot bottom
+            cell.asth_layers_next[0].set_temp_kelvin(1000.0); // Cool surface
+            cell.asth_layers_next[1].set_temp_kelvin(1500.0); // Medium
+            cell.asth_layers_next[2].set_temp_kelvin(2000.0); // Hot bottom
         }
 
         let initial_temps: Vec<f64> = {
             let cell = sim.cells.values().next().unwrap();
-            cell.layers_next.iter().map(|l| l.kelvin()).collect()
+            cell.asth_layers_next.iter().map(|l| l.kelvin()).collect()
         };
 
         // Apply thermal diffusion
@@ -222,7 +271,7 @@ mod tests {
 
         let final_temps: Vec<f64> = {
             let cell = sim.cells.values().next().unwrap();
-            cell.layers_next.iter().map(|l| l.kelvin()).collect()
+            cell.asth_layers_next.iter().map(|l| l.kelvin()).collect()
         };
 
         // Temperatures should move toward equilibrium

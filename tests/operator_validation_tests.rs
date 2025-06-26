@@ -16,8 +16,8 @@ fn test_core_radiance_op_adds_energy() {
     
     // Record initial state
     let cell = sim.cells.values().next().unwrap();
-    let initial_bottom_energy = cell.layers[cell.layers.len() - 1].energy_joules();
-    let initial_bottom_temp = cell.layers[cell.layers.len() - 1].kelvin();
+    let initial_bottom_energy = cell.asth_layers[cell.asth_layers.len() - 1].energy_joules();
+    let initial_bottom_temp = cell.asth_layers[cell.asth_layers.len() - 1].kelvin();
     
     println!("   Initial bottom energy: {:.2e} J", initial_bottom_energy);
     println!("   Initial bottom temp: {:.1}K", initial_bottom_temp);
@@ -32,8 +32,8 @@ fn test_core_radiance_op_adds_energy() {
     
     // Check results
     let cell = sim.cells.values().next().unwrap();
-    let final_bottom_energy = cell.layers[cell.layers.len() - 1].energy_joules();
-    let final_bottom_temp = cell.layers[cell.layers.len() - 1].kelvin();
+    let final_bottom_energy = cell.asth_layers[cell.asth_layers.len() - 1].energy_joules();
+    let final_bottom_temp = cell.asth_layers[cell.asth_layers.len() - 1].kelvin();
     
     println!("   Final bottom energy: {:.2e} J", final_bottom_energy);
     println!("   Final bottom temp: {:.1}K", final_bottom_temp);
@@ -58,8 +58,8 @@ fn test_atmosphere_op_removes_energy() {
     
     // Record initial state
     let cell = sim.cells.values().next().unwrap();
-    let initial_surface_energy = cell.layers[0].energy_joules();
-    let initial_surface_temp = cell.layers[0].kelvin();
+    let initial_surface_energy = cell.asth_layers[0].energy_joules();
+    let initial_surface_temp = cell.asth_layers[0].kelvin();
     
     println!("   Initial surface energy: {:.2e} J", initial_surface_energy);
     println!("   Initial surface temp: {:.1}K", initial_surface_temp);
@@ -77,8 +77,8 @@ fn test_atmosphere_op_removes_energy() {
     
     // Check results
     let cell = sim.cells.values().next().unwrap();
-    let final_surface_energy = cell.layers[0].energy_joules();
-    let final_surface_temp = cell.layers[0].kelvin();
+    let final_surface_energy = cell.asth_layers[0].energy_joules();
+    let final_surface_temp = cell.asth_layers[0].kelvin();
     
     println!("   Final surface energy: {:.2e} J", final_surface_energy);
     println!("   Final surface temp: {:.1}K", final_surface_temp);
@@ -103,7 +103,7 @@ fn test_radiance_op_mixes_energy() {
     
     // Record initial state
     let cell = sim.cells.values().next().unwrap();
-    let initial_temps: Vec<f64> = cell.layers.iter().map(|l| l.kelvin()).collect();
+    let initial_temps: Vec<f64> = cell.asth_layers.iter().map(|l| l.kelvin()).collect();
     let initial_gradient = initial_temps[0] - initial_temps[initial_temps.len() - 1];
     
     println!("   Initial temperatures: {:?}", initial_temps);
@@ -116,7 +116,7 @@ fn test_radiance_op_mixes_energy() {
     
     // Check results
     let cell = sim.cells.values().next().unwrap();
-    let final_temps: Vec<f64> = cell.layers.iter().map(|l| l.kelvin()).collect();
+    let final_temps: Vec<f64> = cell.asth_layers.iter().map(|l| l.kelvin()).collect();
     let final_gradient = final_temps[0] - final_temps[final_temps.len() - 1];
     
     println!("   Final temperatures: {:?}", final_temps);
@@ -139,8 +139,8 @@ fn test_combined_operators() {
     
     // Record initial state
     let cell = sim.cells.values().next().unwrap();
-    let initial_temps: Vec<f64> = cell.layers.iter().map(|l| l.kelvin()).collect();
-    let initial_total_energy: f64 = cell.layers.iter().map(|l| l.energy_joules()).sum();
+    let initial_temps: Vec<f64> = cell.asth_layers.iter().map(|l| l.kelvin()).collect();
+    let initial_total_energy: f64 = cell.asth_layers.iter().map(|l| l.energy_joules()).sum();
 
     println!("   Initial temperatures: {:?}", initial_temps);
     println!("   Initial total energy: {:.2e} J", initial_total_energy);
@@ -164,16 +164,16 @@ fn test_combined_operators() {
         sim.step_with_ops(&mut [&mut core_op, &mut atmosphere_op, &mut radiance_op]);
         
         let cell = sim.cells.values().next().unwrap();
-        let temps: Vec<f64> = cell.layers.iter().map(|l| l.kelvin()).collect();
-        let total_energy: f64 = cell.layers.iter().map(|l| l.energy_joules()).sum();
+        let temps: Vec<f64> = cell.asth_layers.iter().map(|l| l.kelvin()).collect();
+        let total_energy: f64 = cell.asth_layers.iter().map(|l| l.energy_joules()).sum();
 
         println!("   Step {}: temps={:?}, energy={:.2e}", step + 1, temps, total_energy);
     }
     
     // Check final state
     let cell = sim.cells.values().next().unwrap();
-    let final_temps: Vec<f64> = cell.layers.iter().map(|l| l.kelvin()).collect();
-    let final_total_energy: f64 = cell.layers.iter().map(|l| l.energy_joules()).sum();
+    let final_temps: Vec<f64> = cell.asth_layers.iter().map(|l| l.kelvin()).collect();
+    let final_total_energy: f64 = cell.asth_layers.iter().map(|l| l.energy_joules()).sum();
 
     println!("   Final temperatures: {:?}", final_temps);
     println!("   Final total energy: {:.2e} J", final_total_energy);
@@ -212,9 +212,9 @@ fn create_hot_surface_simulation() -> Simulation {
     let mut sim = create_test_simulation();
     // Set very hot surface for significant cooling (realistic hot temperature ~2000K)
     let cell = sim.cells.values_mut().next().unwrap();
-    let volume = cell.layers[0].volume_km3();
+    let volume = cell.asth_layers[0].volume_km3();
     let hot_energy = temp_utils::volume_kelvin_to_joules(volume, 2000.0, 1000.0); // Using 1000 J/(kg·K) specific heat
-    cell.layers[0].set_energy_joules(hot_energy);
+    cell.asth_layers[0].set_energy_joules(hot_energy);
     sim
 }
 
@@ -222,8 +222,8 @@ fn create_gradient_simulation() -> Simulation {
     let mut sim = create_test_simulation();
     // Create temperature gradient: cool surface, hot bottom
     let cell = sim.cells.values_mut().next().unwrap();
-    cell.layers[0].set_energy_joules(1.0e20); // Cool surface
-    cell.layers[1].set_energy_joules(2.0e20); // Medium
-    cell.layers[2].set_energy_joules(3.0e20); // Hot bottom
+    cell.asth_layers[0].set_energy_joules(1.0e20); // Cool surface
+    cell.asth_layers[1].set_energy_joules(2.0e20); // Medium
+    cell.asth_layers[2].set_energy_joules(3.0e20); // Hot bottom
     sim
 }

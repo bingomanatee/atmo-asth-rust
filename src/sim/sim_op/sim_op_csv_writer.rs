@@ -50,7 +50,7 @@ impl CsvColumn for AvgSurfaceTempColumn {
     fn header(&self) -> &str { "avg_surface_temp_k" }
     fn extract_value(&self, sim: &Simulation) -> String {
         let temps: Vec<f64> = sim.cells.values()
-            .filter_map(|column| column.layers.first())
+            .filter_map(|column| column.asth_layers.first())
             .map(|layer| layer.kelvin())
             .collect();
         let avg = temps.iter().sum::<f64>() / temps.len() as f64;
@@ -84,7 +84,7 @@ impl CsvColumn for AvgAsthenosphereTempColumn {
     fn header(&self) -> &str { "avg_asthenosphere_temp_k" }
     fn extract_value(&self, sim: &Simulation) -> String {
         let temps: Vec<f64> = sim.cells.values()
-            .filter_map(|column| column.layers.first())
+            .filter_map(|column| column.asth_layers.first())
             .map(|layer| layer.kelvin())
             .collect();
         let avg = temps.iter().sum::<f64>() / temps.len() as f64;
@@ -125,7 +125,7 @@ impl CsvColumn for AvgEnergyColumn {
     fn header(&self) -> &str { "avg_energy_j" }
     fn extract_value(&self, sim: &Simulation) -> String {
         let energies: Vec<f64> = sim.cells.values()
-            .filter_map(|column| column.layers.first())
+            .filter_map(|column| column.asth_layers.first())
             .map(|layer| layer.energy_joules())
             .collect();
         let avg = energies.iter().sum::<f64>() / energies.len() as f64;
@@ -137,7 +137,7 @@ impl CsvColumn for TotalEnergyColumn {
     fn header(&self) -> &str { "total_energy_j" }
     fn extract_value(&self, sim: &Simulation) -> String {
         let total: f64 = sim.cells.values()
-            .filter_map(|column| column.layers.first())
+            .filter_map(|column| column.asth_layers.first())
             .map(|layer| layer.energy_joules())
             .sum();
         format!("{:.0}", total)

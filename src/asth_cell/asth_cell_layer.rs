@@ -420,9 +420,9 @@ mod tests {
         });
 
         // Check what temperature we actually get in layer 0
-        let layer_0_temp = cell.layers[0].kelvin();
-        let layer_1_temp = cell.layers[1].kelvin();
-        let layer_2_temp = cell.layers[2].kelvin();
+        let layer_0_temp = cell.asth_layers[0].kelvin();
+        let layer_1_temp = cell.asth_layers[1].kelvin();
+        let layer_2_temp = cell.asth_layers[2].kelvin();
 
         println!("Surface temp set to: {:.2} K", surface_temp);
         println!("Layer 0 temp: {:.2} K (diff: {:.2} K)", layer_0_temp, layer_0_temp - surface_temp);

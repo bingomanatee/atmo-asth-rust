@@ -32,17 +32,17 @@ fn test_all_operators_modify_next_arrays() {
 
     // Set up initial state
     let cell = sim.cells.values_mut().next().unwrap();
-    cell.layers[0].set_energy_joules(1.0e20); // Surface
-    cell.layers[1].set_energy_joules(2.0e20); // Bottom
+    cell.asth_layers[0].set_energy_joules(1.0e20); // Surface
+    cell.asth_layers[1].set_energy_joules(2.0e20); // Bottom
     
     // Copy current to next (simulate step start)
-    for i in 0..cell.layers.len() {
-        cell.layers_next[i] = cell.layers[i].clone();
+    for i in 0..cell.asth_layers.len() {
+        cell.asth_layers_next[i] = cell.asth_layers[i].clone();
     }
 
     // Record initial states
-    let initial_current_temps: Vec<f64> = cell.layers.iter().map(|l| l.kelvin()).collect();
-    let initial_next_temps: Vec<f64> = cell.layers_next.iter().map(|l| l.kelvin()).collect();
+    let initial_current_temps: Vec<f64> = cell.asth_layers.iter().map(|l| l.kelvin()).collect();
+    let initial_next_temps: Vec<f64> = cell.asth_layers_next.iter().map(|l| l.kelvin()).collect();
     
     println!("Initial current temps: {:?}", initial_current_temps);
     println!("Initial next temps: {:?}", initial_next_temps);
@@ -53,8 +53,8 @@ fn test_all_operators_modify_next_arrays() {
     radiance_op.update_sim(&mut sim);
     
     let cell = sim.cells.values().next().unwrap();
-    let current_temps_after_radiance: Vec<f64> = cell.layers.iter().map(|l| l.kelvin()).collect();
-    let next_temps_after_radiance: Vec<f64> = cell.layers_next.iter().map(|l| l.kelvin()).collect();
+    let current_temps_after_radiance: Vec<f64> = cell.asth_layers.iter().map(|l| l.kelvin()).collect();
+    let next_temps_after_radiance: Vec<f64> = cell.asth_layers_next.iter().map(|l| l.kelvin()).collect();
     
     // Check if RadianceOp modified next arrays
     let radiance_modified_next = next_temps_after_radiance != initial_next_temps;
@@ -80,16 +80,16 @@ fn test_all_operators_modify_next_arrays() {
     
     // Reset arrays for clean test
     let cell = sim.cells.values_mut().next().unwrap();
-    for i in 0..cell.layers.len() {
-        cell.layers_next[i] = cell.layers[i].clone();
+    for i in 0..cell.asth_layers.len() {
+        cell.asth_layers_next[i] = cell.asth_layers[i].clone();
     }
-    let initial_bottom_energy = cell.layers_next[1].energy_joules();
+    let initial_bottom_energy = cell.asth_layers_next[1].energy_joules();
     
     core_op.update_sim(&mut sim);
     
     let cell = sim.cells.values().next().unwrap();
-    let final_bottom_energy_current = cell.layers[1].energy_joules();
-    let final_bottom_energy_next = cell.layers_next[1].energy_joules();
+    let final_bottom_energy_current = cell.asth_layers[1].energy_joules();
+    let final_bottom_energy_next = cell.asth_layers_next[1].energy_joules();
     
     let core_modified_current = final_bottom_energy_current != initial_bottom_energy;
     let core_modified_next = final_bottom_energy_next != initial_bottom_energy;
@@ -118,17 +118,17 @@ fn test_all_operators_modify_next_arrays() {
     
     // Set up hot surface for cooling
     let cell = sim.cells.values_mut().next().unwrap();
-    cell.layers[0].set_energy_joules(5.0e20); // Very hot for significant cooling
-    for i in 0..cell.layers.len() {
-        cell.layers_next[i] = cell.layers[i].clone();
+    cell.asth_layers[0].set_energy_joules(5.0e20); // Very hot for significant cooling
+    for i in 0..cell.asth_layers.len() {
+        cell.asth_layers_next[i] = cell.asth_layers[i].clone();
     }
-    let initial_surface_energy = cell.layers_next[0].energy_joules();
+    let initial_surface_energy = cell.asth_layers_next[0].energy_joules();
     
     atmosphere_op.update_sim(&mut sim);
     
     let cell = sim.cells.values().next().unwrap();
-    let final_surface_energy_current = cell.layers[0].energy_joules();
-    let final_surface_energy_next = cell.layers_next[0].energy_joules();
+    let final_surface_energy_current = cell.asth_layers[0].energy_joules();
+    let final_surface_energy_next = cell.asth_layers_next[0].energy_joules();
     
     let atmo_modified_current = final_surface_energy_current != initial_surface_energy;
     let atmo_modified_next = final_surface_energy_next != initial_surface_energy;

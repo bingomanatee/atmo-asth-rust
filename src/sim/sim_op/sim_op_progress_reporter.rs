@@ -59,7 +59,7 @@ impl ProgressReporterOp {
     /// Calculate average surface temperature across all cells
     fn calculate_avg_surface_temp(&self, sim: &Simulation) -> f64 {
         let temps: Vec<f64> = sim.cells.values()
-            .map(|cell| cell.layers[0].kelvin())
+            .map(|cell| cell.asth_layers[0].kelvin())
             .collect();
         
         if temps.is_empty() {
@@ -86,8 +86,8 @@ impl ProgressReporterOp {
     fn calculate_total_energy(&self, sim: &Simulation) -> f64 {
         sim.cells.values()
             .map(|cell| {
-                let asth_energy: f64 = cell.layers.iter().map(|l| l.energy_joules()).sum();
-                let lith_energy: f64 = cell.lithospheres.iter().map(|l| l.energy()).sum();
+                let asth_energy: f64 = cell.asth_layers.iter().map(|l| l.energy_joules()).sum();
+                let lith_energy: f64 = cell.lithospheres.iter().map(|l| l.energy_joules()).sum();
                 asth_energy + lith_energy
             })
             .sum()

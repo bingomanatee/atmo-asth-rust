@@ -41,7 +41,7 @@ impl SimOp for CoreRadianceOp {
             let years = sim.years_per_step as f64;
 
             // Apply core radiance to bottom layer - MODIFY NEXT ARRAYS!
-            if let Some(bottom_layer) = column.layers_next.last_mut() {
+            if let Some(bottom_layer) = column.asth_layers_next.last_mut() {
                 // Calculate energy influx for this time step
                 let energy_influx = self.core_radiance_j_per_km2_per_year * area_km2 * years;
 
@@ -82,7 +82,7 @@ mod tests {
 
         // Record initial bottom layer energy using layer() method
         let cell = sim.cells.values_mut().next().unwrap();
-        let bottom_layer_index = cell.layers.len() - 1;
+        let bottom_layer_index = cell.asth_layers.len() - 1;
         let (current_bottom, _) = cell.layer(bottom_layer_index);
         let initial_bottom_energy = current_bottom.energy_joules();
         let initial_bottom_temp = current_bottom.kelvin();

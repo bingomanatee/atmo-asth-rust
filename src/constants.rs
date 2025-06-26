@@ -38,6 +38,11 @@ pub const DEGRADATION_PER_K_ABOVE_PEAK: f64 = 0.1;
 
 pub const MIO: f64 = 1_000_000.0;
 
+pub const M2_PER_KM2: f64 = 1e6;
+pub const SECONDS_PER_YEAR:f64 = 365.25 * 24.0 * 3600.0;
+pub const STEFAN_BOLTZMANN_CONSTANT:f64 = 5.67e-8; // W/(m²·K⁴)
+pub const SIGMA_KM2_YEAR: f64 = STEFAN_BOLTZMANN_CONSTANT * SECONDS_PER_YEAR * M2_PER_KM2; // J/(km²·year·K⁴)
+
 pub const GLOBAL_ENERGY_LOSS_0KM_LITHOSPHERE: f64 = 1.5e27/MIO;      // Fully exposed mantle - maximum cooling
 pub const GLOBAL_ENERGY_LOSS_1KM_LITHOSPHERE: f64 = 8.0e26/MIO;     // Very thin insulation - reduced cooling
 pub const GLOBAL_ENERGY_LOSS_5KM_LITHOSPHERE: f64 = 4.0e26/MIO;      // Thin crust - further reduced

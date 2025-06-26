@@ -61,7 +61,7 @@ impl AtmosphereOp {
                 column.lithospheres.last().unwrap().kelvin()
             } else {
                 // Asthenosphere surface temperature
-                column.layers.first().unwrap().kelvin()
+                column.asth_layers.first().unwrap().kelvin()
             };
 
             let area_km2 = column.area();
@@ -170,7 +170,7 @@ impl AtmosphereOp {
 
             // Remove from top lithosphere layer - NEXT ARRAY!
             let top_lithosphere = column.lithospheres_next.last_mut().unwrap();
-            let current_energy = top_lithosphere.energy();
+            let current_energy = top_lithosphere.energy_joules();
             let energy_to_remove_clamped = energy_to_remove.min(current_energy * 0.9); // Max 90% per step
             top_lithosphere.remove_energy(energy_to_remove_clamped);
 
@@ -181,7 +181,7 @@ impl AtmosphereOp {
                 let asthenosphere_cooling = energy_to_remove * asthenosphere_cooling_fraction;
 
                 // Remove energy from top asthenosphere layer
-                let top_layer = column.layers_next.first_mut().unwrap();
+                let top_layer = column.asth_layers_next.first_mut().unwrap();
                 let current_asth_energy = top_layer.energy_joules();
                 let asth_energy_to_remove = asthenosphere_cooling.min(current_asth_energy * 0.5); // Max 50% per step
                 let energy_after_cooling = current_asth_energy - asth_energy_to_remove;
@@ -189,7 +189,7 @@ impl AtmosphereOp {
             }
         } else {
             // Remove from top asthenosphere layer - NEXT ARRAY!
-            let top_layer = column.layers_next.first_mut().unwrap();
+            let top_layer = column.asth_layers_next.first_mut().unwrap();
             let current_energy = top_layer.energy_joules();
             let energy_to_remove_clamped = energy_to_remove.min(current_energy * 0.9); // Max 90% per step
             let energy_after_cooling = current_energy - energy_to_remove_clamped;
@@ -258,7 +258,7 @@ impl SimOp for AtmosphereOp {
                 column.lithospheres.last().unwrap().kelvin()
             } else {
                 // Asthenosphere surface temperature
-                column.layers.first().unwrap().kelvin()
+                column.asth_layers.first().unwrap().kelvin()
             };
             
             let lithosphere_thickness = column.total_lithosphere_height();
@@ -388,8 +388,8 @@ mod tests {
 
         // Set very hot surface layer for significant cooling
         let cell = sim.cells.values_mut().next().unwrap();
-        cell.layers[0].set_energy_joules(1.0e25); // Very hot surface
-        cell.layers_next[0].set_energy_joules(1.0e25); // Set both arrays
+        cell.asth_layers[0].set_energy_joules(1.0e25); // Very hot surface
+        cell.asth_layers_next[0].set_energy_joules(1.0e25); // Set both arrays
 
         // Record initial state from surface layer
         let cell = sim.cells.values_mut().next().unwrap();

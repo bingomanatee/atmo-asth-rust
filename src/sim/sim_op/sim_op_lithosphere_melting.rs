@@ -36,7 +36,7 @@ impl SimOp for LithosphereMeltingOp {
     fn update_sim(&mut self, sim: &mut Simulation) {
         for column in sim.cells.values_mut() {
             // Get the surface layer temperature (asthenosphere temperature)
-            let surface_temp_k = if let Some(surface_layer) = column.layers.first() {
+            let surface_temp_k = if let Some(surface_layer) = column.asth_layers.first() {
                 surface_layer.kelvin()
             } else {
                 continue; // Skip if no surface layer
@@ -73,7 +73,7 @@ impl SimOp for LithosphereMeltingOp {
 
                     // Add the melted energy back to the surface layer
                     // The melted lithosphere becomes hot magma, adding energy
-                    if let Some(surface_layer) = column.layers_next.first_mut() {
+                    if let Some(surface_layer) = column.asth_layers_next.first_mut() {
                         let melted_height = original_height - lithosphere.height_km;
                         if melted_height > 0.0 {
                             // Calculate energy from melted lithosphere
@@ -128,7 +128,7 @@ mod tests {
 
         // Set surface temperature below formation temperature
         for column in sim.cells.values_mut() {
-            column.layers[0].set_temp_kelvin(1500.0); // Well below silicate formation temp
+            column.asth_layers[0].set_temp_kelvin(1500.0); // Well below silicate formation temp
             
             // Add some lithosphere
             column.lithospheres_next.clear();
@@ -161,7 +161,7 @@ mod tests {
 
         // Set surface temperature well above formation temperature
         for column in sim.cells.values_mut() {
-            column.layers[0].set_temp_kelvin(2500.0); // Well above silicate formation temp
+            column.asth_layers[0].set_temp_kelvin(2500.0); // Well above silicate formation temp
             
             // Add substantial lithosphere
             column.lithospheres_next.clear();
@@ -196,7 +196,7 @@ mod tests {
 
         // Set high temperature to cause melting
         for column in sim.cells.values_mut() {
-            column.layers[0].set_temp_kelvin(2200.0);
+            column.asth_layers[0].set_temp_kelvin(2200.0);
             
             // Add lithosphere
             column.lithospheres_next.clear();
@@ -209,7 +209,7 @@ mod tests {
 
         // Record initial total energy
         let initial_energy: f64 = sim.cells.values()
-            .map(|column| column.layers[0].energy_joules())
+            .map(|column| column.asth_layers[0].energy_joules())
             .sum();
 
         // Run melting operator using step_with_ops for proper array handling
@@ -217,7 +217,7 @@ mod tests {
 
         // Final energy should be higher (melted lithosphere adds energy)
         let final_energy: f64 = sim.cells.values()
-            .map(|column| column.layers[0].energy_joules())
+            .map(|column| column.asth_layers[0].energy_joules())
             .sum();
 
         // Relax the assertion - melting may not always increase energy
@@ -235,7 +235,7 @@ mod tests {
         sim.years_per_step = 100_000; // Long time step
         
         for column in sim.cells.values_mut() {
-            column.layers[0].set_temp_kelvin(3000.0); // Very high temperature
+            column.asth_layers[0].set_temp_kelvin(3000.0); // Very high temperature
             
             // Add thin lithosphere that should melt completely
             column.lithospheres_next.clear();
