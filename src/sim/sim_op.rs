@@ -7,6 +7,7 @@ mod sim_op_lithosphere_feedback;
 mod sim_op_lithosphere_melting;
 mod sim_op_lithosphere_unified;
 pub mod sim_op_csv_writer;
+mod sim_op_progress_reporter;
 
 pub use sim_op_atmosphere::AtmosphereOp;
 pub use sim_op_cooling::CoolingOp;
@@ -17,6 +18,7 @@ pub use sim_op_lithosphere_feedback::LithosphereFeedbackOp;
 pub use sim_op_lithosphere_melting::LithosphereMeltingOp;
 pub use sim_op_lithosphere_unified::LithosphereUnifiedOp;
 pub use sim_op_csv_writer::CsvWriterOp;
+pub use sim_op_progress_reporter::ProgressReporterOp;
 
 use crate::sim::Simulation;
 
