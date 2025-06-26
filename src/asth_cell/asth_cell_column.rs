@@ -110,31 +110,33 @@ impl AsthCellColumn {
     /// Panics if the lithosphere profile cannot be found (game-ending error)
     pub fn lithosphere(
         &mut self,
+        layer_index: usize
     ) -> (
         &AsthCellLithosphere,
         &mut AsthCellLithosphere,
         &'static crate::material::MaterialProfile,
     ) {
-        // Panic if no lithosphere layers exist - this should be created during initialization
-        if self.lithospheres.is_empty() {
-            self.lithospheres.push(AsthCellLithosphere::new(0.0, MaterialType::Silicate, 0.0))
-        }
-        let first = self.lithospheres.iter().next().unwrap();
-        // Ensure the next lithospheres vector has at least one layer - clone from current if missing
-        if self.lithospheres_next.is_empty() {
-            self.lithospheres_next.push(first.clone());
+        // Ensure the current layer exists (should be created by project method)
+        if layer_index >= self.lithospheres.len() {
+            panic!(
+                "Current layer {} does not exist. All layers should be created during initialization. Current layers: {}",
+                layer_index,
+                self.layers.len()
+            );
         }
 
-        let mut next = self
-            .lithospheres_next
-            .iter_mut()
-            .next()
-            .expect("next should exist");
-        // Get the profile for the next lithosphere (panics if not found)
-        let profile = next.profile();
+        // Ensure the next layers vector has this layer - clone from current if missing
+        while self.layers_next.len() <= layer_index {
+            let current_layer = &self.layers[self.layers_next.len()];
+            self.layers_next.push(current_layer.clone());
+        }
 
-        // Return references to the bottom (first) lithosphere layers and the profile
-        (first, next, profile)
+        // Return references to the layers
+        (
+            &self.lithospheres[layer_index],
+            &mut self.lithospheres_next[layer_index],
+            self.lithospheres[layer_index].profile()
+        )
     }
 
     /// Create a lithosphere with the specified material

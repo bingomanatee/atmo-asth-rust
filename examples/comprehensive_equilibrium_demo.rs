@@ -2,7 +2,7 @@ use atmo_asth_rust::constants::EARTH_RADIUS_KM;
 use atmo_asth_rust::planet::Planet;
 use atmo_asth_rust::sim::sim_op::{
     AtmosphereOp, CoreRadianceOp, CoolingOp, CsvWriterOp, LithosphereUnifiedOp,
-    ProgressReporterOp, RadianceOp,
+    ProgressReporterOp, ThermalDiffusionOp,
 };
 use atmo_asth_rust::sim::{SimProps, Simulation};
 use atmo_asth_rust::material::MaterialType;
@@ -11,14 +11,7 @@ use std::fs;
 
 /// Comprehensive demonstration of all thermal operators working together
 /// to achieve realistic planetary thermal equilibrium with CSV data export.
-///
-/// This example demonstrates:
-/// - Core heat generation (CoreRadianceOp)
-/// - Thermal mixing between layers (RadianceOp) 
-/// - Surface cooling to space (CoolingOp)
-/// - Atmospheric radiation effects (AtmosphereOp)
-/// - Lithosphere formation and melting (LithosphereUnifiedOp)
-/// - Complete CSV data export for analysis
+
 fn main() {
     println!("🌍 Comprehensive Thermal Equilibrium Demonstration");
     println!("==================================================");
@@ -29,11 +22,11 @@ fn main() {
     let csv_file = format!("{}/thermal_equilibrium_demo.csv", output_dir);
     let _ = fs::remove_file(&csv_file);
 
-    // Create comprehensive operator suite with balanced parameters
+    // Create comprehensive operator suite with modern thermal physics
     let operators = vec![
-        CoreRadianceOp::handle(0.0), // Balanced core heat
-        RadianceOp::handle(),
-        CoolingOp::handle(1.2), // Higher cooling efficiency
+        CoreRadianceOp::handle(1.0e11), // Core heat input from planetary interior
+        ThermalDiffusionOp::handle(0.15, 25.0), // Realistic thermal diffusion with cascading energy transfer
+        CoolingOp::handle(1.2), // Enhanced surface cooling efficiency
         AtmosphereOp::handle_with_params(
             1300.0, // 1300K outgassing threshold
             5e-11,  // Lower outgassing rate
@@ -63,8 +56,8 @@ fn main() {
         res: Resolution::Two, // Small grid for faster computation
         layer_count: 4,      // 4 asthenosphere layers (200km total)
         layer_height_km: 50.0,
-        sim_steps: 150,      // Run for 150 steps to show equilibrium
-        years_per_step: 20000, // 20,000 years per step = 3M years total
+        sim_steps: 400,      // Run for 150 steps to show equilibrium
+        years_per_step: 10000, // 20,000 years per step = 3M years total
         debug: false,
         alert_freq: 30,      // Report every 30 steps
         starting_surface_temp_k: 1600.0, // Moderate starting temperature
@@ -82,8 +75,8 @@ fn main() {
     let mut sim = Simulation::new(sim_props);
 
     println!("🔧 Operators Configured:");
-    println!("   ✅ CoreRadianceOp: Balanced core heat flux (1.0e11 J/km²/year)");
-    println!("   ✅ RadianceOp: Thermal mixing between layers");
+    println!("   ✅ CoreRadianceOp: Core heat flux from planetary interior (1.0e11 J/km²/year)");
+    println!("   ✅ ThermalDiffusionOp: Realistic thermal diffusion with cascading energy transfer");
     println!("   ✅ CoolingOp: Enhanced surface cooling (1.2x efficiency)");
     println!("   ✅ AtmosphereOp: Moderate atmosphere development");
     println!("   ✅ LithosphereUnifiedOp: Realistic crust formation/melting");

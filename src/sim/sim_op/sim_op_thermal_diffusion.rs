@@ -1,7 +1,8 @@
 use crate::asth_cell::AsthCellColumn;
-use crate::sim::sim_op::{SimOp, SimOpHandle};
-use crate::sim::Simulation;
 use crate::energy_mass::EnergyMass;
+use crate::material::MaterialProfile;
+use crate::sim::Simulation;
+use crate::sim::sim_op::{SimOp, SimOpHandle};
 
 /// Thermal Diffusion Operator
 ///
@@ -13,7 +14,7 @@ use crate::energy_mass::EnergyMass;
 #[derive(Debug, Clone)]
 pub struct ThermalDiffusionOp {
     pub name: String,
-    pub diffusion_rate: f64,  // Base diffusion rate (0.0 to 1.0)
+    pub diffusion_rate: f64,           // Base diffusion rate (0.0 to 1.0)
     pub max_temp_change_per_step: f64, // Maximum temperature change per step (K)
 }
 
@@ -29,7 +30,12 @@ enum LayerType {
 }
 struct LayerPointer {
     pub layer_type: LayerType,
-   pub index: usize,
+    pub index: usize,
+    pub energy_j: f64,
+    pub volume_km3: f64,
+    pub material: MaterialProfile,
+    pub temperature: f64,
+    pub conductivity: f64,
 }
 
 impl ThermalDiffusionOp {
@@ -44,79 +50,110 @@ impl ThermalDiffusionOp {
 
     /// Create a handle for the thermal diffusion operator
     pub fn handle(diffusion_rate: f64, max_temp_change_per_step: f64) -> SimOpHandle {
-        SimOpHandle::new(Box::new(Self::new(diffusion_rate, max_temp_change_per_step)))
+        SimOpHandle::new(Box::new(Self::new(
+            diffusion_rate,
+            max_temp_change_per_step,
+        )))
     }
-
 
     /// Process thermal diffusion for a single cell column
     fn process_cell_thermal_diffusion(&self, column: &mut AsthCellColumn, years: f64) {
         // Create a simplified thermal diffusion between adjacent asthenosphere layers
         // This avoids complex borrowing issues while still providing realistic thermal mixing
 
-        let mut lith_columns: Vec<LayerPointer> = Vec::new();
+        let mut columns: Vec<LayerPointer> = Vec::new();
         let mut asth_columns: Vec<LayerPointer> = Vec::new();
-        for index in 0..column.lithospheres_next.iter().len() {
-            lith_columns.push(LayerPointer {
-                index, layer_type: LayerType::Lith
+        for index in 0..column.lithospheres.iter().len() {
+            let lith = column.lithospheres.get(index).expect("cannot get lithosphere");
+            columns.push(LayerPointer {
+                index,
+                layer_type: LayerType::Lith,
+                energy_j: lith.energy(),
+                volume_km3: lith.volume_km3(),
+                material: lith.profile().clone(),
+                temperature: lith.kelvin(),
+                conductivity: lith.thermal_conductivity()
             })
         }
-        for index in 0..column.layers_next.iter().len() {
+        for index in 0..column.layers.iter().len() {
+            let layer = column.layers.get(index).expect("cannot get lithosphere");
             asth_columns.push(LayerPointer {
-                index, layer_type: LayerType::Asth
+                index,
+                layer_type: LayerType::Asth,
+                energy_j: layer.energy_joules(),
+                volume_km3: layer.volume_km3(),
+                material: layer.profile().clone(),
+                temperature: layer.kelvin(),
+                conductivity: layer.thermal_conductivity()
             })
         }
         
-        let mut columns: Vec<LayerPointer> = lith_columns.iter().rev().collect() as Vec<LayerPointer>;
         columns.extend(asth_columns);
+        
+        for (index, pointer) in columns.iter().enumerate() {
+            if (index >0 ) {
+                let prev_pointer = columns.get(index - 1).unwrap();
+                self.transfer_energy(years, column, pointer, prev_pointer)
+            }
+        }
+     
+    }
+    
+    fn transfer_energy(&self, years: f64,  column: &mut AsthCellColumn, from_pointer: &LayerPointer, to_pointer: &LayerPointer) {
+        let interface_conductivity = 2.0 * from_pointer.conductivity * to_pointer.conductivity /
+            (from_pointer.conductivity + to_pointer.conductivity);
+        
+        let temp_diff = from_pointer.temperature - to_pointer.temperature;
+        let base_transfer_rate = interface_conductivity * self.diffusion_rate * years * 1e6; // Scaling factor
+        let energy_transfer = temp_diff * base_transfer_rate;
 
-        // Calculate temperature differences and energy transfers between adjacent layers
-        let mut energy_transfers: Vec<Transfer> = vec![];
+            let max_transfer_rate = energy_transfer.max(from_pointer.energy_j * ENERGY_THROTTLE);
+            match from_pointer.layer_type {
+                LayerType::Lith => {
+                    let (_, from_layer) = column.layer(from_pointer.index);
 
-        for i in 0..columns.iter().len() {
-            
-            let upper_temp = column.layers_next[i].kelvin();
-            let lower_temp = column.layers_next[i + 1].kelvin();
-            let temp_diff = lower_temp - upper_temp; // Positive if lower is hotter
+                    if temp_diff > 0.0 {
+                        from_layer.remove_energy(max_transfer_rate);
+                    } else {
+                        from_layer.add_energy(-max_transfer_rate);
+                    }
+                },
+                LayerType::Asth => {
+                    let (_, from_asth, _) = column.lithosphere(from_pointer.index);
 
-            if temp_diff.abs() < 0.1 {
-                continue; // No significant temperature difference
+                    if temp_diff > 0.0 {
+                        from_asth.remove_energy(max_transfer_rate);
+                    } else {
+                        from_asth.add_energy(-max_transfer_rate);
+                    }
+                }
             }
 
-            // Calculate thermal conductivity interface
-            let upper_conductivity = column.layers_next[i].thermal_conductivity();
-            let lower_conductivity = column.layers_next[i + 1].thermal_conductivity();
-            let interface_conductivity = 2.0 * upper_conductivity * lower_conductivity /
-                (upper_conductivity + lower_conductivity);
+            match to_pointer.layer_type {
+                LayerType::Lith => {
+                    let (_, to_layer) = column.layer(to_pointer.index);
 
-            // Calculate energy transfer rate
-            let base_transfer_rate = interface_conductivity * self.diffusion_rate * years * 1e6; // Scaling factor
-            let energy_transfer = temp_diff * base_transfer_rate;
+                    if temp_diff > 0.0 {
+                        to_layer.add_energy(max_transfer_rate);
+                    } else {
+                        to_layer.remove_energy(-max_transfer_rate);
+                    }
+                },
+                LayerType::Asth => {
+                    let (_, to_lith, _) = column.lithosphere(to_pointer.index);
 
-            // Limit energy transfer to prevent extreme temperature changes
-            let upper_energy = column.layers_next[i].energy_joules();
-            let lower_energy = column.layers_next[i + 1].energy_joules();
-
-            let max_change = (upper_energy.min(lower_energy)) * 0.1; // Max 10% energy change per step
-            let limited_transfer = if energy_transfer > 0.0 {
-                energy_transfer.min(max_change)
-            } else {
-                energy_transfer.max(-max_change)
-            };
-
-            energy_transfers.push(Transfer {
-                from_index: i + 1,
-                to_index: i,
-                energy: limited_transfer,
-            });
-        }
-
-        // Apply energy transfers
-        for transfer in energy_transfers {
-            let from_cell =
-                if (transfer.energy > 0.0) {}
-        }
+                    if temp_diff > 0.0 {
+                        to_lith.add_energy(max_transfer_rate);
+                    } else {
+                        to_lith.remove_energy(-max_transfer_rate);
+                    }
+                }
+            }
+        
     }
 }
+
+const ENERGY_THROTTLE: f64 = 0.2;
 
 impl SimOp for ThermalDiffusionOp {
     fn name(&self) -> &str {
@@ -190,8 +227,14 @@ mod tests {
 
         // Temperatures should move toward equilibrium
         // Top layer should get warmer, bottom layer should get cooler
-        assert!(final_temps[0] > initial_temps[0], "Top layer should warm up");
-        assert!(final_temps[2] < initial_temps[2], "Bottom layer should cool down");
+        assert!(
+            final_temps[0] > initial_temps[0],
+            "Top layer should warm up"
+        );
+        assert!(
+            final_temps[2] < initial_temps[2],
+            "Bottom layer should cool down"
+        );
 
         println!("Initial temps: {:?}", initial_temps);
         println!("Final temps: {:?}", final_temps);

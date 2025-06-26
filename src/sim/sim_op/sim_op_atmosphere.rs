@@ -163,13 +163,30 @@ impl AtmosphereOp {
     }
 
     /// Remove energy from the surface layer (lithosphere or asthenosphere) - MODIFY NEXT ARRAYS!
+    /// For thin lithosphere, also allows asthenosphere cooling through the lithosphere
     fn remove_surface_energy(&self, column: &mut crate::asth_cell::AsthCellColumn, energy_to_remove: f64) {
         if !column.lithospheres.is_empty() {
+            let lithosphere_thickness = column.total_lithosphere_height();
+
             // Remove from top lithosphere layer - NEXT ARRAY!
             let top_lithosphere = column.lithospheres_next.last_mut().unwrap();
             let current_energy = top_lithosphere.energy();
             let energy_to_remove_clamped = energy_to_remove.min(current_energy * 0.9); // Max 90% per step
             top_lithosphere.remove_energy(energy_to_remove_clamped);
+
+            // For thin lithosphere, also allow asthenosphere cooling through the lithosphere
+            // This represents heat conduction through thin crust
+            if lithosphere_thickness < 100.0 { // Less than 100km allows asthenosphere cooling
+                let asthenosphere_cooling_fraction = self.calculate_asthenosphere_cooling_fraction(lithosphere_thickness);
+                let asthenosphere_cooling = energy_to_remove * asthenosphere_cooling_fraction;
+
+                // Remove energy from top asthenosphere layer
+                let top_layer = column.layers_next.first_mut().unwrap();
+                let current_asth_energy = top_layer.energy_joules();
+                let asth_energy_to_remove = asthenosphere_cooling.min(current_asth_energy * 0.5); // Max 50% per step
+                let energy_after_cooling = current_asth_energy - asth_energy_to_remove;
+                top_layer.set_energy_joules(energy_after_cooling);
+            }
         } else {
             // Remove from top asthenosphere layer - NEXT ARRAY!
             let top_layer = column.layers_next.first_mut().unwrap();
@@ -178,6 +195,22 @@ impl AtmosphereOp {
             let energy_after_cooling = current_energy - energy_to_remove_clamped;
             top_layer.set_energy_joules(energy_after_cooling);
         }
+    }
+
+    /// Calculate the fraction of surface cooling that also affects the asthenosphere
+    /// through thin lithosphere via thermal conduction
+    fn calculate_asthenosphere_cooling_fraction(&self, lithosphere_thickness_km: f64) -> f64 {
+        if lithosphere_thickness_km >= 100.0 {
+            return 0.0; // Thick lithosphere blocks all asthenosphere cooling
+        }
+
+        // Exponential decay of cooling efficiency through lithosphere
+        // At 0km: 80% of surface cooling affects asthenosphere
+        // At 50km: ~30% of surface cooling affects asthenosphere
+        // At 100km: 0% (fully insulated)
+        let max_fraction = 0.8;
+        let decay_constant = 50.0; // km
+        max_fraction * (-lithosphere_thickness_km / decay_constant).exp()
     }
 
     /// Calculate outgassing rate from a cell based on temperature and pressure

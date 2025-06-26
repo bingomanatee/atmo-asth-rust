@@ -1,7 +1,7 @@
 // Integration tests to verify operators modify the correct arrays
 // This is the critical test that should have caught the "temperatures never change" bug
 
-use atmo_asth_rust::sim::sim_op::{RadianceOp, AtmosphereOp, CoreRadianceOp, SimOp};
+use atmo_asth_rust::sim::sim_op::{AtmosphereOp, CoreRadianceOp, SimOp};
 use atmo_asth_rust::sim::{Simulation, SimProps};
 use atmo_asth_rust::planet::Planet;
 use atmo_asth_rust::constants::EARTH_RADIUS_KM;

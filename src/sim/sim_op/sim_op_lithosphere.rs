@@ -104,7 +104,7 @@ impl SimOp for LithosphereOp {
             };
             let area = column.area();
             // Now get lithosphere (panics if none exists - should be created during init)
-            let (_, next_lithosphere, profile) = column.lithosphere();
+            let (_, next_lithosphere, profile) = column.lithosphere(0);
             
             let kelvin = top.kelvin();
 
@@ -341,7 +341,7 @@ mod tests {
 
         // Check lithosphere growth
         for column in sim.cells.values() {
-            let (_, _, profile) = &mut column.clone().lithosphere();
+            let (_, _, profile) = &mut column.clone().lithosphere(0);
             assert_eq!(profile.kind, MaterialType::Silicate);
 
             // At formation temp, growth should be minimal (close to 0)
@@ -364,7 +364,7 @@ mod tests {
             let mut column_clone = column.clone();
             let (current_layer, _) = column_clone.layer(0);
             let actual_temp = current_layer.kelvin();
-            let (_, _, profile) = column_clone.lithosphere();
+            let (_, _, profile) = column_clone.lithosphere(0);
 
             // At halfway temp, should have partial growth
             let expected_growth_rate = profile.growth_at_kelvin(actual_temp);
@@ -393,7 +393,7 @@ mod tests {
             let actual_temp = current_layer.kelvin();
             println!("Surface temp set to: 1673.15 K, actual layer temp: {:.2} K", actual_temp);
 
-            let (_, _, profile) = column_clone.lithosphere();
+            let (_, _, profile) = column_clone.lithosphere(0);
             let growth_rate = profile.growth_at_kelvin(actual_temp);
             println!("Growth rate at {:.2} K: {:.6} km/year", actual_temp, growth_rate);
             break; // Just check first cell
@@ -402,7 +402,7 @@ mod tests {
         sim.step_with_ops(&mut [&mut op]); // This handles copy and commit automatically
 
         for column in sim.cells.values() {
-            let (_, _, profile) = &mut column.clone().lithosphere();
+            let (_, _, profile) = &mut column.clone().lithosphere(0);
 
             // Calculate expected height based on actual temperature-dependent growth
             let surface_kelvin = 1673.15; // Peak growth temperature
@@ -428,7 +428,7 @@ mod tests {
         sim.step_with_ops(&mut [&mut op]); // This handles copy and commit automatically
 
         for column in sim.cells.values() {
-            let (_, _, profile) = &mut column.clone().lithosphere();
+            let (_, _, profile) = &mut column.clone().lithosphere(0);
 
             // Calculate expected height based on actual temperature-dependent growth
             let surface_kelvin = 1573.15; // Below peak temperature
@@ -502,7 +502,7 @@ mod tests {
         }
 
         for column in sim.cells.values() {
-            let (_, _, profile) = &mut column.clone().lithosphere();
+            let (_, _, profile) = &mut column.clone().lithosphere(0);
 
             // Calculate expected height based on actual temperature-dependent growth over 3 steps
             let surface_kelvin = 1673.15; // Peak growth temperature

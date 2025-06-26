@@ -1,10 +1,11 @@
 // Comprehensive operator validation tests
 // Tests each operator individually to ensure values change in expected ways
 
-use atmo_asth_rust::sim::sim_op::{RadianceOp, AtmosphereOp, CoreRadianceOp, SimOp};
+use atmo_asth_rust::sim::sim_op::{AtmosphereOp, CoreRadianceOp};
 use atmo_asth_rust::sim::{Simulation, SimProps};
 use atmo_asth_rust::planet::Planet;
 use atmo_asth_rust::constants::EARTH_RADIUS_KM;
+use atmo_asth_rust::temp_utils;
 use h3o::Resolution;
 
 #[test]
@@ -209,9 +210,11 @@ fn create_test_simulation() -> Simulation {
 
 fn create_hot_surface_simulation() -> Simulation {
     let mut sim = create_test_simulation();
-    // Set very hot surface for significant cooling
+    // Set very hot surface for significant cooling (realistic hot temperature ~2000K)
     let cell = sim.cells.values_mut().next().unwrap();
-    cell.layers[0].set_energy_joules(5.0e20);
+    let volume = cell.layers[0].volume_km3();
+    let hot_energy = temp_utils::volume_kelvin_to_joules(volume, 2000.0, 1000.0); // Using 1000 J/(kg·K) specific heat
+    cell.layers[0].set_energy_joules(hot_energy);
     sim
 }
 
