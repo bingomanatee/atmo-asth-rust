@@ -158,22 +158,48 @@ impl AsthCellLithosphere {
 
     /// Grow this lithosphere layer by the specified amount
     /// Returns the excess height if growth exceeds max individual layer height
-    pub fn grow(&mut self, growth_km: f64, area_km2: f64, max_layer_height_km: f64) -> f64 {
+    pub fn grow(&mut self, growth_km: f64, area_km2: f64, max_layer_height_km: f64, formation_temp_k: f64) -> f64 {
         if growth_km <= 0.0 {
             return 0.0;
         }
 
         let new_height = self.height_km + growth_km;
-        let new_energy = self.energy_joules() * growth_km / self.height_km.min(2.0);
-        self.add_energy(new_energy);
-        self.height_km = new_height.min(max_layer_height_km);
 
         if new_height <= max_layer_height_km {
-            self.set_volume_km3(new_height * area_km2);
+            // Growth fits within this layer
+            self.height_km = new_height;
+            let new_volume = area_km2 * self.height_km;
+            self.set_volume_km3(new_volume);
+
+            // Set temperature to formation temperature if layer has no energy
+            if self.energy_joules() <= 0.0 {
+                let mass_kg = self.mass_kg();
+                let specific_heat = self.specific_heat();
+                if mass_kg > 0.0 && specific_heat > 0.0 {
+                    let target_energy = mass_kg * specific_heat * formation_temp_k;
+                    self.add_energy(target_energy);
+                }
+            }
+
             0.0 // No excess
         } else {
-            self.set_volume_km3(area_km2 * max_layer_height_km);
-            ((new_height * area_km2) - self.volume_km3()).min(area_km2 * max_layer_height_km) // if for some reason we craxy town grow past twice, cap to a full new layer
+            // Growth exceeds max layer height - cap this layer and return excess
+            let excess = new_height - max_layer_height_km;
+            self.height_km = max_layer_height_km;
+            let new_volume = area_km2 * self.height_km;
+            self.set_volume_km3(new_volume);
+
+            // Set temperature to formation temperature if layer has no energy
+            if self.energy_joules() <= 0.0 {
+                let mass_kg = self.mass_kg();
+                let specific_heat = self.specific_heat();
+                if mass_kg > 0.0 && specific_heat > 0.0 {
+                    let target_energy = mass_kg * specific_heat * formation_temp_k;
+                    self.add_energy(target_energy);
+                }
+            }
+
+            excess
         }
     }
 

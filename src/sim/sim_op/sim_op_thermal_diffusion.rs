@@ -1,7 +1,7 @@
 use crate::asth_cell::AsthCellColumn;
 use crate::energy_mass::{EnergyMass, StandardEnergyMass};
-use crate::sim::simulation::Simulation;
 use crate::sim::sim_op::{SimOp, SimOpHandle};
+use crate::sim::simulation::Simulation;
 
 /// Thermal Diffusion Operator
 ///
@@ -92,12 +92,20 @@ impl ThermalDiffusionOp {
         }
 
         columns.extend(asth_columns);
+        println!("--------- columns ---------");
 
         for (index, pointer) in columns.iter().enumerate() {
             if (index > 0) {
                 let prev_pointer = columns.get(index - 1).unwrap();
                 self.transfer_energy(years, column, pointer, prev_pointer)
             }
+        }
+        
+        for c in columns {
+            println!("type: {}, energy: {} J, volume: {} km3, temp: {} K", match c.layer_type {
+                LayerType::Lith => "Lithosphere",
+                LayerType::Asth => "Atheosphere"
+            }, c.energy_mass.energy(), c.energy_mass.volume(), c.energy_mass.kelvin())
         }
     }
 
@@ -111,20 +119,22 @@ impl ThermalDiffusionOp {
         // Use the energy_mass from LayerPointer
         let from_mass = &from_pointer.energy_mass;
         let to_mass = &to_pointer.energy_mass;
-        if from_pointer.index >= match from_pointer.layer_type {
-            LayerType::Lith => column.lithospheres_next.len().min(column.lith_layers.len()),
-            LayerType::Asth => column.asth_layers.len().min(column.asth_layers_next.len())
-        } {
+        if from_pointer.index
+            >= match from_pointer.layer_type {
+                LayerType::Lith => column.lithospheres_next.len().min(column.lith_layers.len()),
+                LayerType::Asth => column.asth_layers.len().min(column.asth_layers_next.len()),
+            }
+        {
             return;
         }
         // Delegate calculation
         let base_energy_transfer =
             from_mass.calculate_thermal_transfer(to_mass, self.diffusion_rate, years);
 
-        let (source_height_km, source_energy) = if base_energy_transfer > 0.0 {
-            (from_pointer.height_km, from_pointer.energy_mass.energy()) // from is hotter
+        let source_energy = if base_energy_transfer > 0.0 {
+            from_pointer.energy_mass.energy() // from is hotter
         } else {
-            (to_pointer.height_km, to_pointer.energy_mass.energy()) // to is hotter
+            to_pointer.energy_mass.energy() // to is hotter
         };
 
         let energy_transfer = base_energy_transfer;
@@ -181,10 +191,14 @@ impl ThermalDiffusionOp {
         {
             // Radiate from top lithosphere layer
             let (_, top_lithosphere, _) = column.lithosphere(0);
-            top_lithosphere.energy_mass_mut().radiate_to_space(area, years);
+            top_lithosphere
+                .energy_mass_mut()
+                .radiate_to_space(area, years);
         } else {
             let (_, top_layer_next) = column.asth_layer(0);
-            top_layer_next.energy_mass_mut().radiate_to_space(area, years);
+            top_layer_next
+                .energy_mass_mut()
+                .radiate_to_space(area, years);
         }
     }
 }
@@ -210,8 +224,8 @@ mod tests {
     use super::*;
     use crate::constants::EARTH_RADIUS_KM;
     use crate::planet::Planet;
-    use h3o::Resolution;
     use crate::sim::simulation::{SimProps, Simulation};
+    use h3o::Resolution;
 
     #[test]
     fn test_thermal_diffusion_creation() {

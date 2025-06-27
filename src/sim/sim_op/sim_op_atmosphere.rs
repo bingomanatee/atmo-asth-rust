@@ -56,12 +56,12 @@ impl AtmosphereOp {
     fn apply_stefan_boltzmann_cooling(&self, sim: &mut Simulation, years: f64) {
         for column in sim.cells.values_mut() {
             // Get surface temperature and area
-            let surface_temp = if !column.lith_layers.is_empty() {
+            let surface_temp = if !column.lith_layers_t.is_empty() {
                 // Lithosphere surface temperature
-                column.lith_layers.last().unwrap().kelvin()
+                column.lith_layers_t.last().unwrap().0.kelvin()
             } else {
                 // Asthenosphere surface temperature
-                column.asth_layers.first().unwrap().kelvin()
+                column.asth_layers_t.first().unwrap().0.kelvin()
             };
 
             let area_km2 = column.area();
@@ -165,11 +165,11 @@ impl AtmosphereOp {
     /// Remove energy from the surface layer (lithosphere or asthenosphere) - MODIFY NEXT ARRAYS!
     /// For thin lithosphere, also allows asthenosphere cooling through the lithosphere
     fn remove_surface_energy(&self, column: &mut crate::asth_cell::AsthCellColumn, energy_to_remove: f64) {
-        if !column.lith_layers.is_empty() {
+        if !column.lith_layers_t.is_empty() {
             let lithosphere_thickness = column.total_lithosphere_height();
 
             // Remove from top lithosphere layer - NEXT ARRAY!
-            let top_lithosphere = column.lithospheres_next.last_mut().unwrap();
+            let top_lithosphere = &mut column.lith_layers_t.last_mut().unwrap().1;
             let current_energy = top_lithosphere.energy_joules();
             let energy_to_remove_clamped = energy_to_remove.min(current_energy * 0.9); // Max 90% per step
             top_lithosphere.remove_energy(energy_to_remove_clamped);
@@ -181,7 +181,7 @@ impl AtmosphereOp {
                 let asthenosphere_cooling = energy_to_remove * asthenosphere_cooling_fraction;
 
                 // Remove energy from top asthenosphere layer
-                let top_layer = column.asth_layers_next.first_mut().unwrap();
+                let top_layer = &mut column.asth_layers_t.first_mut().unwrap().1;
                 let current_asth_energy = top_layer.energy_joules();
                 let asth_energy_to_remove = asthenosphere_cooling.min(current_asth_energy * 0.5); // Max 50% per step
                 let energy_after_cooling = current_asth_energy - asth_energy_to_remove;
@@ -189,7 +189,7 @@ impl AtmosphereOp {
             }
         } else {
             // Remove from top asthenosphere layer - NEXT ARRAY!
-            let top_layer = column.asth_layers_next.first_mut().unwrap();
+            let top_layer = &mut column.asth_layers_t.first_mut().unwrap().1;
             let current_energy = top_layer.energy_joules();
             let energy_to_remove_clamped = energy_to_remove.min(current_energy * 0.9); // Max 90% per step
             let energy_after_cooling = current_energy - energy_to_remove_clamped;
@@ -253,12 +253,12 @@ impl SimOp for AtmosphereOp {
         // Calculate outgassing from all cells
         for column in sim.cells.values() {
             // Get surface conditions
-            let surface_temp = if !column.lith_layers.is_empty() {
+            let surface_temp = if !column.lith_layers_t.is_empty() {
                 // Lithosphere surface temperature
-                column.lith_layers.last().unwrap().kelvin()
+                column.lith_layers_t.last().unwrap().0.kelvin()
             } else {
                 // Asthenosphere surface temperature
-                column.asth_layers.first().unwrap().kelvin()
+                column.asth_layers_t.first().unwrap().0.kelvin()
             };
             
             let lithosphere_thickness = column.total_lithosphere_height();

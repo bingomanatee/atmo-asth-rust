@@ -29,7 +29,7 @@ impl SimOp for CoolingOp {
     fn update_sim(&mut self, sim: &mut Simulation) {
         for column in sim.cells.values_mut() {
             let lithosphere_km = column.total_lithosphere_height_next();
-            let (_, next_layer) = column.asth_layer(0);
+            let (_, next_layer) = &mut column.layer_mut(0);
 
             let cooling_per_year_per_cell = cooling_per_cell_per_year(sim.resolution, sim.planet.radius_km, lithosphere_km);
             let cooling = cooling_per_year_per_cell * sim.years_per_step as f64;

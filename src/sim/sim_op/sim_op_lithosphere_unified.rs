@@ -99,20 +99,20 @@ impl SimOp for LithosphereUnifiedOp {
             let scaled_val = (random_value + 1.0) / 2.0; // normalize to 0.0–1.0
 
             let material = self.pick_material(scaled_val);
-            column
-                .lithospheres_next
-                .push(AsthCellLithosphere::new(0.0, material, 0.0));
+            let new_layer = AsthCellLithosphere::new(0.0, material, 0.0);
+            column.lith_layers_t.push((new_layer.clone(), new_layer));
         }
     }
 
     fn update_sim(&mut self, sim: &mut Simulation) {
         for column in sim.cells.values_mut() {
-            let (surface_layer, _) = column.asth_layer(0);
+            let (surface_layer, _) = &column.layer(0);
             let surface_temp_k = surface_layer.kelvin();
             let area = column.area();
 
             let current_total_height = column.total_lithosphere_height_next();
-            let (_, bottom_layer, profile) = column.lithosphere(0);
+            let (_, bottom_layer) = &mut column.lithosphere_mut(0);
+            let profile = bottom_layer.profile();
 
             if surface_temp_k <= profile.max_lith_formation_temp_kv {
                 if current_total_height < profile.max_lith_height_km {
@@ -121,7 +121,7 @@ impl SimOp for LithosphereUnifiedOp {
                         bottom_layer.growth_per_year(surface_temp_k) * sim.years_per_step as f64;
                     if (growth_height > 0.0) {
                         let excess_mass =
-                            bottom_layer.grow(growth_height, area, sim.lith_layer_height_km);
+                            bottom_layer.grow(growth_height, area, sim.lith_layer_height_km, surface_temp_k);
                         if (excess_mass > 0.0) {
                             let mt = bottom_layer.material_type();
                             column.add_bottom_lithosphere(mt, excess_mass / area);
@@ -134,11 +134,14 @@ impl SimOp for LithosphereUnifiedOp {
                 if bottom_layer.height_km > 0.0 {
                     let energy = bottom_layer.process_melting(surface_temp_k, sim.years_per_step);
                     if (energy > 0.0) {
-                        let (_, top_asth_layer) = column.asth_layer(0);
+                        let (_, top_asth_layer) = &mut column.layer_mut(0);
                         top_asth_layer.add_energy(energy);
                     }
                 }
             }
+
+            // Clean up any empty lithosphere layers after processing
+            column.cleanup_empty_lithosphere_layers();
         }
     }
 }

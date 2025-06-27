@@ -19,10 +19,8 @@ use serde::{Deserialize, Serialize};
 pub struct AsthCellColumn {
     pub energy_joules: f64,
     pub volume_km3: f64,
-    pub asth_layers: Vec<AsthCellAsthLayer>,
-    pub asth_layers_next: Vec<AsthCellAsthLayer>,
-    pub lith_layers: Vec<AsthCellLithosphere>,
-    pub lithospheres_next: Vec<AsthCellLithosphere>,
+    pub asth_layers_t: Vec<(AsthCellAsthLayer, AsthCellAsthLayer)>,
+    pub lith_layers_t: Vec<(AsthCellLithosphere, AsthCellLithosphere)>,
     pub layer_height_km: f64,
     pub planet_radius_km: f64,
     pub layer_count: usize,
@@ -55,36 +53,29 @@ impl AsthCellColumn {
         // Calculate correct layer volume: area × layer_height_km
         let layer_volume = params.volume * params.layer_height_km;
 
+        let initial_asth_layer = AsthCellAsthLayer::new_with_material(
+            MaterialType::Silicate,
+            params.surface_temp_k,
+            layer_volume,
+            0,
+        );
+        let initial_lith_layer = crate::asth_cell::asth_cell_lithosphere::AsthCellLithosphere::new(
+            0.0,
+            MaterialType::Silicate,
+            0.0,
+        );
+
         let cell_column = AsthCellColumn {
             energy_joules: 0.0,
             volume_km3: 0.0,
             neighbor_cell_ids: H3Utils::neighbors_for(params.cell_index),
             // Create layer 0 at surface temperature - projection will handle geothermal gradient for deeper layers
-            asth_layers: vec![AsthCellAsthLayer::new_with_material(
-                MaterialType::Silicate,
-                params.surface_temp_k,
-                layer_volume,
-                0,
-            )],
+            asth_layers_t: vec![(initial_asth_layer.clone(), initial_asth_layer)],
             cell_index: params.cell_index,
             layer_height_km: params.layer_height_km,
             layer_count: params.layer_count,
-            asth_layers_next: vec![],
             planet_radius_km: params.planet_radius_km,
-            lith_layers: vec![
-                crate::asth_cell::asth_cell_lithosphere::AsthCellLithosphere::new(
-                    0.0,
-                    MaterialType::Silicate,
-                    0.0,
-                ),
-            ],
-            lithospheres_next: vec![
-                crate::asth_cell::asth_cell_lithosphere::AsthCellLithosphere::new(
-                    0.0,
-                    MaterialType::Silicate,
-                    0.0,
-                ),
-            ],
+            lith_layers_t: vec![(initial_lith_layer.clone(), initial_lith_layer)],
         };
 
         cell_column.project(
@@ -94,17 +85,14 @@ impl AsthCellColumn {
         )
     }
 
-    /// Get the total height of all lithosphere layers
+    /// Get the total height of all current lithosphere layers
     pub fn total_lithosphere_height(&self) -> f64 {
-        self.lith_layers.iter().map(|layer| layer.height_km).sum()
+        self.lith_layers_t.iter().map(|(current, _)| current.height_km).sum()
     }
 
     /// Get the total height of all next lithosphere layers
     pub fn total_lithosphere_height_next(&self) -> f64 {
-        self.lithospheres_next
-            .iter()
-            .map(|layer| layer.height_km)
-            .sum()
+        self.lith_layers_t.iter().map(|(_, next)| next.height_km).sum()
     }
 
     /// Get the area of this cell column in km²
@@ -113,67 +101,62 @@ impl AsthCellColumn {
         H3Utils::cell_area(self.cell_index.resolution(), self.planet_radius_km)
     }
 
-    fn reconcile_lith(&mut self) {
-        while self.lith_layers.len() != self.lithospheres_next.len() {
-            for (index, curr) in self.lith_layers.iter().enumerate() {
-                if index >= self.lithospheres_next.len() {
-                    self.lithospheres_next.insert(index, curr.clone());
-                }
-            }
 
-            for (index, curr) in self.lithospheres_next.iter().enumerate() {
-                if index >= self.lith_layers.len() {
-                    self.lith_layers.insert(index, curr.clone());
-                }
-            }
-        }
-    }
 
-    fn reconcile_asth(&mut self) {
-        while self.asth_layers.len() != self.asth_layers_next.len() {
-            for (index, curr) in self.asth_layers.iter().enumerate() {
-                if index >= self.asth_layers_next.len() {
-                    self.asth_layers_next.insert(index, curr.clone());
-                }
-            }
-
-            for (index, curr) in self.asth_layers_next.iter().enumerate() {
-                if index >= self.asth_layers.len() {
-                    self.asth_layers.insert(index, curr.clone());
-                }
-            }
-        }
-    }
-
-    /// Get the bottom lithosphere layer, returning (current, next, profile) where next is mutable
+    /// Get mutable reference to lithosphere layer tuple (current, next)
     /// Panics if no lithosphere exists - all lithospheres should be created during initialization
-    /// If next lithosphere is absent, clone the current lithosphere into next
-    /// Returns the profile of the next lithosphere as the third argument
-    /// Panics if the lithosphere profile cannot be found (game-ending error)
-    pub fn lithosphere(
-        &mut self,
-        layer_index: usize,
-    ) -> (
-        &AsthCellLithosphere,
-        &mut AsthCellLithosphere,
-        &'static crate::material::MaterialProfile,
-    ) {
-        self.reconcile_lith();
-        // Ensure the current layer exists (should be created by project method)
-        if layer_index >= self.lith_layers.len() {
+    pub fn lithosphere_mut(&mut self, layer_index: usize) -> &mut (AsthCellLithosphere, AsthCellLithosphere) {
+        // Ensure the layer exists
+        if layer_index >= self.lith_layers_t.len() {
             panic!(
-                "Current lithosphere {} does not exist. All layers should be created during initialization. Current layers: {}",
+                "Lithosphere layer {} does not exist. Current layers: {}",
                 layer_index,
-                self.asth_layers.len()
+                self.lith_layers_t.len()
             );
         }
 
-        // Return references to the layers
-        (
-            &self.lith_layers[layer_index],
-            &mut self.lithospheres_next[layer_index],
-            self.lith_layers[layer_index].profile(),
-        )
+        &mut self.lith_layers_t[layer_index]
+    }
+
+    /// Get immutable reference to lithosphere layer tuple (current, next)
+    pub fn lithosphere(&self, layer_index: usize) -> &(AsthCellLithosphere, AsthCellLithosphere) {
+        if layer_index >= self.lith_layers_t.len() {
+            panic!(
+                "Lithosphere layer {} does not exist. Current layers: {}",
+                layer_index,
+                self.lith_layers_t.len()
+            );
+        }
+
+        &self.lith_layers_t[layer_index]
+    }
+
+    /// Get mutable reference to asthenosphere layer tuple (current, next)
+    /// Panics if no asthenosphere layer exists
+    pub fn layer_mut(&mut self, layer_index: usize) -> &mut (AsthCellAsthLayer, AsthCellAsthLayer) {
+        // Ensure the layer exists
+        if layer_index >= self.asth_layers_t.len() {
+            panic!(
+                "Asthenosphere layer {} does not exist. Current layers: {}",
+                layer_index,
+                self.asth_layers_t.len()
+            );
+        }
+
+        &mut self.asth_layers_t[layer_index]
+    }
+
+    /// Get immutable reference to asthenosphere layer tuple (current, next)
+    pub fn layer(&self, layer_index: usize) -> &(AsthCellAsthLayer, AsthCellAsthLayer) {
+        if layer_index >= self.asth_layers_t.len() {
+            panic!(
+                "Asthenosphere layer {} does not exist. Current layers: {}",
+                layer_index,
+                self.asth_layers_t.len()
+            );
+        }
+
+        &self.asth_layers_t[layer_index]
     }
 
     /// Create a lithosphere with the specified material
@@ -181,9 +164,8 @@ impl AsthCellColumn {
     pub fn create_lithosphere(&mut self, material: MaterialType, height_km: f64, volume_km3: f64) {
         let lithosphere = AsthCellLithosphere::new(height_km, material, volume_km3);
 
-        // Add to both current and next
-        self.lith_layers.push(lithosphere.clone());
-        self.lithospheres_next.push(lithosphere);
+        // Add as tuple (current, next) - both start the same
+        self.lith_layers_t.push((lithosphere.clone(), lithosphere));
     }
 
     /// Add a new lithosphere layer at the bottom (becomes new layer 0)
@@ -191,45 +173,44 @@ impl AsthCellColumn {
     pub fn add_bottom_lithosphere(&mut self, material: MaterialType, height_km: f64) {
         let area = self.area();
         let volume_km3 = area * height_km;
-        let lithosphere = AsthCellLithosphere::new(height_km, material, volume_km3);
+
+        // Get formation temperature from the surface asthenosphere layer
+        let formation_temp_k = if let Some((surface_layer, _)) = self.asth_layers_t.first() {
+            surface_layer.kelvin()
+        } else {
+            1673.15 // Default formation temperature
+        };
+
+        let lithosphere = AsthCellLithosphere::new_with_temp(height_km, material, volume_km3, formation_temp_k);
 
         // Insert at index 0 (bottom) - all other layers shift up
-        self.lithospheres_next.insert(0, lithosphere);
+        self.lith_layers_t.insert(0, (lithosphere.clone(), lithosphere));
     }
 
-    /// Get a layer by index, returning (current, next) where next is mutable
-    /// If next layer is absent, clone the current layer into next
-    pub fn asth_layer(
-        &mut self,
-        layer_index: usize,
-    ) -> (&AsthCellAsthLayer, &mut AsthCellAsthLayer) {
-        // Ensure the current layer exists (should be created by project method)
-        self.reconcile_asth();
+    /// Remove empty lithosphere layers (height = 0 or volume = 0)
+    /// This prevents accumulation of empty layers that can cause ordering issues
+    pub fn cleanup_empty_lithosphere_layers(&mut self) {
+        // Remove empty layers from lith_layers_t
+        self.lith_layers_t.retain(|(current, next)| {
+            current.height_km > 0.001 && current.volume_km3() > 0.001 &&
+            next.height_km > 0.001 && next.volume_km3() > 0.001
+        });
 
-        if layer_index >= self.asth_layers.len() {
-            panic!(
-                "Current layer {} does not exist. All layers should be created during initialization. Current layers: {}",
-                layer_index,
-                self.asth_layers.len()
-            );
+        // Ensure we always have at least one lithosphere layer
+        if self.lith_layers_t.is_empty() {
+            let empty_layer = AsthCellLithosphere::new(0.0, crate::material::MaterialType::Silicate, 0.0);
+            self.lith_layers_t.push((empty_layer.clone(), empty_layer));
         }
-
-        // Ensure the next layers vector has this layer - clone from current if missing
-        while self.asth_layers_next.len() <= layer_index {
-            let current_layer = &self.asth_layers[self.asth_layers_next.len()];
-            self.asth_layers_next.push(current_layer.clone());
-        }
-
-        // Return references to the layers
-        (
-            &self.asth_layers[layer_index],
-            &mut self.asth_layers_next[layer_index],
-        )
     }
 
     pub fn commit_next_layers(&mut self) {
-        self.asth_layers.clone_from_slice(&self.asth_layers_next);
-        self.lith_layers = self.lithospheres_next.clone();
+        // Copy next state to current state for all layers
+        for (current, next) in self.asth_layers_t.iter_mut() {
+            *current = next.clone();
+        }
+        for (current, next) in self.lith_layers_t.iter_mut() {
+            *current = next.clone();
+        }
     }
 
     pub fn default_volume(&self) -> f64 {
@@ -242,11 +223,10 @@ impl AsthCellColumn {
         planet_radius: f64,
         surface_temp_k: f64,
     ) -> AsthCellColumn {
-        let mut layers: Vec<AsthCellAsthLayer> = self.asth_layers.clone();
-        let mut layers_next = self.asth_layers_next.clone();
+        let mut layers_t: Vec<(AsthCellAsthLayer, AsthCellAsthLayer)> = self.asth_layers_t.clone();
 
         // iterate over all the absent _current_ cells
-        for index in layers.len()..level_count {
+        for index in layers_t.len()..level_count {
             // Always use the correct volume calculation: area × layer_height_km
             let volume = self.default_volume();
 
@@ -256,20 +236,19 @@ impl AsthCellColumn {
                 surface_temp_k + crate::constants::GEOTHERMAL_GRADIENT_K_PER_KM * depth_km;
 
             // Create layer with target temperature and let EnergyMass calculate energy
-            layers.push(AsthCellAsthLayer::new_with_material(
+            let layer = AsthCellAsthLayer::new_with_material(
                 MaterialType::Silicate,
                 layer_temp,
                 volume,
                 index,
-            ));
+            );
+
+            // Add as tuple (current, next) - both start the same
+            layers_t.push((layer.clone(), layer));
         }
-        // Ensure layers_next has the correct size and copy layers
-        layers_next.clear();
-        layers_next.extend(layers.iter().cloned());
 
         AsthCellColumn {
-            asth_layers: layers,
-            asth_layers_next: layers_next,
+            asth_layers_t: layers_t,
             layer_count: level_count,
             ..self.clone()
         }
