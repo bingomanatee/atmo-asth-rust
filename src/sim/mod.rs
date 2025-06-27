@@ -71,7 +71,7 @@ mod tests {
             fn update_sim(&mut self, sim: &mut Simulation) {
                 self.update_count += 1;
                 for column in sim.cells.values_mut() {
-                    let (_, next_layer) = column.layer(0);
+                    let (_, next_layer) = column.asth_layer(0);
                     let current_energy = next_layer.energy_joules();
                     next_layer.set_energy_joules(current_energy * self.intensity);
                 }

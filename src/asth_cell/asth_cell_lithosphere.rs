@@ -9,6 +9,21 @@ pub struct AsthCellLithosphere {
 }
 
 impl AsthCellLithosphere {
+    pub fn growth_per_year(&self, surface_temp_k: f64) -> f64 {
+        let profile = self.profile();
+        profile.max_lith_growth_km_per_year
+            * if surface_temp_k <= profile.peak_lith_growth_temp_kv {
+            // At or below peak growth temperature - maximum growth
+            1.0
+        } else {
+            // Between peak and formation temperature - reduced growth
+            let temp_range = profile.max_lith_formation_temp_kv
+                - profile.peak_lith_growth_temp_kv;
+            let temp_above_peak = surface_temp_k - profile.peak_lith_growth_temp_kv;
+            (1.0 - (temp_above_peak / temp_range)).max(0.0)
+        }
+    }
+
     /// Create a new lithosphere with specified material, height, and volume
     /// Temperature defaults to 0K (will be set by thermal processes)
     pub fn new(height_km: f64, material: MaterialType, volume_km3: f64) -> AsthCellLithosphere {
@@ -116,7 +131,7 @@ impl AsthCellLithosphere {
         &self,
         temp_asth_k: f64,
     ) -> f64 {
-        
+
         let material = self.profile();
         if temp_asth_k <= material.max_lith_formation_temp_kv {
             return 0.0;
@@ -127,7 +142,7 @@ impl AsthCellLithosphere {
         let energy_per_m3 = material.specific_heat_capacity_j_per_kg_k
             * material.density_kg_m3
             * delta_t;
-        
+
         // Joules per year per m²
         let thickness_m = self.height_km * 1000.0;
         let flux_w_m2 = material.thermal_conductivity_w_m_k * delta_t / thickness_m; // W/m²
@@ -139,5 +154,69 @@ impl AsthCellLithosphere {
 
         // Return in km/year
         melt_m / 1000.0
+    }
+
+    /// Grow this lithosphere layer by the specified amount
+    /// Returns the excess height if growth exceeds max individual layer height
+    pub fn grow(&mut self, growth_km: f64, area_km2: f64, max_layer_height_km: f64) -> f64 {
+        if growth_km <= 0.0 {
+            return 0.0;
+        }
+
+        let new_height = self.height_km + growth_km;
+        let new_energy = self.energy_joules() * growth_km / self.height_km.min(2.0);
+        self.add_energy(new_energy);
+        
+        if new_height <= max_layer_height_km {
+            self.set_volume_km3(new_height * area_km2);
+            0.0 // No excess
+        } else {
+            self.set_volume_km3(area_km2 * max_layer_height_km);
+            ((new_height * area_km2) - self.volume_km3()).min(area_km2 * max_layer_height_km) // if for some reason we craxy town grow past twice, cap to a full new layer
+        }
+    }
+
+    /// Melt this lithosphere layer by the specified amount
+    /// Returns the amount actually melted (may be less than requested if layer is too thin)
+    pub fn melt(&mut self, melt_km: f64) -> f64 {
+        if melt_km <= 0.0 || self.height_km <= 0.0 {
+            return 0.0;
+        }
+        let actual_melt = melt_km.min(self.height_km);
+        self.height_km -= actual_melt;
+        actual_melt
+    }
+
+    /// Process melting from asthenosphere temperature and add melted energy back to asthenosphere
+    /// Returns energy removed
+    pub fn process_melting(&mut self, asthenosphere_temp_k: f64, years_per_step: u32) -> f64 {
+        if self.height_km <= 0.0 {
+            return 0.0;
+        }
+
+        // Store original height and energy before melting
+        let original_height = self.height_km;
+        let original_energy = self.energy_joules();
+
+        // Calculate melting rate using the existing melt_from_below_km_per_year function
+        let melt_rate_km_per_year = self.melt_from_below_km_per_year(asthenosphere_temp_k);
+
+        if melt_rate_km_per_year > 0.0 {
+            let melt_rate_km_per_step = melt_rate_km_per_year * years_per_step as f64;
+
+            let melted_height = self.melt(melt_rate_km_per_step);
+
+            // Add melted energy back to asthenosphere
+            if melted_height > 0.0 && original_height > 0.0 {
+                // Melted energy is proportional to the fraction of layer that melted
+                let new_volume = self.volume_km3() * (self.height_km / original_height);
+                self.set_volume_km3(new_volume);
+                let melted_energy = original_energy * (melted_height / original_height);
+                self.remove_energy(melted_energy);
+                return melted_energy;
+            }
+        }
+
+        0.0
     }
 }

@@ -84,7 +84,7 @@ mod tests {
         // Record initial bottom layer energy using layer() method
         let cell = sim.cells.values_mut().next().unwrap();
         let bottom_layer_index = cell.asth_layers.len() - 1;
-        let (current_bottom, _) = cell.layer(bottom_layer_index);
+        let (current_bottom, _) = cell.asth_layer(bottom_layer_index);
         let initial_bottom_energy = current_bottom.energy_joules();
         let initial_bottom_temp = current_bottom.kelvin();
 
@@ -98,7 +98,7 @@ mod tests {
 
         // Verify energy was added to bottom layer using layer() method
         let cell = sim.cells.values_mut().next().unwrap();
-        let (final_current_bottom, _) = cell.layer(bottom_layer_index);
+        let (final_current_bottom, _) = cell.asth_layer(bottom_layer_index);
         let final_bottom_energy = final_current_bottom.energy_joules();
         let final_bottom_temp = final_current_bottom.kelvin();
 

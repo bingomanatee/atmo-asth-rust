@@ -3,7 +3,7 @@ use super::serialize_cell_indexes::{
     serialize_neighbor_cells,
 };
 use crate::material::MaterialType;
-pub(crate) use crate::asth_cell::asth_cell_layer::AsthCellLayer;
+pub(crate) use crate::asth_cell::asth_cell_asth_layer::AsthCellAsthLayer;
 use crate::asth_cell::energy_at_layer::energy_at_layer;
 use crate::asth_cell::AsthCellLithosphere;
 use crate::constants::{ASTHENOSPHERE_SURFACE_START_TEMP_K, EARTH_RADIUS_KM, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K};
@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 pub struct AsthCellColumn {
     pub energy_joules: f64,
     pub volume_km3: f64,
-    pub asth_layers: Vec<AsthCellLayer>,
-    pub asth_layers_next: Vec<AsthCellLayer>,
+    pub asth_layers: Vec<AsthCellAsthLayer>,
+    pub asth_layers_next: Vec<AsthCellAsthLayer>,
     pub lithospheres: Vec<AsthCellLithosphere>,
     pub lithospheres_next: Vec<AsthCellLithosphere>,
     pub layer_height_km: f64,
@@ -58,7 +58,7 @@ impl AsthCellColumn {
             volume_km3: 0.0,
             neighbor_cell_ids: H3Utils::neighbors_for(params.cell_index),
             // Create layer 0 at surface temperature - projection will handle geothermal gradient for deeper layers
-            asth_layers: vec![AsthCellLayer::new_with_material(MaterialType::Silicate, params.surface_temp_k, layer_volume, 0)],
+            asth_layers: vec![AsthCellAsthLayer::new_with_material(MaterialType::Silicate, params.surface_temp_k, layer_volume, 0)],
             cell_index: params.cell_index,
             layer_height_km: params.layer_height_km,
             layer_count: params.layer_count,
@@ -157,9 +157,24 @@ impl AsthCellColumn {
         self.lithospheres_next.push(lithosphere);
     }
 
+
+
+    /// Add a new lithosphere layer at the bottom (becomes new layer 0)
+    /// All existing layers shift up in index
+    pub fn add_bottom_lithosphere(&mut self, material: MaterialType, height_km: f64) {
+        let area = self.area();
+        let volume_km3 = area * height_km;
+        let lithosphere = AsthCellLithosphere::new(height_km, material, volume_km3);
+
+        // Insert at index 0 (bottom) - all other layers shift up
+        self.lithospheres_next.insert(0, lithosphere);
+    }
+
+
+
     /// Get a layer by index, returning (current, next) where next is mutable
     /// If next layer is absent, clone the current layer into next
-    pub fn layer(&mut self, layer_index: usize) -> (&AsthCellLayer, &mut AsthCellLayer) {
+    pub fn asth_layer(&mut self, layer_index: usize) -> (&AsthCellAsthLayer, &mut AsthCellAsthLayer) {
         // Ensure the current layer exists (should be created by project method)
         if layer_index >= self.asth_layers.len() {
             panic!(
@@ -197,7 +212,7 @@ impl AsthCellColumn {
         planet_radius: f64,
         surface_temp_k: f64,
     ) -> AsthCellColumn {
-        let mut layers: Vec<AsthCellLayer> = self.asth_layers.clone();
+        let mut layers: Vec<AsthCellAsthLayer> = self.asth_layers.clone();
         let mut layers_next = self.asth_layers_next.clone();
 
         // iterate over all the absent _current_ cells
@@ -210,7 +225,7 @@ impl AsthCellColumn {
             let layer_temp = surface_temp_k + crate::constants::GEOTHERMAL_GRADIENT_K_PER_KM * depth_km;
 
             // Create layer with target temperature and let EnergyMass calculate energy
-            layers.push(AsthCellLayer::new_with_material(MaterialType::Silicate, layer_temp, volume, index));
+            layers.push(AsthCellAsthLayer::new_with_material(MaterialType::Silicate, layer_temp, volume, index));
         }
         // Ensure layers_next has the correct size and copy layers
         layers_next.clear();
@@ -277,7 +292,7 @@ mod tests {
 
         // Test accessing existing layer
         {
-            let (current, next) = cell.layer(0);
+            let (current, next) = cell.asth_layer(0);
             assert_eq!(current.level, 0);
             assert_eq!(next.level, 0);
 
@@ -288,7 +303,7 @@ mod tests {
 
         // Test accessing layer 1 (should exist from initialization)
         {
-            let (current_1, next_1) = cell.layer(1);
+            let (current_1, next_1) = cell.asth_layer(1);
             assert_eq!(current_1.level, 1);
             assert_eq!(next_1.level, 1);
 
@@ -301,7 +316,7 @@ mod tests {
 
         // Access a layer that might not be in next yet
         {
-            let (_, next_layer) = cell.layer(1);
+            let (_, next_layer) = cell.asth_layer(1);
             next_layer.set_energy_joules(1500.0);
         }
 
@@ -311,7 +326,7 @@ mod tests {
 
         // Test accessing multiple layers separately
         {
-            let (_, next_0) = cell.layer(0);
+            let (_, next_0) = cell.asth_layer(0);
             next_0.set_energy_joules(3000.0);
         }
 

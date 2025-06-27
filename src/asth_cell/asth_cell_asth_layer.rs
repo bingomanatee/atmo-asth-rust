@@ -3,12 +3,12 @@ use crate::energy_mass::{EnergyMass, StandardEnergyMass};
 use crate::material::MaterialType;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct AsthCellLayer {
+pub struct AsthCellAsthLayer {
     pub(crate) energy_mass: StandardEnergyMass,
     pub level: usize,
 }
 
-impl AsthCellLayer {
+impl AsthCellAsthLayer {
     /// Create a new layer with specified material, temperature, volume, and level
     pub fn new_with_material(material_type: MaterialType, temperature_k: f64, volume_km3: f64, level: usize) -> Self {
         Self {
@@ -155,20 +155,20 @@ impl AsthCellLayer {
     /// Merge another layer into this one
     /// Energy and volume are directly added, resulting in a new blended temperature
     /// The other layer must have compatible material properties
-    pub fn merge_layer(&mut self, other: &AsthCellLayer) {
+    pub fn merge_layer(&mut self, other: &AsthCellAsthLayer) {
         self.energy_mass.merge_em(&other.energy_mass);
     }
 
     /// Remove a specified volume from this layer, returning a new layer with that volume
     /// The removed layer will have the same temperature as the original
     /// This layer will have proportionally less volume and energy but maintain the same temperature
-    pub fn remove_volume_as_layer(&mut self, volume_to_remove: f64) -> AsthCellLayer {
+    pub fn remove_volume_as_layer(&mut self, volume_to_remove: f64) -> AsthCellAsthLayer {
         let removed_energy_mass = self.energy_mass.remove_volume(volume_to_remove);
         // Downcast the Box<dyn EnergyMass> back to StandardEnergyMass
         let any_box: Box<dyn std::any::Any> = removed_energy_mass;
         let standard_energy_mass = *any_box.downcast::<StandardEnergyMass>()
             .expect("Expected StandardEnergyMass");
-        AsthCellLayer {
+        AsthCellAsthLayer {
             energy_mass: standard_energy_mass,
             level: self.level, // Same level as the source
         }
@@ -177,13 +177,13 @@ impl AsthCellLayer {
     /// Split this layer into two parts by volume fraction
     /// Returns a new layer with the specified fraction, this one keeps the remainder
     /// Both will have the same temperature as the original
-    pub fn split_layer_by_fraction(&mut self, fraction: f64) -> AsthCellLayer {
+    pub fn split_layer_by_fraction(&mut self, fraction: f64) -> AsthCellAsthLayer {
         let split_energy_mass = self.energy_mass.split_by_fraction(fraction);
         // Downcast the Box<dyn EnergyMass> back to StandardEnergyMass
         let any_box: Box<dyn std::any::Any> = split_energy_mass;
         let standard_energy_mass = *any_box.downcast::<StandardEnergyMass>()
             .expect("Expected StandardEnergyMass");
-        AsthCellLayer {
+        AsthCellAsthLayer {
             energy_mass: standard_energy_mass,
             level: self.level, // Same level as the source
         }
@@ -199,7 +199,7 @@ mod tests {
 
     #[test]
     fn test_temperature_energy_conversion_roundtrip() {
-        let mut layer = AsthCellLayer::new_with_material(MaterialType::Silicate, 1000.0, 100.0, 0);
+        let mut layer = AsthCellAsthLayer::new_with_material(MaterialType::Silicate, 1000.0, 100.0, 0);
 
         // Test various temperatures
         let test_temperatures = vec![
@@ -228,7 +228,7 @@ mod tests {
 
     #[test]
     fn test_temperature_setting_validation() {
-        let mut layer = AsthCellLayer::new_with_material(MaterialType::Silicate, 1000.0, 50.0, 1);
+        let mut layer = AsthCellAsthLayer::new_with_material(MaterialType::Silicate, 1000.0, 50.0, 1);
 
         // Test that setting specific lithosphere-relevant temperatures works
         let lithosphere_temps = vec![
@@ -254,7 +254,7 @@ mod tests {
         let volumes = vec![10.0, 50.0, 100.0, 200.0];
 
         for volume in volumes {
-            let mut layer = AsthCellLayer::new_with_material(MaterialType::Silicate, test_temp, volume, 0);
+            let mut layer = AsthCellAsthLayer::new_with_material(MaterialType::Silicate, test_temp, volume, 0);
 
             let actual_temp = layer.kelvin();
 
@@ -272,8 +272,8 @@ mod tests {
         use crate::material::MaterialType;
 
         // Test that we can create layers with different materials and access their profiles
-        let silicate_layer = AsthCellLayer::new_with_material(MaterialType::Silicate, 1673.15, 100.0, 0);
-        let basaltic_layer = AsthCellLayer::new_with_material(MaterialType::Basaltic, 1573.15, 100.0, 0);
+        let silicate_layer = AsthCellAsthLayer::new_with_material(MaterialType::Silicate, 1673.15, 100.0, 0);
+        let basaltic_layer = AsthCellAsthLayer::new_with_material(MaterialType::Basaltic, 1573.15, 100.0, 0);
 
         // Test that we can access material profiles
         let silicate_profile = silicate_layer.profile();
@@ -301,7 +301,7 @@ mod tests {
         let test_volume = 100.0; // km³
 
         // Test Silicate
-        let mut silicate_layer = AsthCellLayer::new_with_material(MaterialType::Silicate, 1000.0, test_volume, 0);
+        let mut silicate_layer = AsthCellAsthLayer::new_with_material(MaterialType::Silicate, 1000.0, test_volume, 0);
         let silicate_profile = silicate_layer.profile();
 
         // Calculate expected energy for a specific temperature
@@ -323,7 +323,7 @@ mod tests {
                 "Temperature should be {} K, got {} K", target_temp, actual_temp);
 
         // Test Basaltic
-        let mut basaltic_layer = AsthCellLayer::new_with_material(MaterialType::Basaltic, 1000.0, test_volume, 0);
+        let mut basaltic_layer = AsthCellAsthLayer::new_with_material(MaterialType::Basaltic, 1000.0, test_volume, 0);
         let basaltic_profile = basaltic_layer.profile();
 
         let basaltic_target_temp = 1573.15; // Basaltic peak growth temperature
@@ -350,8 +350,8 @@ mod tests {
         use crate::material::MaterialType;
 
         // Simple test to validate that temperature setting works correctly
-        let layer1 = AsthCellLayer::new_with_material(MaterialType::Silicate, 1673.15, 100.0, 0);
-        let layer2 = AsthCellLayer::new_with_material(MaterialType::Basaltic, 1573.15, 100.0, 0);
+        let layer1 = AsthCellAsthLayer::new_with_material(MaterialType::Silicate, 1673.15, 100.0, 0);
+        let layer2 = AsthCellAsthLayer::new_with_material(MaterialType::Basaltic, 1573.15, 100.0, 0);
 
         // Test that temperatures are set correctly
         assert!((layer1.temperature() - 1673.15).abs() < 0.01,
@@ -370,7 +370,7 @@ mod tests {
         use crate::material::MaterialType;
 
         // Test that setting Kelvin temperature and getting it back works correctly
-        let mut layer = AsthCellLayer::new_with_material(MaterialType::Silicate, 1000.0, 100.0, 0);
+        let mut layer = AsthCellAsthLayer::new_with_material(MaterialType::Silicate, 1000.0, 100.0, 0);
 
         // Test various temperatures relevant to lithosphere formation
         let test_temps = vec![
@@ -452,8 +452,8 @@ mod tests {
 
     #[test]
     fn test_layer_merge_and_split() {
-        let mut layer1 = AsthCellLayer::new_with_material(MaterialType::Silicate, 1600.0, 100.0, 0); // Hot layer
-        let layer2 = AsthCellLayer::new_with_material(MaterialType::Silicate, 1200.0, 50.0, 0);      // Cool layer
+        let mut layer1 = AsthCellAsthLayer::new_with_material(MaterialType::Silicate, 1600.0, 100.0, 0); // Hot layer
+        let layer2 = AsthCellAsthLayer::new_with_material(MaterialType::Silicate, 1200.0, 50.0, 0);      // Cool layer
 
         let initial_temp1 = layer1.kelvin();
         let initial_volume1 = layer1.volume_km3();

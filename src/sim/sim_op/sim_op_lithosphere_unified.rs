@@ -1,22 +1,22 @@
-use crate::sim::sim_op::{SimOp, SimOpHandle};
-use crate::sim::simulation::Simulation;
-use crate::material::MaterialType;
 use crate::asth_cell::AsthCellLithosphere;
 use crate::h3_utils::H3Utils;
+use crate::material::MaterialType;
+use crate::sim::sim_op::{SimOp, SimOpHandle};
+use crate::sim::simulation::Simulation;
 use noise::{NoiseFn, Perlin};
 
 /// Unified Lithosphere Operator
-/// 
+///
 /// This operator handles both lithosphere formation and melting in a single, unified system:
-/// 
+///
 /// **Formation**: When asthenosphere temperature drops below material formation threshold:
 /// - Grows lithosphere based on material-specific growth rates
 /// - Respects maximum height limits per material
-/// 
+///
 /// **Melting**: When asthenosphere temperature exceeds formation threshold:
 /// - Melts lithosphere back into magma using `melt_from_below_km_per_year`
 /// - Adds melted energy back to asthenosphere
-/// 
+///
 /// This creates the complete thermal cycle:
 /// 1. Cool → Lithosphere forms → Insulation → Less cooling → Temperature rises
 /// 2. Hot → Lithosphere melts → Less insulation → More cooling → Temperature drops
@@ -24,17 +24,17 @@ use noise::{NoiseFn, Perlin};
 pub struct LithosphereUnifiedOp {
     /// Material distribution for lithosphere formation
     pub materials: Vec<(MaterialType, f64)>,
-    
+
     /// Random seed for material distribution
     pub seed: u32,
-    
+
     /// Noise scale for material variation
     pub scale: f64,
 }
 
 impl LithosphereUnifiedOp {
     /// Create a new unified lithosphere operator
-    /// 
+    ///
     /// # Arguments
     /// * `materials` - Vector of (MaterialType, frequency) pairs for lithosphere formation
     /// * `seed` - Random seed for material distribution
@@ -56,9 +56,13 @@ impl LithosphereUnifiedOp {
     fn pick_material(&self, noise_value: f64) -> MaterialType {
         // Normalize frequencies to sum to 1.0
         let total_freq: f64 = self.materials.iter().map(|(_, freq)| freq).sum();
-        
+
         if total_freq == 0.0 {
-            return self.materials.first().map(|(mat, _)| *mat).unwrap_or(MaterialType::Silicate);
+            return self
+                .materials
+                .first()
+                .map(|(mat, _)| *mat)
+                .unwrap_or(MaterialType::Silicate);
         }
 
         let mut cumulative = 0.0;
@@ -72,7 +76,10 @@ impl LithosphereUnifiedOp {
         }
 
         // Fallback to first material
-        self.materials.first().map(|(mat, _)| *mat).unwrap_or(MaterialType::Silicate)
+        self.materials
+            .first()
+            .map(|(mat, _)| *mat)
+            .unwrap_or(MaterialType::Silicate)
     }
 }
 
@@ -92,95 +99,43 @@ impl SimOp for LithosphereUnifiedOp {
             let scaled_val = (random_value + 1.0) / 2.0; // normalize to 0.0–1.0
 
             let material = self.pick_material(scaled_val);
-            column.lithospheres_next.push(AsthCellLithosphere::new(0.0, material, 0.0));
+            column
+                .lithospheres_next
+                .push(AsthCellLithosphere::new(0.0, material, 0.0));
         }
     }
 
     fn update_sim(&mut self, sim: &mut Simulation) {
         for column in sim.cells.values_mut() {
-            // Get the surface layer temperature (asthenosphere temperature)
-            let surface_temp_k = if let Some(surface_layer) = column.asth_layers.first() {
-                surface_layer.kelvin()
-            } else {
-                continue; // Skip if no surface layer
-            };
-
-            // Calculate area once to avoid borrowing issues
+            let (surface_layer, _) = column.asth_layer(0);
+            let surface_temp_k = surface_layer.kelvin();
             let area = column.area();
 
-            // Check total lithosphere height limit before processing layers
             let current_total_height = column.total_lithosphere_height_next();
+            let (_, bottom_layer, profile) = column.lithosphere(0);
 
-            // Process each lithosphere layer
-            for lithosphere in column.lithospheres_next.iter_mut() {
-                let profile = lithosphere.profile();
-
-                if surface_temp_k <= profile.max_lith_formation_temp_kv {
-                    // FORMATION: Temperature is cool enough for lithosphere growth
-                    if current_total_height < profile.max_lith_height_km {
-                        // Calculate growth rate based on temperature
-                        let growth_km_per_year = if surface_temp_k <= profile.peak_lith_growth_temp_kv {
-                            // At or below peak growth temperature - maximum growth
-                            profile.max_lith_growth_km_per_year
-                        } else {
-                            // Between peak and formation temperature - reduced growth
-                            let temp_range = profile.max_lith_formation_temp_kv - profile.peak_lith_growth_temp_kv;
-                            let temp_above_peak = surface_temp_k - profile.peak_lith_growth_temp_kv;
-                            let growth_factor = 1.0 - (temp_above_peak / temp_range);
-                            profile.max_lith_growth_km_per_year * growth_factor.max(0.0)
-                        };
-
-                        let growth_km_per_step = growth_km_per_year * sim.years_per_step as f64;
-
-                        if growth_km_per_step > 0.0 {
-                            // Calculate new height but cap at maximum total allowed height
-                            let max_additional_growth = profile.max_lith_height_km - current_total_height;
-                            let capped_growth = growth_km_per_step.min(max_additional_growth);
-                            let capped_height = lithosphere.height_km + capped_growth;
-
-                            lithosphere.height_km = capped_height;
-                            let new_volume = area * lithosphere.height_km;
-                            lithosphere.set_volume_km3(new_volume);
+            if surface_temp_k <= profile.max_lith_formation_temp_kv {
+                // FORMATION: Temperature is cool enough for lithosphere growth
+                if current_total_height < profile.max_lith_height_km {
+                    // Calculate growth rate based on temperature
+                    let growth_height = bottom_layer.growth_per_year(surface_temp_k);
+                    if (growth_height > 0.0) {
+                        let excess_mass =
+                            bottom_layer.grow(growth_height, area, sim.lith_layer_height_km);
+                        if (excess_mass > 0.0) {
+                            let mt = bottom_layer.material_type();
+                            column.add_bottom_lithosphere(mt, excess_mass / area);
                         }
                     }
-                } else {
-                    // MELTING: Temperature is too hot - melt lithosphere
-                    if lithosphere.height_km > 0.0 {
-                        // Calculate melting rate using the existing melt_from_below_km_per_year function
-                        let melt_rate_km_per_year = lithosphere.melt_from_below_km_per_year(surface_temp_k);
-                        
-                        if melt_rate_km_per_year > 0.0 {
-                            // Convert to melting per simulation step
-                            let melt_rate_km_per_step = melt_rate_km_per_year * sim.years_per_step as f64;
-                            
-                            // Apply melting (reduce lithosphere height)
-                            let original_height = lithosphere.height_km;
-                            lithosphere.height_km = (lithosphere.height_km - melt_rate_km_per_step).max(0.0);
-                            
-                            // Update volume to match new height
-                            if lithosphere.height_km > 0.0 {
-                                let new_volume = area * lithosphere.height_km;
-                                lithosphere.set_volume_km3(new_volume);
-                            } else {
-                                // Lithosphere completely melted
-                                lithosphere.set_volume_km3(0.0);
-                            }
-
-                            // Add the melted energy back to the surface layer
-                            // The melted lithosphere becomes hot magma, adding energy
-                            if let Some(surface_layer) = column.asth_layers_next.first_mut() {
-                                let melted_height = original_height - lithosphere.height_km;
-                                if melted_height > 0.0 {
-                                    // Calculate energy from melted lithosphere
-                                    // Use the asthenosphere temperature as the energy to add
-                                    let melted_volume_km3 = area * melted_height;
-                                    let melted_mass_kg = melted_volume_km3 * 1e9 * lithosphere.density();
-                                    let energy_to_add = melted_mass_kg * lithosphere.specific_heat() * surface_temp_k;
-                                    
-                                    surface_layer.add_energy(energy_to_add);
-                                }
-                            }
-                        }
+                }
+            } else {
+                // MELTING: Temperature is too hot - melt lithosphere from bottom layer only
+                // We need to handle this without multiple mutable borrows
+                if bottom_layer.height_km > 0.0 {
+                    let energy = bottom_layer.process_melting(surface_temp_k, sim.years_per_step);
+                    if (energy > 0.0) {
+                        let (_, top_asth_layer) = column.asth_layer(0);
+                        top_asth_layer.add_energy(energy);
                     }
                 }
             }
@@ -193,9 +148,9 @@ mod tests {
     use super::*;
     use crate::constants::{ASTHENOSPHERE_SURFACE_START_TEMP_K, EARTH_RADIUS_KM};
     use crate::planet::Planet;
-    use h3o::Resolution;
-    use approx::assert_abs_diff_eq;
     use crate::sim::simulation::{SimProps, Simulation};
+    use approx::assert_abs_diff_eq;
+    use h3o::Resolution;
 
     fn create_test_simulation() -> Simulation {
         Simulation::new(SimProps {
@@ -220,11 +175,7 @@ mod tests {
     #[test]
     fn test_formation_at_low_temperature() {
         let mut sim = create_test_simulation();
-        let mut op = LithosphereUnifiedOp::new(
-            vec![(MaterialType::Silicate, 1.0)],
-            42,
-            0.1,
-        );
+        let mut op = LithosphereUnifiedOp::new(vec![(MaterialType::Silicate, 1.0)], 42, 0.1);
 
         // Initialize lithosphere
         op.init_sim(&mut sim);
@@ -235,7 +186,9 @@ mod tests {
         }
 
         // Record initial heights
-        let initial_heights: Vec<f64> = sim.cells.values()
+        let initial_heights: Vec<f64> = sim
+            .cells
+            .values()
             .map(|column| column.lithospheres_next.last().unwrap().height_km)
             .collect();
 
@@ -245,20 +198,19 @@ mod tests {
         // Heights should increase (formation occurred)
         for (column, &initial_height) in sim.cells.values().zip(initial_heights.iter()) {
             let final_height = column.lithospheres_next.last().unwrap().height_km;
-            assert!(final_height > initial_height, 
-                    "Lithosphere should form at low temperature. Initial: {}, Final: {}", 
-                    initial_height, final_height);
+            assert!(
+                final_height > initial_height,
+                "Lithosphere should form at low temperature. Initial: {}, Final: {}",
+                initial_height,
+                final_height
+            );
         }
     }
 
     #[test]
     fn test_melting_at_high_temperature() {
         let mut sim = create_test_simulation();
-        let mut op = LithosphereUnifiedOp::new(
-            vec![(MaterialType::Silicate, 1.0)],
-            42,
-            0.1,
-        );
+        let mut op = LithosphereUnifiedOp::new(vec![(MaterialType::Silicate, 1.0)], 42, 0.1);
 
         // Initialize and add some lithosphere
         op.init_sim(&mut sim);
@@ -266,7 +218,11 @@ mod tests {
             column.lithospheres_next.last_mut().unwrap().height_km = 10.0;
             let area = column.area();
             let volume = area * 10.0;
-            column.lithospheres_next.last_mut().unwrap().set_volume_km3(volume);
+            column
+                .lithospheres_next
+                .last_mut()
+                .unwrap()
+                .set_volume_km3(volume);
         }
 
         // Set high temperature for melting
@@ -275,7 +231,9 @@ mod tests {
         }
 
         // Record initial heights
-        let initial_heights: Vec<f64> = sim.cells.values()
+        let initial_heights: Vec<f64> = sim
+            .cells
+            .values()
             .map(|column| column.lithospheres_next.last().unwrap().height_km)
             .collect();
 
@@ -285,20 +243,19 @@ mod tests {
         // Heights should decrease (melting occurred)
         for (column, &initial_height) in sim.cells.values().zip(initial_heights.iter()) {
             let final_height = column.lithospheres_next.last().unwrap().height_km;
-            assert!(final_height < initial_height, 
-                    "Lithosphere should melt at high temperature. Initial: {}, Final: {}", 
-                    initial_height, final_height);
+            assert!(
+                final_height < initial_height,
+                "Lithosphere should melt at high temperature. Initial: {}, Final: {}",
+                initial_height,
+                final_height
+            );
         }
     }
 
     #[test]
     fn test_equilibrium_behavior() {
         let mut sim = create_test_simulation();
-        let mut op = LithosphereUnifiedOp::new(
-            vec![(MaterialType::Silicate, 1.0)],
-            42,
-            0.1,
-        );
+        let mut op = LithosphereUnifiedOp::new(vec![(MaterialType::Silicate, 1.0)], 42, 0.1);
 
         // Initialize lithosphere
         op.init_sim(&mut sim);
@@ -309,7 +266,9 @@ mod tests {
         }
 
         // Record initial heights
-        let initial_heights: Vec<f64> = sim.cells.values()
+        let initial_heights: Vec<f64> = sim
+            .cells
+            .values()
             .map(|column| column.lithospheres_next.last().unwrap().height_km)
             .collect();
 

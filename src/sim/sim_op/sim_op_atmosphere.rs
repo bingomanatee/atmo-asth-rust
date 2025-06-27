@@ -395,7 +395,7 @@ mod tests {
 
         // Record initial state from surface layer
         let cell = sim.cells.values_mut().next().unwrap();
-        let (current_surface, _) = cell.layer(0);
+        let (current_surface, _) = cell.asth_layer(0);
         let initial_surface_temp = current_surface.kelvin();
         let initial_surface_energy = current_surface.energy_joules();
 
@@ -412,7 +412,7 @@ mod tests {
 
         // Verify energy was removed from surface layer
         let cell = sim.cells.values_mut().next().unwrap();
-        let (final_current_surface, _) = cell.layer(0);
+        let (final_current_surface, _) = cell.asth_layer(0);
         let final_surface_temp = final_current_surface.kelvin();
         let final_surface_energy = final_current_surface.energy_joules();
 

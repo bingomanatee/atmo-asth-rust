@@ -135,7 +135,7 @@ impl ThermalDiffusionOp {
                 }
             }
             LayerType::Asth => {
-                let (_, from_asth) = column.layer(from_pointer.index);
+                let (_, from_asth) = column.asth_layer(from_pointer.index);
 
                 if energy_transfer > 0.0 {
                     from_asth.remove_energy(max_transfer_rate);
@@ -156,7 +156,7 @@ impl ThermalDiffusionOp {
                 }
             }
             LayerType::Asth => {
-                let (_, to_asth) = column.layer(to_pointer.index);
+                let (_, to_asth) = column.asth_layer(to_pointer.index);
 
                 if energy_transfer > 0.0 {
                     to_asth.add_energy(max_transfer_rate);
@@ -178,7 +178,7 @@ impl ThermalDiffusionOp {
             let (_, top_lithosphere, _) = column.lithosphere(0);
             top_lithosphere.energy_mass_mut().radiate_to_space(area, years);
         } else {
-            let (_, top_layer_next) = column.layer(0);
+            let (_, top_layer_next) = column.asth_layer(0);
             top_layer_next.energy_mass_mut().radiate_to_space(area, years);
         }
     }
