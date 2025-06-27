@@ -8,6 +8,7 @@ use crate::asth_cell::energy_at_layer::energy_at_layer;
 use crate::constants::{
     ASTHENOSPHERE_SURFACE_START_TEMP_K, EARTH_RADIUS_KM, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K,
 };
+use crate::energy_mass::{EnergyMass, StandardEnergyMass};
 use crate::h3_utils::H3Utils;
 use crate::material::MaterialType;
 use h3o::CellIndex;
@@ -63,6 +64,7 @@ impl AsthCellColumn {
             0.0,
             MaterialType::Silicate,
             0.0,
+            params.surface_temp_k, // Use surface temperature as formation temperature
         );
 
         let cell_column = AsthCellColumn {
@@ -104,8 +106,28 @@ impl AsthCellColumn {
 
 
     /// Get mutable reference to lithosphere layer tuple (current, next)
-    /// Panics if no lithosphere exists - all lithospheres should be created during initialization
+    /// If accessing index 0 and no lithosphere exists, creates an empty layer with the same material type as the top asthenosphere layer
     pub fn lithosphere_mut(&mut self, layer_index: usize) -> &mut (AsthCellLithosphere, AsthCellLithosphere) {
+        // Special case: if accessing index 0 and no lithosphere layers exist, create an empty layer
+        if layer_index == 0 && self.lith_layers_t.is_empty() {
+            // Get material type from top asthenosphere layer
+            let material_type = if !self.asth_layers_t.is_empty() {
+                self.asth_layers_t[0].0.energy_mass.material_type()
+            } else {
+                // Fallback to Silicate if no asthenosphere layers exist
+                MaterialType::Silicate
+            };
+
+            // Create empty lithosphere layer tuple with surface temperature
+            let formation_temp_k = if let Some((surface_layer, _)) = self.asth_layers_t.first() {
+                surface_layer.kelvin()
+            } else {
+                1673.15 // Default formation temperature for Silicate
+            };
+            let empty_layer = AsthCellLithosphere::new(0.0, material_type, 0.0, formation_temp_k);
+            self.lith_layers_t.push((empty_layer.clone(), empty_layer));
+        }
+
         // Ensure the layer exists
         if layer_index >= self.lith_layers_t.len() {
             panic!(
@@ -162,7 +184,14 @@ impl AsthCellColumn {
     /// Create a lithosphere with the specified material
     /// Used when operations need to create new lithosphere
     pub fn create_lithosphere(&mut self, material: MaterialType, height_km: f64, volume_km3: f64) {
-        let lithosphere = AsthCellLithosphere::new(height_km, material, volume_km3);
+        // Get formation temperature from the surface asthenosphere layer
+        let formation_temp_k = if let Some((surface_layer, _)) = self.asth_layers_t.first() {
+            surface_layer.kelvin()
+        } else {
+            1673.15 // Default formation temperature for Silicate
+        };
+
+        let lithosphere = AsthCellLithosphere::new(height_km, material, volume_km3, formation_temp_k);
 
         // Add as tuple (current, next) - both start the same
         self.lith_layers_t.push((lithosphere.clone(), lithosphere));
@@ -181,7 +210,7 @@ impl AsthCellColumn {
             1673.15 // Default formation temperature
         };
 
-        let lithosphere = AsthCellLithosphere::new_with_temp(height_km, material, volume_km3, formation_temp_k);
+        let lithosphere = AsthCellLithosphere::new(height_km, material, volume_km3, formation_temp_k);
 
         // Insert at index 0 (bottom) - all other layers shift up
         self.lith_layers_t.insert(0, (lithosphere.clone(), lithosphere));
@@ -198,10 +227,232 @@ impl AsthCellColumn {
 
         // Ensure we always have at least one lithosphere layer
         if self.lith_layers_t.is_empty() {
-            let empty_layer = AsthCellLithosphere::new(0.0, crate::material::MaterialType::Silicate, 0.0);
+            // Get formation temperature from the surface asthenosphere layer
+            let formation_temp_k = if let Some((surface_layer, _)) = self.asth_layers_t.first() {
+                surface_layer.kelvin()
+            } else {
+                1673.15 // Default formation temperature for Silicate
+            };
+            let empty_layer = AsthCellLithosphere::new(0.0, crate::material::MaterialType::Silicate, 0.0, formation_temp_k);
             self.lith_layers_t.push((empty_layer.clone(), empty_layer));
         }
     }
+
+    /// Insert a lithosphere layer with the given height
+    /// - Only allows empty layers when the stack is completely empty (initial state)
+    /// - Otherwise, only allows non-empty layers (growth creates material, melting shrinks existing)
+    pub fn insert_layer_height(&mut self, material_type: MaterialType, height_km: f64, _max_layer_height_km: f64) -> bool {
+        let is_empty = height_km <= 0.001;
+
+        // Get formation temperature from the surface asthenosphere layer
+        let formation_temp_k = if let Some((surface_layer, _)) = self.asth_layers_t.first() {
+            surface_layer.kelvin()
+        } else {
+            1673.15 // Default formation temperature for Silicate
+        };
+
+        // Only allow empty layers when there are no layers at all (initial state)
+        if is_empty {
+            if self.lith_layers_t.is_empty() {
+                let new_layer = AsthCellLithosphere::new(height_km, material_type, 0.0, formation_temp_k);
+                self.lith_layers_t.insert(0, (new_layer.clone(), new_layer));
+                return true;
+            } else {
+                // Don't insert empty layers when there are existing layers
+                return false;
+            }
+        }
+
+        // Non-empty layers are always acceptable (growth/formation creates material)
+        let new_layer = AsthCellLithosphere::new(height_km, material_type, 0.0, formation_temp_k);
+        self.lith_layers_t.insert(0, (new_layer.clone(), new_layer));
+        true
+    }
+
+    /// Insert a lithosphere layer with the given volume and energy, following acceptable patterns
+    pub fn insert_layer_volume_energy(&mut self, material_type: MaterialType, volume_km3: f64, energy_j: f64, max_layer_height_km: f64) -> bool {
+        // Calculate height from volume
+        let height_km = volume_km3 / self.area();
+
+        // Use the height-based logic to determine if insertion is acceptable
+        if !self.insert_layer_height(material_type, height_km, max_layer_height_km) {
+            return false;
+        }
+
+        // Replace the layer that was just inserted with one that has correct volume and energy
+        if let Some((current, next)) = self.lith_layers_t.first_mut() {
+            let energy_mass = StandardEnergyMass::new_with_material_energy(material_type, energy_j, volume_km3);
+            let new_layer = AsthCellLithosphere {
+                height_km,
+                energy_mass,
+            };
+            *current = new_layer.clone();
+            *next = new_layer;
+        }
+
+        true
+    }
+
+
+
+    /// Get the material type for lithosphere formation (from top asthenosphere layer)
+    pub fn formation_material_type(&self) -> MaterialType {
+        if !self.asth_layers_t.is_empty() {
+            self.asth_layers_t[0].0.energy_mass.material_type()
+        } else {
+            MaterialType::Silicate // Fallback
+        }
+    }
+
+    /// Process lithosphere formation/melting at the layer level
+    /// Returns the energy released from melting (if any)
+    pub fn process_lithosphere_layer_change(&mut self, surface_temp_k: f64, years_per_step: u32, max_layer_height_km: f64) -> f64 {
+        let material_type = self.formation_material_type();
+        let profile = crate::material::get_profile(material_type).unwrap();
+
+        let current_total_height = self.total_lithosphere_height();
+        let mut energy_released = 0.0;
+
+        if surface_temp_k <= profile.max_lith_formation_temp_kv {
+            // FORMATION: Temperature below formation threshold
+            if current_total_height < profile.max_lith_height_km {
+                // Use the existing layer growth_per_year method
+                let growth_rate_km_per_year = if let Some((bottom_layer, _)) = self.lith_layers_t.first() {
+                    bottom_layer.growth_per_year(surface_temp_k)
+                } else {
+                    // Fallback to profile calculation if no layers exist
+                    profile.growth_at_kelvin(surface_temp_k)
+                };
+
+                let growth_km = growth_rate_km_per_year * years_per_step as f64;
+
+                if growth_km > 0.0 {
+                    self.grow_lithosphere_stack(growth_km, max_layer_height_km, surface_temp_k);
+                }
+            }
+        } else {
+            // MELTING: Temperature above formation threshold
+            if current_total_height > 0.0 {
+                // Use the existing layer melt_from_below_km_per_year method
+                let melt_rate_km_per_year = if let Some((bottom_layer, _)) = self.lith_layers_t.first() {
+                    bottom_layer.melt_from_below_km_per_year(surface_temp_k)
+                } else {
+                    0.0
+                };
+
+                let melt_km = melt_rate_km_per_year * years_per_step as f64;
+
+                if melt_km > 0.0 {
+                    energy_released = self.melt_lithosphere_stack(melt_km);
+                }
+            }
+        }
+
+        energy_released
+    }
+
+    /// Grow the lithosphere stack by the specified total height
+    /// Manages layer creation and distribution from high index to low index
+    pub fn grow_lithosphere_stack(&mut self, growth_km: f64, max_layer_height_km: f64, formation_temp_k: f64) {
+        let material_type = self.formation_material_type();
+        let area = self.area();
+        let mut remaining_growth = growth_km;
+
+        // Start from the bottom layer (index 0) and work upward
+        let mut layer_index = 0;
+
+        while remaining_growth > 0.001 && layer_index < 20 { // Safety limit
+            // Ensure layer exists
+            if layer_index >= self.lith_layers_t.len() {
+                // Create new layer at the top (highest index) with formation temperature
+                let new_layer = AsthCellLithosphere::new(0.0, material_type, 0.0, formation_temp_k);
+                self.lith_layers_t.push((new_layer.clone(), new_layer));
+            }
+
+            let (_, next_layer) = &mut self.lith_layers_t[layer_index];
+
+            // Use the existing layer grow() method which handles excess properly
+            let excess_height = next_layer.grow(remaining_growth, area, max_layer_height_km, formation_temp_k);
+
+            // Calculate how much growth was actually applied to this layer
+            let growth_applied = remaining_growth - excess_height;
+            remaining_growth = excess_height;
+
+            // If this layer is now full and we still have growth remaining, move to next layer
+            if excess_height > 0.001 {
+                layer_index += 1;
+            } else {
+                // All growth was absorbed by this layer
+                break;
+            }
+        }
+    }
+
+    /// Melt the lithosphere stack by the specified total height
+    /// Removes layers from front of array (high index to low index) and returns energy released
+    pub fn melt_lithosphere_stack(&mut self, melt_km: f64) -> f64 {
+        let mut remaining_melt = melt_km;
+        let mut total_energy_released = 0.0;
+        let area = self.area(); // Calculate area once to avoid borrowing issues
+
+        // Start from the bottom layer (index 0) and work upward
+        while remaining_melt > 0.001 && !self.lith_layers_t.is_empty() {
+            let (_, next_layer) = &mut self.lith_layers_t[0]; // Always work on bottom layer
+
+            if next_layer.height_km <= 0.001 {
+                // Remove empty layer and continue
+                self.lith_layers_t.remove(0);
+                continue;
+            }
+
+            // Use the existing layer melt() method
+            let original_height = next_layer.height_km;
+            let original_energy = next_layer.energy_joules();
+
+            let actual_melted = next_layer.melt(remaining_melt);
+
+            if actual_melted > 0.0 {
+                // Calculate energy released proportional to melted fraction
+                let melted_fraction = actual_melted / original_height;
+                let energy_released = original_energy * melted_fraction;
+                total_energy_released += energy_released;
+
+                // Remove the melted energy from the layer
+                next_layer.remove_energy(energy_released);
+
+                // Update volume to match new height
+                let new_volume = area * next_layer.height_km;
+                next_layer.set_volume_km3(new_volume);
+
+                remaining_melt -= actual_melted;
+            }
+
+            // If layer is now empty, remove it
+            if next_layer.height_km <= 0.001 {
+                self.lith_layers_t.remove(0);
+            } else {
+                // Layer still has material but we couldn't melt more - stop
+                break;
+            }
+        }
+
+        // Ensure we always have at least one lithosphere layer (even if empty)
+        if self.lith_layers_t.is_empty() {
+            let material_type = self.formation_material_type();
+            // Get formation temperature from the surface asthenosphere layer
+            let formation_temp_k = if let Some((surface_layer, _)) = self.asth_layers_t.first() {
+                surface_layer.kelvin()
+            } else {
+                1673.15 // Default formation temperature for Silicate
+            };
+            let empty_layer = AsthCellLithosphere::new(0.0, material_type, 0.0, formation_temp_k);
+            self.lith_layers_t.push((empty_layer.clone(), empty_layer));
+        }
+
+        total_energy_released
+    }
+
+
 
     pub fn commit_next_layers(&mut self) {
         // Copy next state to current state for all layers

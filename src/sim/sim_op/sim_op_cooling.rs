@@ -136,6 +136,7 @@ mod tests {
                 50.0, // 50 km thick lithosphere
                 MaterialType::Silicate,
                 column.default_volume(),
+                1673.15, // Formation temperature
             );
             column.lith_layers_t.push((new_layer.clone(), new_layer));
         }

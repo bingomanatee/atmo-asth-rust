@@ -106,7 +106,7 @@ fn analyze_final_state(sim: &Simulation) {
     
     for cell in sim.cells.values() {
         // Surface temperature from top asthenosphere layer (most accurate)
-        let surface_temp = cell.asth_layers[0].kelvin();
+        let surface_temp = cell.asth_layers_t[0].0.kelvin();
         surface_temps.push(surface_temp);
         
         // Lithosphere thickness
@@ -114,8 +114,8 @@ fn analyze_final_state(sim: &Simulation) {
         lithosphere_thicknesses.push(thickness);
         
         // Total energy
-        total_energy += cell.asth_layers.iter().map(|l| l.energy_joules()).sum::<f64>();
-        total_energy += cell.lith_layers.iter().map(|l| l.energy_joules()).sum::<f64>();
+        total_energy += cell.asth_layers_t.iter().map(|(l, _)| l.energy_joules()).sum::<f64>();
+        total_energy += cell.lith_layers_t.iter().map(|(l, _)| l.energy_joules()).sum::<f64>();
     }
     
     let avg_surface_temp = surface_temps.iter().sum::<f64>() / surface_temps.len() as f64;

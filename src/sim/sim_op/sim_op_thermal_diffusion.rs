@@ -92,20 +92,12 @@ impl ThermalDiffusionOp {
         }
 
         columns.extend(asth_columns);
-        println!("--------- columns ---------");
 
         for (index, pointer) in columns.iter().enumerate() {
             if (index > 0) {
                 let prev_pointer = columns.get(index - 1).unwrap();
                 self.transfer_energy(years, column, pointer, prev_pointer)
             }
-        }
-        
-        for c in columns {
-            println!("type: {}, energy: {} J, volume: {} km3, temp: {} K", match c.layer_type {
-                LayerType::Lith => "Lithosphere",
-                LayerType::Asth => "Atheosphere"
-            }, c.energy_mass.energy(), c.energy_mass.volume(), c.energy_mass.kelvin())
         }
     }
 
@@ -265,7 +257,10 @@ mod tests {
 
         let initial_temps: Vec<f64> = {
             let cell = sim.cells.values().next().unwrap();
-            cell.asth_layers_t.iter().map(|(_, next)| next.kelvin()).collect()
+            cell.asth_layers_t
+                .iter()
+                .map(|(_, next)| next.kelvin())
+                .collect()
         };
 
         // Apply thermal diffusion
@@ -274,7 +269,10 @@ mod tests {
 
         let final_temps: Vec<f64> = {
             let cell = sim.cells.values().next().unwrap();
-            cell.asth_layers_t.iter().map(|(_, next)| next.kelvin()).collect()
+            cell.asth_layers_t
+                .iter()
+                .map(|(_, next)| next.kelvin())
+                .collect()
         };
 
         // Temperatures should move toward equilibrium

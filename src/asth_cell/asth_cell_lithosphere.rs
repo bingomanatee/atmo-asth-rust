@@ -30,21 +30,19 @@ impl AsthCellLithosphere {
         }
     }
 
-    /// Create a new lithosphere with specified material, height, and volume
-    /// Temperature defaults to 0K (will be set by thermal processes)
-    pub fn new(height_km: f64, material: MaterialType, volume_km3: f64) -> AsthCellLithosphere {
-        AsthCellLithosphere {
-            height_km,
-            energy_mass: StandardEnergyMass::new_with_material(material, 0.0, volume_km3),
-        }
-    }
-
     /// Create a new lithosphere with specified material, height, volume, and temperature
-    pub fn new_with_temp(height_km: f64, material: MaterialType, volume_km3: f64, temperature_k: f64) -> AsthCellLithosphere {
+    /// This is the only way to create lithosphere - temperature must always be specified
+    pub fn new(height_km: f64, material: MaterialType, volume_km3: f64, temperature_k: f64) -> AsthCellLithosphere {
         AsthCellLithosphere {
             height_km,
             energy_mass: StandardEnergyMass::new_with_material(material, temperature_k, volume_km3),
         }
+    }
+
+    /// Alias for new() - kept for backward compatibility
+    /// Create a new lithosphere with specified material, height, volume, and temperature
+    pub fn new_with_temp(height_km: f64, material: MaterialType, volume_km3: f64, temperature_k: f64) -> AsthCellLithosphere {
+        Self::new(height_km, material, volume_km3, temperature_k)
     }
 
     /// Get the material type
