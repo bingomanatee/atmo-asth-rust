@@ -108,9 +108,9 @@ impl Simulation {
     pub fn energy_at_layer(&self, layer: usize) -> f64 {
         self.cells
             .iter()
-            .map(|(_index, cell)| match cell.asth_layers.get(layer) {
+            .map(|(_index, cell)| match cell.asth_layers_t.get(layer) {
                 None => 0.0,
-                Some(layer) => layer.energy_joules(),
+                Some((current, _)) => current.energy_joules(),
             })
             .sum()
     }
@@ -122,12 +122,14 @@ impl Simulation {
 
     /// Run a single step with custom operators (for testing)
     pub fn step_with_ops(&mut self, ops: &mut [&mut dyn SimOp]) {
-        // Copy current to next arrays
+        // Copy current to next within tuples (this is now automatic with tuple structure)
         for column in self.cells.values_mut() {
-            for i in 0..column.asth_layers.len() {
-                column.asth_layers_next[i] = column.asth_layers[i].clone();
+            for (current, next) in column.asth_layers_t.iter_mut() {
+                *next = current.clone();
             }
-            column.lithospheres_next = column.lith_layers.clone();
+            for (current, next) in column.lith_layers_t.iter_mut() {
+                *next = current.clone();
+            }
         }
 
         // Run operators on next arrays

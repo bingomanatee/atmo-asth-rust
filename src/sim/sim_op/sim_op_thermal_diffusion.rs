@@ -62,9 +62,9 @@ impl ThermalDiffusionOp {
 
         let mut columns: Vec<LayerPointer> = Vec::new();
         let mut asth_columns: Vec<LayerPointer> = Vec::new();
-        for index in 0..column.lith_layers.iter().len() {
-            if let lith = column
-                .lith_layers
+        for index in 0..column.lith_layers_t.iter().len() {
+            if let (lith, _) = column
+                .lith_layers_t
                 .get(index)
                 .expect("cannot get lithosphere")
             {
@@ -76,11 +76,11 @@ impl ThermalDiffusionOp {
                 })
             }
         }
-        for index in 0..column.asth_layers.iter().len() {
-            if let layer = column
-                .asth_layers
+        for index in 0..column.asth_layers_t.iter().len() {
+            if let (layer, _) = column
+                .asth_layers_t
                 .get(index)
-                .expect("cannot get lithosphere")
+                .expect("cannot get asthenosphere")
             {
                 asth_columns.push(LayerPointer {
                     index,
@@ -121,8 +121,8 @@ impl ThermalDiffusionOp {
         let to_mass = &to_pointer.energy_mass;
         if from_pointer.index
             >= match from_pointer.layer_type {
-                LayerType::Lith => column.lithospheres_next.len().min(column.lith_layers.len()),
-                LayerType::Asth => column.asth_layers.len().min(column.asth_layers_next.len()),
+                LayerType::Lith => column.lith_layers_t.len(),
+                LayerType::Asth => column.asth_layers_t.len(),
             }
         {
             return;
@@ -141,7 +141,7 @@ impl ThermalDiffusionOp {
         let max_transfer_rate = energy_transfer.abs().min(source_energy * ENERGY_THROTTLE);
         match from_pointer.layer_type {
             LayerType::Lith => {
-                let (_, from_lith, _) = column.lithosphere(from_pointer.index);
+                let (_, from_lith) = &mut column.lithosphere_mut(from_pointer.index);
 
                 if energy_transfer > 0.0 {
                     from_lith.remove_energy(max_transfer_rate);
@@ -150,7 +150,7 @@ impl ThermalDiffusionOp {
                 }
             }
             LayerType::Asth => {
-                let (_, from_asth) = column.asth_layer(from_pointer.index);
+                let (_, from_asth) = &mut column.layer_mut(from_pointer.index);
 
                 if energy_transfer > 0.0 {
                     from_asth.remove_energy(max_transfer_rate);
@@ -162,7 +162,7 @@ impl ThermalDiffusionOp {
 
         match to_pointer.layer_type {
             LayerType::Lith => {
-                let (_, to_lith, _) = column.lithosphere(to_pointer.index);
+                let (_, to_lith) = &mut column.lithosphere_mut(to_pointer.index);
 
                 if energy_transfer > 0.0 {
                     to_lith.add_energy(max_transfer_rate);
@@ -171,7 +171,7 @@ impl ThermalDiffusionOp {
                 }
             }
             LayerType::Asth => {
-                let (_, to_asth) = column.asth_layer(to_pointer.index);
+                let (_, to_asth) = &mut column.layer_mut(to_pointer.index);
 
                 if energy_transfer > 0.0 {
                     to_asth.add_energy(max_transfer_rate);
@@ -186,16 +186,16 @@ impl ThermalDiffusionOp {
     fn radiate_top_layer_to_space(&self, column: &mut AsthCellColumn, years: f64) {
         let area = column.area();
         // Determine which layer is the surface and remove energy from it
-        if !column.lithospheres_next.is_empty()
-            && column.lithospheres_next.last().unwrap().height_km > 10.0
+        if !column.lith_layers_t.is_empty()
+            && column.lith_layers_t.last().unwrap().1.height_km > 10.0
         {
             // Radiate from top lithosphere layer
-            let (_, top_lithosphere, _) = column.lithosphere(0);
+            let (_, top_lithosphere) = &mut column.lithosphere_mut(0);
             top_lithosphere
                 .energy_mass_mut()
                 .radiate_to_space(area, years);
         } else {
-            let (_, top_layer_next) = column.asth_layer(0);
+            let (_, top_layer_next) = &mut column.layer_mut(0);
             top_layer_next
                 .energy_mass_mut()
                 .radiate_to_space(area, years);
