@@ -1,7 +1,7 @@
 use crate::asth_cell::AsthCellColumn;
 use crate::constants::{M2_PER_KM2, SECONDS_PER_YEAR, SIGMA_KM2_YEAR};
-use crate::energy_mass::EnergyMass;
-use crate::material::MaterialProfile;
+use crate::energy_mass::{EnergyMass, StandardEnergyMass};
+use crate::material::{MaterialProfile, MaterialType};
 use crate::sim::Simulation;
 use crate::sim::sim_op::{SimOp, SimOpHandle};
 
@@ -32,11 +32,8 @@ enum LayerType {
 struct LayerPointer {
     pub layer_type: LayerType,
     pub index: usize,
-    pub energy_j: f64,
-    pub volume_km3: f64,
-    pub material: MaterialProfile,
-    pub temperature: f64,
-    pub conductivity: f64,
+    pub energy_mass: StandardEnergyMass,
+    pub height_km: f64,
 }
 
 impl ThermalDiffusionOp {
@@ -76,24 +73,22 @@ impl ThermalDiffusionOp {
                 columns.push(LayerPointer {
                     index,
                     layer_type: LayerType::Lith,
-                    energy_j: lith.energy_joules(),
-                    volume_km3: lith.volume_km3(),
-                    material: lith.profile().clone(),
-                    temperature: lith.kelvin(),
-                    conductivity: lith.thermal_conductivity(),
+                    energy_mass: StandardEnergyMass::new_with_material_energy(lith.material_type(), lith.energy_joules(), lith.volume_km3()),
+                    height_km: lith.height_km,
                 })
             }
         }
         for index in 0..column.asth_layers.iter().len() {
-            if let layer = column.asth_layers.get(index).expect("cannot get lithosphere") {
+            if let layer = column
+                .asth_layers
+                .get(index)
+                .expect("cannot get lithosphere")
+            {
                 asth_columns.push(LayerPointer {
                     index,
                     layer_type: LayerType::Asth,
-                    energy_j: layer.energy_joules(),
-                    volume_km3: layer.volume_km3(),
-                    material: layer.profile().clone(),
-                    temperature: layer.kelvin(),
-                    conductivity: layer.thermal_conductivity(),
+                    energy_mass: StandardEnergyMass::new_with_material_energy(layer.material_type(), layer.energy_joules(), layer.volume_km3()),
+                    height_km: column.layer_height_km,
                 })
             }
         }
@@ -115,28 +110,37 @@ impl ThermalDiffusionOp {
         from_pointer: &LayerPointer,
         to_pointer: &LayerPointer,
     ) {
-        let interface_conductivity = 2.0 * from_pointer.conductivity * to_pointer.conductivity
-            / (from_pointer.conductivity + to_pointer.conductivity);
+        // Use the energy_mass from LayerPointer
+        let from_mass = &from_pointer.energy_mass;
+        let to_mass = &to_pointer.energy_mass;
 
-        let temp_diff = from_pointer.temperature - to_pointer.temperature;
-        let base_transfer_rate = interface_conductivity * self.diffusion_rate * years * 1e6; // Scaling factor
-        let energy_transfer = temp_diff * base_transfer_rate;
+        // Delegate calculation
+        let base_energy_transfer =
+            from_mass.calculate_thermal_transfer(to_mass, self.diffusion_rate, years);
 
-        let max_transfer_rate = energy_transfer.max(from_pointer.energy_j * ENERGY_THROTTLE);
+        let (source_height_km, source_energy) = if base_energy_transfer > 0.0 {
+            (from_pointer.height_km, from_pointer.energy_mass.energy()) // from is hotter
+        } else {
+            (to_pointer.height_km, to_pointer.energy_mass.energy()) // to is hotter
+        };
+        let height_scale = (source_height_km * 2.0).sqrt();
+
+        let energy_transfer = base_energy_transfer * height_scale;
+        let max_transfer_rate = energy_transfer.abs().min(source_energy * ENERGY_THROTTLE);
         match from_pointer.layer_type {
             LayerType::Lith => {
                 let (_, from_lith, _) = column.lithosphere(from_pointer.index);
 
-                if temp_diff > 0.0 {
+                if energy_transfer > 0.0 {
                     from_lith.remove_energy(max_transfer_rate);
                 } else {
                     from_lith.add_energy(-max_transfer_rate);
                 }
             }
             LayerType::Asth => {
-                let (_, from_asth, _) = column.lithosphere(from_pointer.index);
+                let (_, from_asth) = column.layer(from_pointer.index);
 
-                if temp_diff > 0.0 {
+                if energy_transfer > 0.0 {
                     from_asth.remove_energy(max_transfer_rate);
                 } else {
                     from_asth.add_energy(-max_transfer_rate);
@@ -148,19 +152,19 @@ impl ThermalDiffusionOp {
             LayerType::Lith => {
                 let (_, to_lith, _) = column.lithosphere(to_pointer.index);
 
-                if temp_diff > 0.0 {
+                if energy_transfer > 0.0 {
                     to_lith.add_energy(max_transfer_rate);
                 } else {
                     to_lith.remove_energy(-max_transfer_rate);
                 }
             }
             LayerType::Asth => {
-                let (_, to_lith, _) = column.lithosphere(to_pointer.index);
+                let (_, to_asth) = column.layer(to_pointer.index);
 
-                if temp_diff > 0.0 {
-                    to_lith.add_energy(max_transfer_rate);
+                if energy_transfer > 0.0 {
+                    to_asth.add_energy(max_transfer_rate);
                 } else {
-                    to_lith.remove_energy(-max_transfer_rate);
+                    to_asth.remove_energy(-max_transfer_rate);
                 }
             }
         }

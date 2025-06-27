@@ -27,7 +27,7 @@ impl AsthCellLithosphere {
     }
 
     /// Get the material type
-    pub fn material(&self) -> MaterialType {
+    pub fn material_type(&self) -> MaterialType {
         self.energy_mass.material_type()
     }
 

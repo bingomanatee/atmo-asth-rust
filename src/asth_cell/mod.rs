@@ -11,5 +11,6 @@ pub use crate::material::MaterialType;
 pub use crate::asth_cell::asth_cell_lithosphere::AsthCellLithosphere;
 
 // Re-export AsthCellColumn types to make them available from this module
-pub(crate) use asth_cell_column::{AsthCellColumn, AsthCellParams, AsthCellLayer};
+pub(crate) use asth_cell_column::AsthCellLayer;
+pub use asth_cell_column::{AsthCellColumn, AsthCellParams};
 

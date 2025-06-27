@@ -117,6 +117,70 @@ pub trait EnergyMass: std::any::Any {
 
         actual_radiated
     }
+
+    /// Calculate thermal energy transfer between two materials based on conductivity and temperature difference
+    /// Scales transfer based on the volume of the hotter material
+    /// Returns the energy transfer amount (J)
+    fn calculate_thermal_transfer(&self, other: &dyn EnergyMass, diffusion_rate: f64, years: f64) -> f64 {
+        let interface_conductivity = 2.0 * self.thermal_conductivity() * other.thermal_conductivity()
+            / (self.thermal_conductivity() + other.thermal_conductivity());
+
+        // Calculate interface R0 (harmonic mean like conductivity)
+        let interface_r0 = 2.0 * self.thermal_transmission_r0() * other.thermal_transmission_r0()
+            / (self.thermal_transmission_r0() + other.thermal_transmission_r0());
+
+        let temp_diff = self.kelvin() - other.kelvin();
+
+        // Determine which material is hotter and use its volume for scaling
+        let hot_volume_km3 = if temp_diff > 0.0 {
+            self.volume_km3()  // self is hotter
+        } else {
+            other.volume_km3() // other is hotter
+        };
+
+        // Volume scaling factor: larger hot volumes can transfer more energy
+        // Use cube root to prevent excessive scaling for very large volumes
+        let volume_scale = (hot_volume_km3 / 100.0).powf(0.33).max(0.1); // Baseline 100 km³, minimum 0.1x
+
+        let base_transfer_rate = interface_conductivity * interface_r0 * diffusion_rate * years * 1e12; // Scaling factor
+        let energy_transfer = temp_diff * base_transfer_rate * volume_scale;
+
+        energy_transfer
+    }
+
+    /// Calculate bulk thermal energy transfer for large volume objects
+    /// Uses volume-based thermal diffusion physics appropriate for thick layers
+    /// Returns the energy transfer amount (J)
+    fn calculate_bulk_thermal_transfer(&self, other: &dyn EnergyMass, layer_thickness_km: f64, years: f64) -> f64 {
+        let temp_diff = self.kelvin() - other.kelvin();
+
+        // Calculate thermal diffusivity (m²/s) = conductivity / (density × specific_heat)
+        let self_diffusivity = self.thermal_conductivity() / (self.density_kg_m3() * self.specific_heat_capacity_j_per_kg_k());
+        let other_diffusivity = other.thermal_conductivity() / (other.density_kg_m3() * other.specific_heat_capacity_j_per_kg_k());
+
+        // Use average diffusivity for the transfer
+        let avg_diffusivity = (self_diffusivity + other_diffusivity) / 2.0;
+
+        // Convert to km²/year for our units
+        let diffusivity_km2_per_year = avg_diffusivity * 3.15576e7 / 1e6; // seconds/year / m²/km²
+
+        // Calculate diffusion length scale: sqrt(diffusivity × time)
+        let diffusion_length_km = (diffusivity_km2_per_year * years).sqrt();
+
+        // Energy transfer efficiency based on diffusion vs layer thickness
+        let transfer_efficiency = (diffusion_length_km / layer_thickness_km).min(1.0);
+
+        // Volume-based energy transfer: larger volumes can transfer more energy
+        let transfer_volume_km3 = (self.volume_km3() + other.volume_km3()) / 2.0;
+
+        // Base energy transfer rate (J/K/km³/year)
+        let base_rate = avg_diffusivity * 1e15; // Scaling factor for realistic energy transfer
+
+        // Total energy transfer
+        let energy_transfer = temp_diff * transfer_volume_km3 * transfer_efficiency * base_rate * years;
+
+        energy_transfer
+    }
 }
 
 /// Standard implementation of EnergyMass using material profiles

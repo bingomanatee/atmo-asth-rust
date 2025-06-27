@@ -49,13 +49,16 @@ pub struct AsthCellParams {
 }
 
 impl AsthCellColumn {
-    pub(crate) fn new(params: AsthCellParams) -> AsthCellColumn {
+    pub fn new(params: AsthCellParams) -> AsthCellColumn {
+        // Calculate correct layer volume: area × layer_height_km
+        let layer_volume = params.volume * params.layer_height_km;
+
         let cell_column = AsthCellColumn {
             energy_joules: 0.0,
             volume_km3: 0.0,
             neighbor_cell_ids: H3Utils::neighbors_for(params.cell_index),
             // Create layer 0 at surface temperature - projection will handle geothermal gradient for deeper layers
-            asth_layers: vec![AsthCellLayer::new_with_material(MaterialType::Silicate, params.surface_temp_k, params.volume, 0)],
+            asth_layers: vec![AsthCellLayer::new_with_material(MaterialType::Silicate, params.surface_temp_k, layer_volume, 0)],
             cell_index: params.cell_index,
             layer_height_km: params.layer_height_km,
             layer_count: params.layer_count,
@@ -199,11 +202,8 @@ impl AsthCellColumn {
 
         // iterate over all the absent _current_ cells
         for index in layers.len()..level_count {
-            let volume = if !layers.is_empty() {
-                layers[0].volume_km3()
-            } else {
-                self.default_volume()
-            };
+            // Always use the correct volume calculation: area × layer_height_km
+            let volume = self.default_volume();
 
             // Calculate temperature for this layer using geothermal gradient
             let depth_km = (index as f64 + 0.5) * self.layer_height_km;
