@@ -56,9 +56,9 @@ impl AtmosphereOp {
     fn apply_stefan_boltzmann_cooling(&self, sim: &mut Simulation, years: f64) {
         for column in sim.cells.values_mut() {
             // Get surface temperature and area
-            let surface_temp = if !column.lithospheres.is_empty() {
+            let surface_temp = if !column.lith_layers.is_empty() {
                 // Lithosphere surface temperature
-                column.lithospheres.last().unwrap().kelvin()
+                column.lith_layers.last().unwrap().kelvin()
             } else {
                 // Asthenosphere surface temperature
                 column.asth_layers.first().unwrap().kelvin()
@@ -165,7 +165,7 @@ impl AtmosphereOp {
     /// Remove energy from the surface layer (lithosphere or asthenosphere) - MODIFY NEXT ARRAYS!
     /// For thin lithosphere, also allows asthenosphere cooling through the lithosphere
     fn remove_surface_energy(&self, column: &mut crate::asth_cell::AsthCellColumn, energy_to_remove: f64) {
-        if !column.lithospheres.is_empty() {
+        if !column.lith_layers.is_empty() {
             let lithosphere_thickness = column.total_lithosphere_height();
 
             // Remove from top lithosphere layer - NEXT ARRAY!
@@ -253,9 +253,9 @@ impl SimOp for AtmosphereOp {
         // Calculate outgassing from all cells
         for column in sim.cells.values() {
             // Get surface conditions
-            let surface_temp = if !column.lithospheres.is_empty() {
+            let surface_temp = if !column.lith_layers.is_empty() {
                 // Lithosphere surface temperature
-                column.lithospheres.last().unwrap().kelvin()
+                column.lith_layers.last().unwrap().kelvin()
             } else {
                 // Asthenosphere surface temperature
                 column.asth_layers.first().unwrap().kelvin()

@@ -2,12 +2,14 @@ use super::serialize_cell_indexes::{
     deserialize_cell_index, deserialize_neighbor_cells, serialize_cell_index,
     serialize_neighbor_cells,
 };
-use crate::material::MaterialType;
+use crate::asth_cell::AsthCellLithosphere;
 pub(crate) use crate::asth_cell::asth_cell_asth_layer::AsthCellAsthLayer;
 use crate::asth_cell::energy_at_layer::energy_at_layer;
-use crate::asth_cell::AsthCellLithosphere;
-use crate::constants::{ASTHENOSPHERE_SURFACE_START_TEMP_K, EARTH_RADIUS_KM, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K};
+use crate::constants::{
+    ASTHENOSPHERE_SURFACE_START_TEMP_K, EARTH_RADIUS_KM, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K,
+};
 use crate::h3_utils::H3Utils;
+use crate::material::MaterialType;
 use h3o::CellIndex;
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +21,7 @@ pub struct AsthCellColumn {
     pub volume_km3: f64,
     pub asth_layers: Vec<AsthCellAsthLayer>,
     pub asth_layers_next: Vec<AsthCellAsthLayer>,
-    pub lithospheres: Vec<AsthCellLithosphere>,
+    pub lith_layers: Vec<AsthCellLithosphere>,
     pub lithospheres_next: Vec<AsthCellLithosphere>,
     pub layer_height_km: f64,
     pub planet_radius_km: f64,
@@ -58,13 +60,18 @@ impl AsthCellColumn {
             volume_km3: 0.0,
             neighbor_cell_ids: H3Utils::neighbors_for(params.cell_index),
             // Create layer 0 at surface temperature - projection will handle geothermal gradient for deeper layers
-            asth_layers: vec![AsthCellAsthLayer::new_with_material(MaterialType::Silicate, params.surface_temp_k, layer_volume, 0)],
+            asth_layers: vec![AsthCellAsthLayer::new_with_material(
+                MaterialType::Silicate,
+                params.surface_temp_k,
+                layer_volume,
+                0,
+            )],
             cell_index: params.cell_index,
             layer_height_km: params.layer_height_km,
             layer_count: params.layer_count,
             asth_layers_next: vec![],
             planet_radius_km: params.planet_radius_km,
-            lithospheres: vec![
+            lith_layers: vec![
                 crate::asth_cell::asth_cell_lithosphere::AsthCellLithosphere::new(
                     0.0,
                     MaterialType::Silicate,
@@ -89,7 +96,7 @@ impl AsthCellColumn {
 
     /// Get the total height of all lithosphere layers
     pub fn total_lithosphere_height(&self) -> f64 {
-        self.lithospheres.iter().map(|layer| layer.height_km).sum()
+        self.lith_layers.iter().map(|layer| layer.height_km).sum()
     }
 
     /// Get the total height of all next lithosphere layers
@@ -106,6 +113,38 @@ impl AsthCellColumn {
         H3Utils::cell_area(self.cell_index.resolution(), self.planet_radius_km)
     }
 
+    fn reconcile_lith(&mut self) {
+        while self.lith_layers.len() != self.lithospheres_next.len() {
+            for (index, curr) in self.lith_layers.iter().enumerate() {
+                if index >= self.lithospheres_next.len() {
+                    self.lithospheres_next.insert(index, curr.clone());
+                }
+            }
+
+            for (index, curr) in self.lithospheres_next.iter().enumerate() {
+                if index >= self.lith_layers.len() {
+                    self.lith_layers.insert(index, curr.clone());
+                }
+            }
+        }
+    }
+
+    fn reconcile_asth(&mut self) {
+        while self.asth_layers.len() != self.asth_layers_next.len() {
+            for (index, curr) in self.asth_layers.iter().enumerate() {
+                if index >= self.asth_layers_next.len() {
+                    self.asth_layers_next.insert(index, curr.clone());
+                }
+            }
+
+            for (index, curr) in self.asth_layers_next.iter().enumerate() {
+                if index >= self.asth_layers.len() {
+                    self.asth_layers.insert(index, curr.clone());
+                }
+            }
+        }
+    }
+
     /// Get the bottom lithosphere layer, returning (current, next, profile) where next is mutable
     /// Panics if no lithosphere exists - all lithospheres should be created during initialization
     /// If next lithosphere is absent, clone the current lithosphere into next
@@ -113,14 +152,15 @@ impl AsthCellColumn {
     /// Panics if the lithosphere profile cannot be found (game-ending error)
     pub fn lithosphere(
         &mut self,
-        layer_index: usize
+        layer_index: usize,
     ) -> (
         &AsthCellLithosphere,
         &mut AsthCellLithosphere,
         &'static crate::material::MaterialProfile,
     ) {
+        self.reconcile_lith();
         // Ensure the current layer exists (should be created by project method)
-        if layer_index >= self.lithospheres.len() {
+        if layer_index >= self.lith_layers.len() {
             panic!(
                 "Current lithosphere {} does not exist. All layers should be created during initialization. Current layers: {}",
                 layer_index,
@@ -128,36 +168,23 @@ impl AsthCellColumn {
             );
         }
 
-        // Ensure the next layers vector has this layer - clone from current if missing
-        while self.asth_layers_next.len() <= layer_index {
-            let current_layer = &self.asth_layers[self.asth_layers_next.len()];
-            self.asth_layers_next.push(current_layer.clone());
-        }
-
         // Return references to the layers
         (
-            &self.lithospheres[layer_index],
+            &self.lith_layers[layer_index],
             &mut self.lithospheres_next[layer_index],
-            self.lithospheres[layer_index].profile()
+            self.lith_layers[layer_index].profile(),
         )
     }
 
     /// Create a lithosphere with the specified material
     /// Used when operations need to create new lithosphere
-    pub fn create_lithosphere(
-        &mut self,
-        material: MaterialType,
-        height_km: f64,
-        volume_km3: f64,
-    ) {
+    pub fn create_lithosphere(&mut self, material: MaterialType, height_km: f64, volume_km3: f64) {
         let lithosphere = AsthCellLithosphere::new(height_km, material, volume_km3);
 
         // Add to both current and next
-        self.lithospheres.push(lithosphere.clone());
+        self.lith_layers.push(lithosphere.clone());
         self.lithospheres_next.push(lithosphere);
     }
-
-
 
     /// Add a new lithosphere layer at the bottom (becomes new layer 0)
     /// All existing layers shift up in index
@@ -170,12 +197,15 @@ impl AsthCellColumn {
         self.lithospheres_next.insert(0, lithosphere);
     }
 
-
-
     /// Get a layer by index, returning (current, next) where next is mutable
     /// If next layer is absent, clone the current layer into next
-    pub fn asth_layer(&mut self, layer_index: usize) -> (&AsthCellAsthLayer, &mut AsthCellAsthLayer) {
+    pub fn asth_layer(
+        &mut self,
+        layer_index: usize,
+    ) -> (&AsthCellAsthLayer, &mut AsthCellAsthLayer) {
         // Ensure the current layer exists (should be created by project method)
+        self.reconcile_asth();
+
         if layer_index >= self.asth_layers.len() {
             panic!(
                 "Current layer {} does not exist. All layers should be created during initialization. Current layers: {}",
@@ -199,7 +229,7 @@ impl AsthCellColumn {
 
     pub fn commit_next_layers(&mut self) {
         self.asth_layers.clone_from_slice(&self.asth_layers_next);
-        self.lithospheres = self.lithospheres_next.clone();
+        self.lith_layers = self.lithospheres_next.clone();
     }
 
     pub fn default_volume(&self) -> f64 {
@@ -222,10 +252,16 @@ impl AsthCellColumn {
 
             // Calculate temperature for this layer using geothermal gradient
             let depth_km = (index as f64 + 0.5) * self.layer_height_km;
-            let layer_temp = surface_temp_k + crate::constants::GEOTHERMAL_GRADIENT_K_PER_KM * depth_km;
+            let layer_temp =
+                surface_temp_k + crate::constants::GEOTHERMAL_GRADIENT_K_PER_KM * depth_km;
 
             // Create layer with target temperature and let EnergyMass calculate energy
-            layers.push(AsthCellAsthLayer::new_with_material(MaterialType::Silicate, layer_temp, volume, index));
+            layers.push(AsthCellAsthLayer::new_with_material(
+                MaterialType::Silicate,
+                layer_temp,
+                volume,
+                index,
+            ));
         }
         // Ensure layers_next has the correct size and copy layers
         layers_next.clear();
@@ -243,7 +279,10 @@ impl AsthCellColumn {
 #[cfg(test)]
 mod tests {
     use crate::asth_cell::asth_cell_column::{AsthCellColumn, AsthCellParams};
-    use crate::constants::{ASTHENOSPHERE_SURFACE_START_TEMP_K, DEFAULT_LAYER_HEIGHT_KM, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K};
+    use crate::constants::{
+        ASTHENOSPHERE_SURFACE_START_TEMP_K, DEFAULT_LAYER_HEIGHT_KM,
+        SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K,
+    };
     use crate::temp_utils::volume_kelvin_to_joules;
     use approx::assert_abs_diff_eq;
     use h3o::CellIndex;
@@ -253,7 +292,11 @@ mod tests {
         let first = CellIndex::base_cells().next().unwrap();
 
         let volume: f64 = 1000.0;
-        let energy = volume_kelvin_to_joules(volume, ASTHENOSPHERE_SURFACE_START_TEMP_K, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K);
+        let energy = volume_kelvin_to_joules(
+            volume,
+            ASTHENOSPHERE_SURFACE_START_TEMP_K,
+            SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K,
+        );
 
         const LEVEL_COUNT: usize = 4;
 
@@ -271,7 +314,11 @@ mod tests {
         assert_eq!(cell.asth_layers.iter().len(), LEVEL_COUNT);
         assert_eq!(cell.asth_layers_next.iter().len(), LEVEL_COUNT);
         assert_eq!(cell.asth_layers[0].volume_km3(), volume);
-        assert_abs_diff_eq!(cell.asth_layers[0].energy_joules(), 7.08e21, epsilon = 4.0e20);
+        assert_abs_diff_eq!(
+            cell.asth_layers[0].energy_joules(),
+            7.08e21,
+            epsilon = 4.0e20
+        );
     }
 
     #[test]
@@ -364,22 +411,39 @@ mod tests {
 
             // Check layer 0 (surface layer)
             let layer_0_temp = cell.asth_layers[0].kelvin();
-            println!("{}: Surface temp {:.2} K -> Layer 0 temp {:.2} K (diff: {:.2} K)",
-                     description, surface_temp_k, layer_0_temp, layer_0_temp - surface_temp_k);
+            println!(
+                "{}: Surface temp {:.2} K -> Layer 0 temp {:.2} K (diff: {:.2} K)",
+                description,
+                surface_temp_k,
+                layer_0_temp,
+                layer_0_temp - surface_temp_k
+            );
 
             // Check layer 1 (deeper layer)
             let layer_1_temp = cell.asth_layers[1].kelvin();
-            println!("  Layer 1 temp: {:.2} K (diff from surface: {:.2} K)",
-                     layer_1_temp, layer_1_temp - surface_temp_k);
+            println!(
+                "  Layer 1 temp: {:.2} K (diff from surface: {:.2} K)",
+                layer_1_temp,
+                layer_1_temp - surface_temp_k
+            );
 
             // Check layer 2 (deepest layer)
             let layer_2_temp = cell.asth_layers[2].kelvin();
-            println!("  Layer 2 temp: {:.2} K (diff from surface: {:.2} K)",
-                     layer_2_temp, layer_2_temp - surface_temp_k);
+            println!(
+                "  Layer 2 temp: {:.2} K (diff from surface: {:.2} K)",
+                layer_2_temp,
+                layer_2_temp - surface_temp_k
+            );
 
             // Verify temperature increases with depth (geothermal gradient)
-            assert!(layer_1_temp > layer_0_temp, "Layer 1 should be hotter than layer 0");
-            assert!(layer_2_temp > layer_1_temp, "Layer 2 should be hotter than layer 1");
+            assert!(
+                layer_1_temp > layer_0_temp,
+                "Layer 1 should be hotter than layer 0"
+            );
+            assert!(
+                layer_2_temp > layer_1_temp,
+                "Layer 2 should be hotter than layer 1"
+            );
         }
     }
 
@@ -415,13 +479,17 @@ mod tests {
                 let actual_layer_temp = cell.asth_layers[0].kelvin();
                 let diff = (actual_layer_temp - target_temp).abs();
 
-                println!("{} (target {:.2} K): Surface {:.2} K -> Layer {:.2} K (diff: {:.2} K)",
-                         description, target_temp, surface_temp, actual_layer_temp, diff);
+                println!(
+                    "{} (target {:.2} K): Surface {:.2} K -> Layer {:.2} K (diff: {:.2} K)",
+                    description, target_temp, surface_temp, actual_layer_temp, diff
+                );
 
                 // If we're within 10K, that's close enough for testing
                 if diff < 10.0 {
-                    println!("  *** GOOD MATCH: Use surface temp {:.2} K for target {:.2} K ***",
-                             surface_temp, target_temp);
+                    println!(
+                        "  *** GOOD MATCH: Use surface temp {:.2} K for target {:.2} K ***",
+                        surface_temp, target_temp
+                    );
                 }
             }
             println!();

@@ -87,7 +87,7 @@ impl ProgressReporterOp {
         sim.cells.values()
             .map(|cell| {
                 let asth_energy: f64 = cell.asth_layers.iter().map(|l| l.energy_joules()).sum();
-                let lith_energy: f64 = cell.lithospheres.iter().map(|l| l.energy_joules()).sum();
+                let lith_energy: f64 = cell.lith_layers.iter().map(|l| l.energy_joules()).sum();
                 asth_energy + lith_energy
             })
             .sum()

@@ -115,7 +115,7 @@ fn analyze_final_state(sim: &Simulation) {
         
         // Total energy
         total_energy += cell.asth_layers.iter().map(|l| l.energy_joules()).sum::<f64>();
-        total_energy += cell.lithospheres.iter().map(|l| l.energy_joules()).sum::<f64>();
+        total_energy += cell.lith_layers.iter().map(|l| l.energy_joules()).sum::<f64>();
     }
     
     let avg_surface_temp = surface_temps.iter().sum::<f64>() / surface_temps.len() as f64;

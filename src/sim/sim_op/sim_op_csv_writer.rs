@@ -72,8 +72,8 @@ impl CsvColumn for AvgLithosphereTempColumn {
     fn extract_value(&self, sim: &Simulation) -> String {
         let temps: Vec<f64> = sim.cells.values()
             .filter_map(|column| {
-                if !column.lithospheres.is_empty() {
-                    Some(column.lithospheres.last().unwrap().kelvin())
+                if !column.lith_layers.is_empty() {
+                    Some(column.lith_layers.last().unwrap().kelvin())
                 } else {
                     None
                 }
@@ -219,7 +219,7 @@ impl CsvColumn for AvgLithLayerTempColumn {
 
     fn extract_value(&self, sim: &Simulation) -> String {
         let temps: Vec<f64> = sim.cells.values()
-            .filter_map(|column| column.lithospheres.get(self.layer_index))
+            .filter_map(|column| column.lith_layers.get(self.layer_index))
             .map(|layer| layer.kelvin())
             .collect();
 

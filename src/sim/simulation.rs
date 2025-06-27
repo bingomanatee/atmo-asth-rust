@@ -127,7 +127,7 @@ impl Simulation {
             for i in 0..column.asth_layers.len() {
                 column.asth_layers_next[i] = column.asth_layers[i].clone();
             }
-            column.lithospheres_next = column.lithospheres.clone();
+            column.lithospheres_next = column.lith_layers.clone();
         }
 
         // Run operators on next arrays

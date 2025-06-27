@@ -115,10 +115,10 @@ impl SimOp for LithosphereUnifiedOp {
             let (_, bottom_layer, profile) = column.lithosphere(0);
 
             if surface_temp_k <= profile.max_lith_formation_temp_kv {
-                // FORMATION: Temperature is cool enough for lithosphere growth
                 if current_total_height < profile.max_lith_height_km {
                     // Calculate growth rate based on temperature
-                    let growth_height = bottom_layer.growth_per_year(surface_temp_k);
+                    let growth_height =
+                        bottom_layer.growth_per_year(surface_temp_k) * sim.years_per_step as f64;
                     if (growth_height > 0.0) {
                         let excess_mass =
                             bottom_layer.grow(growth_height, area, sim.lith_layer_height_km);
@@ -128,7 +128,7 @@ impl SimOp for LithosphereUnifiedOp {
                         }
                     }
                 }
-            } else {
+            } else if (surface_temp_k > profile.melting_point_min_k) {
                 // MELTING: Temperature is too hot - melt lithosphere from bottom layer only
                 // We need to handle this without multiple mutable borrows
                 if bottom_layer.height_km > 0.0 {

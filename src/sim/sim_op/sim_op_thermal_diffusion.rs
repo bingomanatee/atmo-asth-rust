@@ -62,9 +62,9 @@ impl ThermalDiffusionOp {
 
         let mut columns: Vec<LayerPointer> = Vec::new();
         let mut asth_columns: Vec<LayerPointer> = Vec::new();
-        for index in 0..column.lithospheres.iter().len() {
+        for index in 0..column.lith_layers.iter().len() {
             if let lith = column
-                .lithospheres
+                .lith_layers
                 .get(index)
                 .expect("cannot get lithosphere")
             {
@@ -111,7 +111,12 @@ impl ThermalDiffusionOp {
         // Use the energy_mass from LayerPointer
         let from_mass = &from_pointer.energy_mass;
         let to_mass = &to_pointer.energy_mass;
-
+        if from_pointer.index >= match from_pointer.layer_type {
+            LayerType::Lith => column.lithospheres_next.len().min(column.lith_layers.len()),
+            LayerType::Asth => column.asth_layers.len().min(column.asth_layers_next.len())
+        } {
+            return;
+        }
         // Delegate calculation
         let base_energy_transfer =
             from_mass.calculate_thermal_transfer(to_mass, self.diffusion_rate, years);

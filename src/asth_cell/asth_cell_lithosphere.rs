@@ -12,7 +12,7 @@ impl AsthCellLithosphere {
     pub fn growth_per_year(&self, surface_temp_k: f64) -> f64 {
         let profile = self.profile();
         profile.max_lith_growth_km_per_year
-            * if surface_temp_k <= profile.peak_lith_growth_temp_kv {
+            * if surface_temp_k >= profile.peak_lith_growth_temp_kv {
             // At or below peak growth temperature - maximum growth
             1.0
         } else {
@@ -166,7 +166,8 @@ impl AsthCellLithosphere {
         let new_height = self.height_km + growth_km;
         let new_energy = self.energy_joules() * growth_km / self.height_km.min(2.0);
         self.add_energy(new_energy);
-        
+        self.height_km = new_height.min(max_layer_height_km);
+
         if new_height <= max_layer_height_km {
             self.set_volume_km3(new_height * area_km2);
             0.0 // No excess
