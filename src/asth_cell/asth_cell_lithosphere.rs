@@ -11,8 +11,14 @@ pub struct AsthCellLithosphere {
 impl AsthCellLithosphere {
     pub fn growth_per_year(&self, surface_temp_k: f64) -> f64 {
         let profile = self.profile();
+
+        // No growth if temperature is above formation threshold
+        if surface_temp_k > profile.max_lith_formation_temp_kv {
+            return 0.0;
+        }
+
         profile.max_lith_growth_km_per_year
-            * if surface_temp_k >= profile.peak_lith_growth_temp_kv {
+            * if surface_temp_k <= profile.peak_lith_growth_temp_kv {
             // At or below peak growth temperature - maximum growth
             1.0
         } else {

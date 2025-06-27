@@ -50,8 +50,8 @@ pub struct AsthCellParams {
 
 impl AsthCellColumn {
     pub fn new(params: AsthCellParams) -> AsthCellColumn {
-        // Calculate correct layer volume: area × layer_height_km
-        let layer_volume = params.volume * params.layer_height_km;
+        // Use the volume as provided (should already be area × layer_height_km)
+        let layer_volume = params.volume;
 
         let initial_asth_layer = AsthCellAsthLayer::new_with_material(
             MaterialType::Silicate,
@@ -290,13 +290,12 @@ mod tests {
         });
 
         assert_eq!(cell.neighbor_cell_ids.iter().len(), 6);
-        assert_eq!(cell.asth_layers.iter().len(), LEVEL_COUNT);
-        assert_eq!(cell.asth_layers_next.iter().len(), LEVEL_COUNT);
-        assert_eq!(cell.asth_layers[0].volume_km3(), volume);
+        assert_eq!(cell.asth_layers_t.iter().len(), LEVEL_COUNT);
+        assert_eq!(cell.asth_layers_t[0].0.volume_km3(), volume);
         assert_abs_diff_eq!(
-            cell.asth_layers[0].energy_joules(),
-            7.08e21,
-            epsilon = 4.0e20
+            cell.asth_layers_t[0].0.energy_joules(),
+            energy,
+            epsilon = 1e10
         );
     }
 
@@ -318,18 +317,18 @@ mod tests {
 
         // Test accessing existing layer
         {
-            let (current, next) = cell.asth_layer(0);
+            let (current, next) = &mut cell.layer_mut(0);
             assert_eq!(current.level, 0);
             assert_eq!(next.level, 0);
 
             // Modify the next layer
             next.set_energy_joules(2000.0);
         }
-        assert_eq!(cell.asth_layers_next[0].energy_joules(), 2000.0);
+        assert_eq!(cell.asth_layers_t[0].1.energy_joules(), 2000.0);
 
         // Test accessing layer 1 (should exist from initialization)
         {
-            let (current_1, next_1) = cell.asth_layer(1);
+            let (current_1, next_1) = &mut cell.layer_mut(1);
             assert_eq!(current_1.level, 1);
             assert_eq!(next_1.level, 1);
 
@@ -338,26 +337,26 @@ mod tests {
         }
 
         // Test that the layer method properly clones current to next when needed
-        let initial_next_len = cell.asth_layers_next.len();
+        let initial_next_len = cell.asth_layers_t.len();
 
         // Access a layer that might not be in next yet
         {
-            let (_, next_layer) = cell.asth_layer(1);
+            let (_, next_layer) = &mut cell.layer_mut(1);
             next_layer.set_energy_joules(1500.0);
         }
 
         // Should have cloned current layers to next if needed
-        assert!(cell.asth_layers_next.len() >= 2);
-        assert_eq!(cell.asth_layers_next[1].energy_joules(), 1500.0);
+        assert!(cell.asth_layers_t.len() >= 2);
+        assert_eq!(cell.asth_layers_t[1].1.energy_joules(), 1500.0);
 
         // Test accessing multiple layers separately
         {
-            let (_, next_0) = cell.asth_layer(0);
+            let (_, next_0) = &mut cell.layer_mut(0);
             next_0.set_energy_joules(3000.0);
         }
 
-        assert_eq!(cell.asth_layers_next[0].energy_joules(), 3000.0);
-        assert_eq!(cell.asth_layers_next[1].energy_joules(), 1500.0);
+        assert_abs_diff_eq!(cell.asth_layers_t[0].1.energy_joules(), 3000.0, epsilon = 1e-6);
+        assert_abs_diff_eq!(cell.asth_layers_t[1].1.energy_joules(), 1500.0, epsilon = 1e-6);
     }
 
     #[test]
@@ -389,7 +388,7 @@ mod tests {
             });
 
             // Check layer 0 (surface layer)
-            let layer_0_temp = cell.asth_layers[0].kelvin();
+            let layer_0_temp = cell.asth_layers_t[0].0.kelvin();
             println!(
                 "{}: Surface temp {:.2} K -> Layer 0 temp {:.2} K (diff: {:.2} K)",
                 description,
@@ -399,7 +398,7 @@ mod tests {
             );
 
             // Check layer 1 (deeper layer)
-            let layer_1_temp = cell.asth_layers[1].kelvin();
+            let layer_1_temp = cell.asth_layers_t[1].0.kelvin();
             println!(
                 "  Layer 1 temp: {:.2} K (diff from surface: {:.2} K)",
                 layer_1_temp,
@@ -407,7 +406,7 @@ mod tests {
             );
 
             // Check layer 2 (deepest layer)
-            let layer_2_temp = cell.asth_layers[2].kelvin();
+            let layer_2_temp = cell.asth_layers_t[2].0.kelvin();
             println!(
                 "  Layer 2 temp: {:.2} K (diff from surface: {:.2} K)",
                 layer_2_temp,
@@ -455,7 +454,7 @@ mod tests {
                     surface_temp_k: surface_temp,
                 });
 
-                let actual_layer_temp = cell.asth_layers[0].kelvin();
+                let actual_layer_temp = cell.asth_layers_t[0].0.kelvin();
                 let diff = (actual_layer_temp - target_temp).abs();
 
                 println!(

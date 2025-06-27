@@ -119,21 +119,23 @@ impl SimOp for LithosphereUnifiedOp {
                     // Calculate growth rate based on temperature
                     let growth_height =
                         bottom_layer.growth_per_year(surface_temp_k) * sim.years_per_step as f64;
-                    if (growth_height > 0.0) {
-                        let excess_mass =
+
+                    if growth_height > 0.0 {
+                        let excess_height =
                             bottom_layer.grow(growth_height, area, sim.lith_layer_height_km, surface_temp_k);
-                        if (excess_mass > 0.0) {
+
+                        if excess_height > 0.0 {
                             let mt = bottom_layer.material_type();
-                            column.add_bottom_lithosphere(mt, excess_mass / area);
+                            column.add_bottom_lithosphere(mt, excess_height);
                         }
                     }
                 }
-            } else if (surface_temp_k > profile.melting_point_min_k) {
+            } else if surface_temp_k > profile.melting_point_min_k {
                 // MELTING: Temperature is too hot - melt lithosphere from bottom layer only
                 // We need to handle this without multiple mutable borrows
                 if bottom_layer.height_km > 0.0 {
                     let energy = bottom_layer.process_melting(surface_temp_k, sim.years_per_step);
-                    if (energy > 0.0) {
+                    if energy > 0.0 {
                         let (_, top_asth_layer) = &mut column.layer_mut(0);
                         top_asth_layer.add_energy(energy);
                     }
@@ -185,22 +187,34 @@ mod tests {
 
         // Set low temperature for formation
         for column in sim.cells.values_mut() {
-            column.asth_layers[0].set_temp_kelvin(1600.0); // Below silicate formation temp
+            column.asth_layers_t[0].0.set_temp_kelvin(1600.0); // Below silicate formation temp
         }
 
-        // Record initial heights
+        // Record initial heights (should be 0 or very small initially)
+        // Check the first (bottom) layer since that's where growth happens
         let initial_heights: Vec<f64> = sim
             .cells
             .values()
-            .map(|column| column.lithospheres_next.last().unwrap().height_km)
+            .map(|column| {
+                if column.lith_layers_t.is_empty() {
+                    0.0
+                } else {
+                    column.lith_layers_t.first().unwrap().1.height_km
+                }
+            })
             .collect();
 
         // Run unified operator
         op.update_sim(&mut sim);
 
         // Heights should increase (formation occurred)
+        // Check the first (bottom) layer since that's where growth happens
         for (column, &initial_height) in sim.cells.values().zip(initial_heights.iter()) {
-            let final_height = column.lithospheres_next.last().unwrap().height_km;
+            let final_height = if column.lith_layers_t.is_empty() {
+                0.0
+            } else {
+                column.lith_layers_t.first().unwrap().1.height_km
+            };
             assert!(
                 final_height > initial_height,
                 "Lithosphere should form at low temperature. Initial: {}, Final: {}",
@@ -218,26 +232,27 @@ mod tests {
         // Initialize and add some lithosphere
         op.init_sim(&mut sim);
         for column in sim.cells.values_mut() {
-            column.lithospheres_next.last_mut().unwrap().height_km = 10.0;
+            column.lith_layers_t.last_mut().unwrap().1.height_km = 10.0;
             let area = column.area();
             let volume = area * 10.0;
             column
-                .lithospheres_next
+                .lith_layers_t
                 .last_mut()
                 .unwrap()
+                .1
                 .set_volume_km3(volume);
         }
 
         // Set high temperature for melting
         for column in sim.cells.values_mut() {
-            column.asth_layers[0].set_temp_kelvin(2500.0); // Well above silicate formation temp
+            column.asth_layers_t[0].0.set_temp_kelvin(2500.0); // Well above silicate formation temp
         }
 
         // Record initial heights
         let initial_heights: Vec<f64> = sim
             .cells
             .values()
-            .map(|column| column.lithospheres_next.last().unwrap().height_km)
+            .map(|column| column.lith_layers_t.last().unwrap().1.height_km)
             .collect();
 
         // Run unified operator
@@ -245,7 +260,7 @@ mod tests {
 
         // Heights should decrease (melting occurred)
         for (column, &initial_height) in sim.cells.values().zip(initial_heights.iter()) {
-            let final_height = column.lithospheres_next.last().unwrap().height_km;
+            let final_height = column.lith_layers_t.last().unwrap().1.height_km;
             assert!(
                 final_height < initial_height,
                 "Lithosphere should melt at high temperature. Initial: {}, Final: {}",
@@ -265,14 +280,14 @@ mod tests {
 
         // Set temperature right at formation threshold
         for column in sim.cells.values_mut() {
-            column.asth_layers[0].set_temp_kelvin(1873.15); // Exactly at silicate formation temp
+            column.asth_layers_t[0].0.set_temp_kelvin(1873.15); // Exactly at silicate formation temp
         }
 
         // Record initial heights
         let initial_heights: Vec<f64> = sim
             .cells
             .values()
-            .map(|column| column.lithospheres_next.last().unwrap().height_km)
+            .map(|column| column.lith_layers_t.last().unwrap().1.height_km)
             .collect();
 
         // Run unified operator
@@ -280,7 +295,7 @@ mod tests {
 
         // Heights should remain approximately the same (equilibrium)
         for (column, &initial_height) in sim.cells.values().zip(initial_heights.iter()) {
-            let final_height = column.lithospheres_next.last().unwrap().height_km;
+            let final_height = column.lith_layers_t.last().unwrap().1.height_km;
             assert_abs_diff_eq!(final_height, initial_height, epsilon = 0.1);
         }
     }
