@@ -1,4 +1,4 @@
-use crate::constants::{MANTLE_DENSITY_KGM3, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K};
+use crate::constants::{M2_PER_KM2, MANTLE_DENSITY_KGM3, SECONDS_PER_YEAR, SIGMA_KM2_YEAR, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K};
 use crate::material::{MaterialType, get_profile};
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +19,9 @@ pub trait EnergyMass: std::any::Any {
     /// Get the current volume in km³ (read-only)
     fn volume(&self) -> f64;
 
+    /// Get the height in km (for layer-based calculations)
+    fn height_km(&self) -> f64;
+
     /// Set the temperature in Kelvin (internal use only - maintains thermodynamic consistency)
     fn set_kelvin(&mut self, kelvin: f64);
 
@@ -31,10 +34,10 @@ pub trait EnergyMass: std::any::Any {
     fn mass_kg(&self) -> f64;
 
     /// Get the density in kg/m³
-    fn density(&self) -> f64;
+    fn density_kgm3(&self) -> f64;
 
     /// Get the specific heat in J/(kg·K)
-    fn specific_heat(&self) -> f64;
+    fn specific_heat_j_kg_k(&self) -> f64;
 
     /// Get the thermal conductivity in W/(m·K)
     fn thermal_conductivity(&self) -> f64;
@@ -57,6 +60,10 @@ pub trait EnergyMass: std::any::Any {
     /// Radiate energy to another EnergyMass using conductive transfer
     /// Returns the amount of energy transferred (positive = energy flows to other)
     fn radiate_to(&mut self, other: &mut dyn EnergyMass, distance_km: f64, area_km2: f64, time_years: f64) -> f64;
+
+    /// Radiate energy to space using Stefan-Boltzmann law
+    /// Returns the amount of energy radiated (J)
+    fn radiate_to_space(&mut self, area_km2: f64, time_years: f64) -> f64;
 
     /// Remove volume (enforces zero minimum, maintains temperature)
     fn remove_volume_internal(&mut self, volume_to_remove: f64);
@@ -90,7 +97,7 @@ pub trait EnergyMass: std::any::Any {
         // Add energy by calculating new temperature
         let current_energy = self.energy();
         let mass_kg = self.mass_kg();
-        let specific_heat = self.specific_heat();
+        let specific_heat = self.specific_heat_j_kg_k();
 
         if mass_kg > 0.0 && specific_heat > 0.0 {
             let new_temp = (current_energy + energy_influx) / (mass_kg * specific_heat);
@@ -98,28 +105,8 @@ pub trait EnergyMass: std::any::Any {
         }
     }
 
-    /// Radiate energy to space based on material thermal properties
-    /// The top layer (lithosphere or asthenosphere) radiates as much as possible
-    /// Returns the amount of energy radiated (J)
-    fn radiate_to_space(&mut self, area_km2: f64, time_years: f64) -> f64 {
-        let conductivity = self.thermal_conductivity();
-        let temp_k = self.kelvin();
-        let r0 = self.thermal_transmission_r0();
-
-        // Maximum radiation based on material properties and temperature
-        // Higher conductivity + higher R0 + higher temperature = more radiation
-        let radiation_coefficient = conductivity * r0 * 1e12; // Scaling factor
-        let radiation_energy = radiation_coefficient * temp_k * area_km2 * time_years;
-
-        // Remove the radiated energy (cooling effect)
-        let actual_radiated = radiation_energy.min(self.energy() * 0.5); // Max 50% per step
-        self.remove_heat(actual_radiated);
-
-        actual_radiated
-    }
-
     /// Calculate thermal energy transfer between two materials based on conductivity and temperature difference
-    /// Scales transfer based on the volume of the hotter material
+    /// Includes height scaling: base rates are for 1km layers, scales by sqrt(height of source layer)
     /// Returns the energy transfer amount (J)
     fn calculate_thermal_transfer(&self, other: &dyn EnergyMass, diffusion_rate: f64, years: f64) -> f64 {
         let interface_conductivity = 2.0 * self.thermal_conductivity() * other.thermal_conductivity()
@@ -131,19 +118,18 @@ pub trait EnergyMass: std::any::Any {
 
         let temp_diff = self.kelvin() - other.kelvin();
 
-        // Determine which material is hotter and use its volume for scaling
-        let hot_volume_km3 = if temp_diff > 0.0 {
-            self.volume_km3()  // self is hotter
+        // Determine which material is hotter (source) and use its height for scaling
+        let source_height_km = if temp_diff > 0.0 {
+            self.height_km()  // self is hotter
         } else {
-            other.volume_km3() // other is hotter
+            other.height_km() // other is hotter
         };
 
-        // Volume scaling factor: larger hot volumes can transfer more energy
-        // Use cube root to prevent excessive scaling for very large volumes
-        let volume_scale = (hot_volume_km3 / 100.0).powf(0.33).max(0.1); // Baseline 100 km³, minimum 0.1x
+        // Height scaling factor: base rates are for 1km layers, scale by sqrt(height)
+        let height_scale = (source_height_km/2.0).sqrt();
 
-        let base_transfer_rate = interface_conductivity * interface_r0 * diffusion_rate * years * 1e12; // Scaling factor
-        let energy_transfer = temp_diff * base_transfer_rate * volume_scale;
+        let base_transfer_rate = interface_conductivity * interface_r0 * diffusion_rate * years * crate::constants::SECONDS_PER_YEAR * crate::constants::M2_PER_KM2;
+        let energy_transfer = temp_diff * base_transfer_rate * height_scale;
 
         energy_transfer
     }
@@ -151,18 +137,18 @@ pub trait EnergyMass: std::any::Any {
     /// Calculate bulk thermal energy transfer for large volume objects
     /// Uses volume-based thermal diffusion physics appropriate for thick layers
     /// Returns the energy transfer amount (J)
+    /// May be too aggressive for the sim
     fn calculate_bulk_thermal_transfer(&self, other: &dyn EnergyMass, layer_thickness_km: f64, years: f64) -> f64 {
         let temp_diff = self.kelvin() - other.kelvin();
 
-        // Calculate thermal diffusivity (m²/s) = conductivity / (density × specific_heat)
-        let self_diffusivity = self.thermal_conductivity() / (self.density_kg_m3() * self.specific_heat_capacity_j_per_kg_k());
-        let other_diffusivity = other.thermal_conductivity() / (other.density_kg_m3() * other.specific_heat_capacity_j_per_kg_k());
+        let self_diffusivity = self.thermal_conductivity() / (self.density_kgm3() * self.specific_heat_j_kg_k());
+        let other_diffusivity = other.thermal_conductivity() / (other.density_kgm3() * other.specific_heat_j_kg_k());
 
         // Use average diffusivity for the transfer
         let avg_diffusivity = (self_diffusivity + other_diffusivity) / 2.0;
 
         // Convert to km²/year for our units
-        let diffusivity_km2_per_year = avg_diffusivity * 3.15576e7 / 1e6; // seconds/year / m²/km²
+        let diffusivity_km2_per_year = avg_diffusivity * SECONDS_PER_YEAR / M2_PER_KM2; // seconds/year / m²/km²
 
         // Calculate diffusion length scale: sqrt(diffusivity × time)
         let diffusion_length_km = (diffusivity_km2_per_year * years).sqrt();
@@ -171,7 +157,7 @@ pub trait EnergyMass: std::any::Any {
         let transfer_efficiency = (diffusion_length_km / layer_thickness_km).min(1.0);
 
         // Volume-based energy transfer: larger volumes can transfer more energy
-        let transfer_volume_km3 = (self.volume_km3() + other.volume_km3()) / 2.0;
+        let transfer_volume_km3 = (self.volume() + other.volume()) / 2.0;
 
         // Base energy transfer rate (J/K/km³/year)
         let base_rate = avg_diffusivity * 1e15; // Scaling factor for realistic energy transfer
@@ -189,6 +175,7 @@ pub trait EnergyMass: std::any::Any {
 pub struct StandardEnergyMass {
     energy_joules: f64,
     volume_km3: f64,
+    height_km: f64,            // Height in km (for layer calculations)
     material_type: MaterialType,
     // Cached properties from material profile for performance
     specific_heat: f64,        // J/(kg·K)
@@ -204,6 +191,18 @@ impl StandardEnergyMass {
         temperature_k: f64,
         volume_km3: f64,
     ) -> Self {
+        // Default height calculation: assume typical cell area of ~85,000 km²
+        let default_height_km = volume_km3 / 85000.0;
+        Self::new_with_material_and_height(material_type, temperature_k, volume_km3, default_height_km)
+    }
+
+    /// Create a new StandardEnergyMass with specified material, temperature, volume, and height
+    pub fn new_with_material_and_height(
+        material_type: MaterialType,
+        temperature_k: f64,
+        volume_km3: f64,
+        height_km: f64,
+    ) -> Self {
         let profile = get_profile(material_type).expect(&format!(
             "Material profile not found for {:?}",
             material_type
@@ -218,6 +217,7 @@ impl StandardEnergyMass {
         let mut energy_mass = Self {
             energy_joules: 0.0,
             volume_km3,
+            height_km,
             material_type,
             specific_heat: profile.specific_heat_capacity_j_per_kg_k,
             density: profile.density_kg_m3,
@@ -248,6 +248,7 @@ impl StandardEnergyMass {
         Self {
             energy_joules,
             volume_km3,
+            height_km: volume_km3 / 85000.0, // Default height calculation
             material_type,
             specific_heat: profile.specific_heat_capacity_j_per_kg_k,
             density: profile.density_kg_m3,
@@ -283,6 +284,11 @@ impl EnergyMass for StandardEnergyMass {
         self.volume_km3
     }
 
+    /// Get the height in km (for layer-based calculations)
+    fn height_km(&self) -> f64 {
+        self.height_km
+    }
+
     /// Get the mass in kg (derived from volume and density)
     fn mass_kg(&self) -> f64 {
         const KM3_TO_M3: f64 = 1.0e9;
@@ -291,12 +297,12 @@ impl EnergyMass for StandardEnergyMass {
     }
 
     /// Get the density in kg/m³
-    fn density(&self) -> f64 {
+    fn density_kgm3(&self) -> f64 {
         self.density
     }
 
     /// Get the specific heat in J/(kg·K)
-    fn specific_heat(&self) -> f64 {
+    fn specific_heat_j_kg_k(&self) -> f64 {
         self.specific_heat
     }
 
@@ -384,6 +390,23 @@ impl EnergyMass for StandardEnergyMass {
             self.remove_heat(-actual_transfer);  // Remove negative energy = add positive energy
             -actual_transfer
         }
+    }
+
+    /// Radiate energy to space using Stefan-Boltzmann law
+    /// Returns the amount of energy radiated (J)
+    fn radiate_to_space(&mut self, area_km2: f64, time_years: f64) -> f64 {
+        let surface_temp = self.kelvin();
+
+        // Calculate radiated energy per km² using Stefan-Boltzmann law
+        let radiated_energy_per_km2 = SIGMA_KM2_YEAR * surface_temp.powi(4) * time_years;
+        let total_radiated_energy = radiated_energy_per_km2 * area_km2;
+
+        // Remove energy (max 90% per step to prevent complete energy loss)
+        let current_energy = self.energy();
+        let energy_to_remove = total_radiated_energy.min(current_energy * 0.9);
+        self.remove_heat(energy_to_remove);
+
+        energy_to_remove
     }
 
     /// Remove volume (enforces zero minimum, maintains temperature)
@@ -499,7 +522,7 @@ mod tests {
         // Set energy back
         // Set energy by calculating the required temperature
         let mass_kg = energy_mass.mass_kg();
-        let specific_heat = energy_mass.specific_heat();
+        let specific_heat = energy_mass.specific_heat_j_kg_k();
         if mass_kg > 0.0 && specific_heat > 0.0 {
             let new_temp = energy / (mass_kg * specific_heat);
             energy_mass.set_temperature(new_temp);
@@ -537,7 +560,7 @@ mod tests {
         // Double the energy
         // Set energy by calculating the required temperature
         let mass_kg = energy_mass.mass_kg();
-        let specific_heat = energy_mass.specific_heat();
+        let specific_heat = energy_mass.specific_heat_j_kg_k();
         if mass_kg > 0.0 && specific_heat > 0.0 {
             let new_temp = (initial_energy * 2.0) / (mass_kg * specific_heat);
             energy_mass.set_temperature(new_temp);
@@ -561,7 +584,7 @@ mod tests {
         // Add energy by calculating the new temperature
         let current_energy = energy_mass.energy();
         let mass_kg = energy_mass.mass_kg();
-        let specific_heat = energy_mass.specific_heat();
+        let specific_heat = energy_mass.specific_heat_j_kg_k();
         if mass_kg > 0.0 && specific_heat > 0.0 {
             let new_temp = (current_energy + initial_energy) / (mass_kg * specific_heat);
             energy_mass.set_temperature(new_temp);
@@ -627,7 +650,7 @@ mod tests {
         // Calculate expected blended temperature
         let total_mass = em1.mass_kg() + em2.mass_kg();
         let total_energy = initial_energy1 + initial_energy2;
-        let expected_temp = total_energy / (total_mass * em1.specific_heat());
+        let expected_temp = total_energy / (total_mass * em1.specific_heat_j_kg_k());
 
         em1.merge_em(&em2);
 

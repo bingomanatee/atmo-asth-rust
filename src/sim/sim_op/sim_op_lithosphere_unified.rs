@@ -1,5 +1,5 @@
 use crate::sim::sim_op::{SimOp, SimOpHandle};
-use crate::sim::Simulation;
+use crate::sim::simulation::Simulation;
 use crate::material::MaterialType;
 use crate::asth_cell::AsthCellLithosphere;
 use crate::h3_utils::H3Utils;
@@ -108,13 +108,16 @@ impl SimOp for LithosphereUnifiedOp {
             // Calculate area once to avoid borrowing issues
             let area = column.area();
 
+            // Check total lithosphere height limit before processing layers
+            let current_total_height = column.total_lithosphere_height_next();
+
             // Process each lithosphere layer
             for lithosphere in column.lithospheres_next.iter_mut() {
                 let profile = lithosphere.profile();
-                
+
                 if surface_temp_k <= profile.max_lith_formation_temp_kv {
                     // FORMATION: Temperature is cool enough for lithosphere growth
-                    if lithosphere.height_km < profile.max_lith_height_km {
+                    if current_total_height < profile.max_lith_height_km {
                         // Calculate growth rate based on temperature
                         let growth_km_per_year = if surface_temp_k <= profile.peak_lith_growth_temp_kv {
                             // At or below peak growth temperature - maximum growth
@@ -130,10 +133,11 @@ impl SimOp for LithosphereUnifiedOp {
                         let growth_km_per_step = growth_km_per_year * sim.years_per_step as f64;
 
                         if growth_km_per_step > 0.0 {
-                            // Calculate new height but cap at maximum allowed height
-                            let new_height = lithosphere.height_km + growth_km_per_step;
-                            let capped_height = new_height.min(profile.max_lith_height_km);
-                            
+                            // Calculate new height but cap at maximum total allowed height
+                            let max_additional_growth = profile.max_lith_height_km - current_total_height;
+                            let capped_growth = growth_km_per_step.min(max_additional_growth);
+                            let capped_height = lithosphere.height_km + capped_growth;
+
                             lithosphere.height_km = capped_height;
                             let new_volume = area * lithosphere.height_km;
                             lithosphere.set_volume_km3(new_volume);
@@ -189,9 +193,9 @@ mod tests {
     use super::*;
     use crate::constants::{ASTHENOSPHERE_SURFACE_START_TEMP_K, EARTH_RADIUS_KM};
     use crate::planet::Planet;
-    use crate::sim::{SimProps, Simulation};
     use h3o::Resolution;
     use approx::assert_abs_diff_eq;
+    use crate::sim::simulation::{SimProps, Simulation};
 
     fn create_test_simulation() -> Simulation {
         Simulation::new(SimProps {
@@ -203,7 +207,8 @@ mod tests {
             ops: vec![],
             res: Resolution::Two,
             layer_count: 4,
-            layer_height_km: 10.0,
+            asth_layer_height_km: 100.0,
+            lith_layer_height_km: 50.0,
             sim_steps: 1,
             years_per_step: 1000,
             debug: false,

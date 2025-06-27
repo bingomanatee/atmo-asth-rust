@@ -1,5 +1,5 @@
 use crate::sim::sim_op::{SimOp, SimOpHandle};
-use crate::sim::Simulation;
+use crate::sim::simulation::Simulation;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
@@ -29,6 +29,15 @@ pub struct AvgEnergyColumn;
 pub struct TotalEnergyColumn;
 pub struct AvgLithosphereThicknessColumn;
 pub struct TotalLithosphereThicknessColumn;
+
+// Individual layer temperature columns
+pub struct AvgAsthLayerTempColumn {
+    pub layer_index: usize,
+}
+
+pub struct AvgLithLayerTempColumn {
+    pub layer_index: usize,
+}
 
 // Column implementations
 impl CsvColumn for StepColumn {
@@ -165,6 +174,64 @@ impl CsvColumn for TotalLithosphereThicknessColumn {
     }
 }
 
+impl CsvColumn for AvgAsthLayerTempColumn {
+    fn header(&self) -> &str {
+        // We'll need to create a static string for the header
+        // For now, let's use a simple format
+        match self.layer_index {
+            0 => "avg_asth_layer_0_temp_k",
+            1 => "avg_asth_layer_1_temp_k",
+            2 => "avg_asth_layer_2_temp_k",
+            3 => "avg_asth_layer_3_temp_k",
+            4 => "avg_asth_layer_4_temp_k",
+            5 => "avg_asth_layer_5_temp_k",
+            _ => "avg_asth_layer_x_temp_k",
+        }
+    }
+
+    fn extract_value(&self, sim: &Simulation) -> String {
+        let temps: Vec<f64> = sim.cells.values()
+            .filter_map(|column| column.asth_layers.get(self.layer_index))
+            .map(|layer| layer.kelvin())
+            .collect();
+
+        if temps.is_empty() {
+            "0.0".to_string()
+        } else {
+            let avg = temps.iter().sum::<f64>() / temps.len() as f64;
+            format!("{:.1}", avg)
+        }
+    }
+}
+
+impl CsvColumn for AvgLithLayerTempColumn {
+    fn header(&self) -> &str {
+        match self.layer_index {
+            0 => "avg_lith_layer_0_temp_k",
+            1 => "avg_lith_layer_1_temp_k",
+            2 => "avg_lith_layer_2_temp_k",
+            3 => "avg_lith_layer_3_temp_k",
+            4 => "avg_lith_layer_4_temp_k",
+            5 => "avg_lith_layer_5_temp_k",
+            _ => "avg_lith_layer_x_temp_k",
+        }
+    }
+
+    fn extract_value(&self, sim: &Simulation) -> String {
+        let temps: Vec<f64> = sim.cells.values()
+            .filter_map(|column| column.lithospheres.get(self.layer_index))
+            .map(|layer| layer.kelvin())
+            .collect();
+
+        if temps.is_empty() {
+            "0.0".to_string()
+        } else {
+            let avg = temps.iter().sum::<f64>() / temps.len() as f64;
+            format!("{:.1}", avg)
+        }
+    }
+}
+
 /// CSV Writer Operator with customizable columns
 ///
 /// This operator writes simulation statistics to a CSV file at each step using
@@ -218,9 +285,45 @@ impl CsvWriterOp {
         Self::new_with_columns(file_path, default_columns)
     }
 
+    /// Create a new CSV writer operator with layer temperature columns
+    /// Includes temperature data for each individual asthenosphere and lithosphere layer
+    ///
+    /// # Arguments
+    /// * `file_path` - Path to the CSV file to write (will be created/overwritten)
+    /// * `max_asth_layers` - Maximum number of asthenosphere layers to include
+    /// * `max_lith_layers` - Maximum number of lithosphere layers to include
+    pub fn new_with_layer_temps(file_path: String, max_asth_layers: usize, max_lith_layers: usize) -> Self {
+        let mut columns: Vec<Box<dyn CsvColumn>> = vec![
+            Box::new(StepColumn),
+            Box::new(YearsColumn),
+        ];
+
+        // Add asthenosphere layer temperature columns
+        for i in 0..max_asth_layers {
+            columns.push(Box::new(AvgAsthLayerTempColumn { layer_index: i }));
+        }
+
+        // Add lithosphere layer temperature columns
+        for i in 0..max_lith_layers {
+            columns.push(Box::new(AvgLithLayerTempColumn { layer_index: i }));
+        }
+
+        // Add some summary columns
+        columns.push(Box::new(AvgSurfaceTempColumn));
+        columns.push(Box::new(AvgLithosphereThicknessColumn));
+        columns.push(Box::new(TotalEnergyColumn));
+
+        Self::new_with_columns(file_path, columns)
+    }
+
     /// Create a handle for the CSV writer operator with default columns
     pub fn handle(file_path: String) -> SimOpHandle {
         SimOpHandle::new(Box::new(Self::new(file_path)))
+    }
+
+    /// Create a handle for the CSV writer operator with layer temperature columns
+    pub fn handle_with_layer_temps(file_path: String, max_asth_layers: usize, max_lith_layers: usize) -> SimOpHandle {
+        SimOpHandle::new(Box::new(Self::new_with_layer_temps(file_path, max_asth_layers, max_lith_layers)))
     }
 
     /// Create a handle for the CSV writer operator with custom columns
@@ -307,9 +410,9 @@ mod tests {
     use super::*;
     use crate::constants::{ASTHENOSPHERE_SURFACE_START_TEMP_K, EARTH_RADIUS_KM};
     use crate::planet::Planet;
-    use crate::sim::{SimProps, Simulation};
     use h3o::Resolution;
     use std::fs;
+    use crate::sim::simulation::{SimProps, Simulation};
 
     #[test]
     fn test_csv_writer_creates_file() {
@@ -327,7 +430,8 @@ mod tests {
             ops: vec![CsvWriterOp::handle(test_file.to_string())],
             res: Resolution::Two,
             layer_count: 4,
-            layer_height_km: 10.0,
+            asth_layer_height_km: 100.0,
+            lith_layer_height_km: 50.0,
             sim_steps: 3,
             years_per_step: 1000,
             debug: false,

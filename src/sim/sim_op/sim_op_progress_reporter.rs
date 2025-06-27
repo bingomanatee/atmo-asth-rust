@@ -1,5 +1,5 @@
 use crate::sim::sim_op::{SimOp, SimOpHandle};
-use crate::sim::Simulation;
+use crate::sim::simulation::Simulation;
 
 /// Progress Reporter Operator
 /// 
@@ -177,8 +177,8 @@ mod tests {
     use super::*;
     use crate::constants::EARTH_RADIUS_KM;
     use crate::planet::Planet;
-    use crate::sim::{SimProps, Simulation};
     use h3o::Resolution;
+    use crate::sim::simulation::{SimProps, Simulation};
 
     #[test]
     fn test_progress_reporter_creation() {
@@ -207,7 +207,8 @@ mod tests {
             ops: vec![],
             res: Resolution::Two,
             layer_count: 3,
-            layer_height_km: 50.0,
+            asth_layer_height_km: 50.0,
+            lith_layer_height_km: 25.0,
             sim_steps: 1,
             years_per_step: 1000,
             debug: false,

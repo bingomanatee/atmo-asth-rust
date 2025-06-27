@@ -1,9 +1,6 @@
 mod sim_op_atmosphere;
 mod sim_op_cooling;
 mod sim_op_core_radiance;
-mod sim_op_lithosphere;
-mod sim_op_lithosphere_feedback;
-mod sim_op_lithosphere_melting;
 mod sim_op_lithosphere_unified;
 pub mod sim_op_csv_writer;
 mod sim_op_progress_reporter;
@@ -12,15 +9,11 @@ mod sim_op_thermal_diffusion;
 pub use sim_op_atmosphere::AtmosphereOp;
 pub use sim_op_cooling::CoolingOp;
 pub use sim_op_core_radiance::CoreRadianceOp;
-pub use sim_op_lithosphere::LithosphereOp;
-pub use sim_op_lithosphere_feedback::LithosphereFeedbackOp;
-pub use sim_op_lithosphere_melting::LithosphereMeltingOp;
 pub use sim_op_lithosphere_unified::LithosphereUnifiedOp;
 pub use sim_op_csv_writer::CsvWriterOp;
 pub use sim_op_progress_reporter::ProgressReporterOp;
 pub use sim_op_thermal_diffusion::ThermalDiffusionOp;
-
-use crate::sim::Simulation;
+use crate::sim::simulation::Simulation;
 
 pub trait SimOp {
     /// The name of this operator (for identification and lookup)

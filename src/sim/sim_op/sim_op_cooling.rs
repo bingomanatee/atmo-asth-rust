@@ -1,5 +1,5 @@
 use crate::sim::sim_op::{SimOp, SimOpHandle};
-use crate::sim::Simulation;
+use crate::sim::simulation::Simulation;
 use crate::temp_utils::cooling_per_cell_per_year;
 
 /// This op is @deprectaed 
@@ -46,8 +46,9 @@ mod tests {
     use crate::constants::{ASTHENOSPHERE_SURFACE_START_TEMP_K, EARTH_RADIUS_KM};
     use crate::planet::Planet;
     use crate::sim::sim_op::SimOpHandle;
-    use crate::sim::{SimProps, Simulation};
     use h3o::Resolution;
+    use crate::sim::simulation::{SimProps, Simulation};
+
     #[test]
     fn just_chillin() {
         let mut sim = Simulation::new(SimProps {
@@ -59,7 +60,8 @@ mod tests {
             ops: vec![CoolingOp::handle(1.0)],
             res: Resolution::Two,
             layer_count: 4,
-            layer_height_km: 10.0,
+            asth_layer_height_km: 10.0,
+            lith_layer_height_km: 25.0,
             sim_steps: 10,
             years_per_step: 100_000,
             debug: true,
@@ -98,7 +100,8 @@ mod tests {
             ops: vec![],
             res: Resolution::Two,
             layer_count: 4,
-            layer_height_km: 10.0,
+            asth_layer_height_km: 10.0,
+            lith_layer_height_km: 25.0,
             sim_steps: 1,
             years_per_step: 1000,
             debug: false,
@@ -115,7 +118,8 @@ mod tests {
             ops: vec![],
             res: Resolution::Two,
             layer_count: 4,
-            layer_height_km: 10.0,
+            asth_layer_height_km: 100.0,
+            lith_layer_height_km: 50.0,
             sim_steps: 1,
             years_per_step: 1000,
             debug: false,

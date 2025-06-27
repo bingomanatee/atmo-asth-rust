@@ -1,7 +1,7 @@
 // Atmosphere Operator
 // Accumulates atmospheric mass from outgassing and calculates atmospheric impedance
 
-use crate::sim::Simulation;
+use crate::sim::simulation::Simulation;
 use crate::sim::sim_op::{SimOp, SimOpHandle};
 use crate::temp_utils::radiated_joules_per_year;
 
@@ -311,6 +311,7 @@ pub fn find_atmosphere_op(sim: &Simulation) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
+    use crate::sim::simulation::{SimProps, Simulation};
     use super::*;
 
     #[test]
@@ -363,7 +364,7 @@ mod tests {
 
     #[test]
     fn test_atmosphere_op_removes_energy_from_next_arrays() {
-        use crate::sim::{Simulation, SimProps};
+        use crate::sim::{};
         use crate::planet::Planet;
         use crate::constants::EARTH_RADIUS_KM;
         use h3o::Resolution;
@@ -378,7 +379,8 @@ mod tests {
             ops: vec![],
             res: Resolution::Two,
             layer_count: 3,
-            layer_height_km: 50.0,
+            asth_layer_height_km: 50.0,
+            lith_layer_height_km: 25.0,
             sim_steps: 1,
             years_per_step: 1000,
             debug: false,

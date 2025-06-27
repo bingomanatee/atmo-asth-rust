@@ -4,7 +4,7 @@ use crate::material::MaterialType;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AsthCellLayer {
-    energy_mass: StandardEnergyMass,
+    pub(crate) energy_mass: StandardEnergyMass,
     pub level: usize,
 }
 
@@ -50,7 +50,7 @@ impl AsthCellLayer {
     /// Set the energy, temperature will change accordingly (volume stays constant)
     pub fn set_energy_joules(&mut self, energy_joules: f64) {
         let mass_kg = self.energy_mass.mass_kg();
-        let specific_heat = self.energy_mass.specific_heat();
+        let specific_heat = self.energy_mass.specific_heat_j_kg_k();
         if mass_kg > 0.0 && specific_heat > 0.0 {
             let new_kelvin = energy_joules / (mass_kg * specific_heat);
             self.energy_mass.set_kelvin(new_kelvin);
@@ -85,7 +85,7 @@ impl AsthCellLayer {
     pub fn add_energy(&mut self, additional_energy: f64) {
         let current_energy = self.energy_mass.energy();
         let mass_kg = self.energy_mass.mass_kg();
-        let specific_heat = self.energy_mass.specific_heat();
+        let specific_heat = self.energy_mass.specific_heat_j_kg_k();
         if mass_kg > 0.0 && specific_heat > 0.0 {
             let new_kelvin = (current_energy + additional_energy) / (mass_kg * specific_heat);
             self.energy_mass.set_kelvin(new_kelvin);
@@ -129,12 +129,12 @@ impl AsthCellLayer {
 
     /// Get the density in kg/m³
     pub fn density(&self) -> f64 {
-        self.energy_mass.density()
+        self.energy_mass.density_kgm3()
     }
 
     /// Get the specific heat in J/(kg·K)
     pub fn specific_heat(&self) -> f64 {
-        self.energy_mass.specific_heat()
+        self.energy_mass.specific_heat_j_kg_k()
     }
 
     /// Add energy in Joules (temperature will increase)

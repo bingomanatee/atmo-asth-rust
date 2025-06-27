@@ -1,13 +1,13 @@
 use atmo_asth_rust::constants::EARTH_RADIUS_KM;
 use atmo_asth_rust::planet::Planet;
 use atmo_asth_rust::sim::sim_op::{
-    AtmosphereOp, CoreRadianceOp, CoolingOp, CsvWriterOp, LithosphereUnifiedOp,
+    AtmosphereOp, CoreRadianceOp, CsvWriterOp, LithosphereUnifiedOp,
     ProgressReporterOp, ThermalDiffusionOp,
 };
-use atmo_asth_rust::sim::{SimProps, Simulation};
 use atmo_asth_rust::material::MaterialType;
 use h3o::Resolution;
 use std::fs;
+use atmo_asth_rust::sim::simulation::{SimProps, Simulation};
 
 /// Comprehensive demonstration of all thermal operators working together
 /// to achieve realistic planetary thermal equilibrium with CSV data export.
@@ -24,9 +24,8 @@ fn main() {
 
     // Create comprehensive operator suite with modern thermal physics
     let operators = vec![
-        CoreRadianceOp::handle(1.0e11), // Core heat input from planetary interior
-        ThermalDiffusionOp::handle(0.15, 25.0), // Realistic thermal diffusion with cascading energy transfer
-        CoolingOp::handle(1.2), // Enhanced surface cooling efficiency
+        CoreRadianceOp::handle_earth(), // Core heat input from planetary interior
+        ThermalDiffusionOp::handle(1.0, 25.0), // Realistic thermal diffusion with cascading energy transfer
         AtmosphereOp::handle_with_params(
             1300.0, // 1300K outgassing threshold
             5e-11,  // Lower outgassing rate
@@ -42,7 +41,7 @@ fn main() {
             0.15,  // Scale factor
         ),
         ProgressReporterOp::handle(30), // Report every 30 steps
-        CsvWriterOp::handle(csv_file.clone()),
+        CsvWriterOp::handle_with_layer_temps(csv_file.clone(), 4, 6), // 4 asth layers, up to 6 lith layers
     ];
 
     // Create realistic Earth-like simulation with operators
@@ -55,9 +54,10 @@ fn main() {
         ops: operators,
         res: Resolution::Two, // Small grid for faster computation
         layer_count: 4,      // 4 asthenosphere layers (200km total)
-        layer_height_km: 50.0,
+        asth_layer_height_km: 50.0,
+        lith_layer_height_km: 25.0,
         sim_steps: 400,      // Run for 150 steps to show equilibrium
-        years_per_step: 10000, // 20,000 years per step = 3M years total
+        years_per_step: 1000, // 20,000 years per step = 3M years total
         debug: false,
         alert_freq: 30,      // Report every 30 steps
         starting_surface_temp_k: 1600.0, // Moderate starting temperature

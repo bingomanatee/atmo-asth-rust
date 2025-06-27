@@ -5,7 +5,7 @@ use crate::material::MaterialType;
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AsthCellLithosphere {
     pub height_km: f64,
-    energy_mass: StandardEnergyMass,
+    pub(crate) energy_mass: StandardEnergyMass,
 }
 
 impl AsthCellLithosphere {
@@ -62,7 +62,7 @@ impl AsthCellLithosphere {
         // Since we removed add_energy, we need to set temperature directly
         let current_energy = self.energy_mass.energy();
         let mass_kg = self.energy_mass.mass_kg();
-        let specific_heat = self.energy_mass.specific_heat();
+        let specific_heat = self.energy_mass.specific_heat_j_kg_k();
         if mass_kg > 0.0 && specific_heat > 0.0 {
             let new_temp = (current_energy + energy_joules) / (mass_kg * specific_heat);
             self.energy_mass.set_temperature(new_temp);
@@ -87,7 +87,7 @@ impl AsthCellLithosphere {
 
     /// Get the density in kg/m³
     pub fn density(&self) -> f64 {
-        self.energy_mass.density()
+        self.energy_mass.density_kgm3()
     }
 
     /// Get the thermal conductivity in W/(m·K)
@@ -97,7 +97,7 @@ impl AsthCellLithosphere {
 
     /// Get the specific heat in J/(kg·K)
     pub fn specific_heat(&self) -> f64 {
-        self.energy_mass.specific_heat()
+        self.energy_mass.specific_heat_j_kg_k()
     }
 
     /// Get the temperature in Kelvin

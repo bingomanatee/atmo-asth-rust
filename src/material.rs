@@ -102,8 +102,8 @@ pub static MATERIAL_PROFILES: Lazy<HashMap<MaterialType, MaterialProfile>> = Laz
         density_kg_m3: 3300.0,
         specific_heat_capacity_j_per_kg_k: 1000.0,
         thermal_conductivity_w_m_k: 3.2,
-        thermal_transmission_r0_min: 0.001, // 0.1% minimum thermal transmission (realistic geological)
-        thermal_transmission_r0_max: 0.002, // 0.2% maximum thermal transmission (realistic geological)
+        thermal_transmission_r0_min: 800.0,  // 800 km reference radius (deep mantle)
+        thermal_transmission_r0_max: 1200.0, // 1200 km reference radius (deep mantle)
         melting_point_min_k: 1700.0,       // Peridotite minimum ~1700K
         melting_point_max_k: 1900.0,       // Peridotite maximum ~1900K
         melting_point_avg_k: 1800.0,       // Peridotite average ~1800K
@@ -118,8 +118,8 @@ pub static MATERIAL_PROFILES: Lazy<HashMap<MaterialType, MaterialProfile>> = Laz
         density_kg_m3: 2900.0,
         specific_heat_capacity_j_per_kg_k: 840.0,
         thermal_conductivity_w_m_k: 2.1,
-        thermal_transmission_r0_min: 0.0008,
-        thermal_transmission_r0_max: 0.0016,
+        thermal_transmission_r0_min: 600.0,  // 600 km reference radius (upper mantle)
+        thermal_transmission_r0_max: 1000.0, // 1000 km reference radius (upper mantle)
         melting_point_min_k: 1473.0,       // Basalt minimum ~1473K
         melting_point_max_k: 1573.0,       // Basalt maximum ~1573K
         melting_point_avg_k: 1523.0,       // Basalt average ~1523K
@@ -134,8 +134,8 @@ pub static MATERIAL_PROFILES: Lazy<HashMap<MaterialType, MaterialProfile>> = Laz
         density_kg_m3: 2650.0,    // Granite density
         specific_heat_capacity_j_per_kg_k: 790.0, // Granite specific heat
         thermal_conductivity_w_m_k: 2.5,   // Granite thermal conductivity
-        thermal_transmission_r0_min: 0.0006,
-        thermal_transmission_r0_max: 0.0014,
+        thermal_transmission_r0_min: 400.0,  // 400 km reference radius (shallow mantle)
+        thermal_transmission_r0_max: 800.0,  // 800 km reference radius (shallow mantle)
         melting_point_min_k: 1215.0,       // Granite minimum ~1215K
         melting_point_max_k: 1260.0,       // Granite maximum ~1260K
         melting_point_avg_k: 1238.0,       // Granite average ~1238K
@@ -150,8 +150,8 @@ pub static MATERIAL_PROFILES: Lazy<HashMap<MaterialType, MaterialProfile>> = Laz
         density_kg_m3: 7800.0,
         specific_heat_capacity_j_per_kg_k: 450.0,
         thermal_conductivity_w_m_k: 80.0,
-        thermal_transmission_r0_min: 0.002,
-        thermal_transmission_r0_max: 0.003,
+        thermal_transmission_r0_min: 2000.0, // 2000 km reference radius (core materials)
+        thermal_transmission_r0_max: 3000.0, // 3000 km reference radius (core materials)
         melting_point_min_k: 1811.0,       // Iron melting point (pure iron)
         melting_point_max_k: 1811.0,       // Iron melting point (pure iron)
         melting_point_avg_k: 1811.0,       // Iron melting point (pure iron)
@@ -166,8 +166,8 @@ pub static MATERIAL_PROFILES: Lazy<HashMap<MaterialType, MaterialProfile>> = Laz
         density_kg_m3: 930.0,
         specific_heat_capacity_j_per_kg_k: 2100.0,
         thermal_conductivity_w_m_k: 2.2,
-        thermal_transmission_r0_min: 0.00000005,
-        thermal_transmission_r0_max: 0.00000012,
+        thermal_transmission_r0_min: 0.0005,
+        thermal_transmission_r0_max: 0.0012,
         melting_point_min_k: 273.15,       // Ice melting point (0°C)
         melting_point_max_k: 273.15,       // Ice melting point (0°C)
         melting_point_avg_k: 273.15,       // Ice melting point (0°C)

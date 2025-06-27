@@ -1,7 +1,7 @@
 // Core Radiance Operator
 // Adds Earth's core radiance energy influx to the bottom asthenosphere layer
 
-use crate::sim::Simulation;
+use crate::sim::simulation::Simulation;
 use crate::sim::sim_op::{SimOp, SimOpHandle};
 use crate::energy_mass::EnergyMass;
 
@@ -55,10 +55,10 @@ impl SimOp for CoreRadianceOp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sim::{Simulation, SimProps};
     use crate::planet::Planet;
     use crate::constants::EARTH_RADIUS_KM;
     use h3o::Resolution;
+    use crate::sim::simulation::{SimProps, Simulation};
 
     #[test]
     fn test_core_radiance_op_adds_energy_to_next_arrays() {
@@ -72,7 +72,8 @@ mod tests {
             ops: vec![],
             res: Resolution::Two,
             layer_count: 3,
-            layer_height_km: 50.0,
+            asth_layer_height_km: 50.0,
+            lith_layer_height_km: 25.0,
             sim_steps: 1,
             years_per_step: 1000,
             debug: false,

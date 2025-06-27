@@ -1,8 +1,6 @@
 use crate::asth_cell::AsthCellColumn;
-use crate::constants::{M2_PER_KM2, SECONDS_PER_YEAR, SIGMA_KM2_YEAR};
 use crate::energy_mass::{EnergyMass, StandardEnergyMass};
-use crate::material::{MaterialProfile, MaterialType};
-use crate::sim::Simulation;
+use crate::sim::simulation::Simulation;
 use crate::sim::sim_op::{SimOp, SimOpHandle};
 
 /// Thermal Diffusion Operator
@@ -73,7 +71,7 @@ impl ThermalDiffusionOp {
                 columns.push(LayerPointer {
                     index,
                     layer_type: LayerType::Lith,
-                    energy_mass: StandardEnergyMass::new_with_material_energy(lith.material_type(), lith.energy_joules(), lith.volume_km3()),
+                    energy_mass: lith.energy_mass.clone(),
                     height_km: lith.height_km,
                 })
             }
@@ -87,7 +85,7 @@ impl ThermalDiffusionOp {
                 asth_columns.push(LayerPointer {
                     index,
                     layer_type: LayerType::Asth,
-                    energy_mass: StandardEnergyMass::new_with_material_energy(layer.material_type(), layer.energy_joules(), layer.volume_km3()),
+                    energy_mass: layer.energy_mass.clone(),
                     height_km: column.layer_height_km,
                 })
             }
@@ -123,9 +121,8 @@ impl ThermalDiffusionOp {
         } else {
             (to_pointer.height_km, to_pointer.energy_mass.energy()) // to is hotter
         };
-        let height_scale = (source_height_km * 2.0).sqrt();
 
-        let energy_transfer = base_energy_transfer * height_scale;
+        let energy_transfer = base_energy_transfer;
         let max_transfer_rate = energy_transfer.abs().min(source_energy * ENERGY_THROTTLE);
         match from_pointer.layer_type {
             LayerType::Lith => {
@@ -172,36 +169,17 @@ impl ThermalDiffusionOp {
 
     /// Radiate energy from the top layer to space using Stefan-Boltzmann law
     fn radiate_top_layer_to_space(&self, column: &mut AsthCellColumn, years: f64) {
+        let area = column.area();
         // Determine which layer is the surface and remove energy from it
         if !column.lithospheres_next.is_empty()
             && column.lithospheres_next.last().unwrap().height_km > 10.0
         {
             // Radiate from top lithosphere layer
-            let top_lithosphere = column.lithospheres_next.last().unwrap();
-            let surface_temp = top_lithosphere.kelvin();
-
-            // Calculate radiated energy per km²
-            let radiated_energy_per_km2 = SIGMA_KM2_YEAR * surface_temp.powi(4) * years;
-            let total_radiated_energy = radiated_energy_per_km2 * column.area();
-
-            // Remove from top lithosphere layer
             let (_, top_lithosphere, _) = column.lithosphere(0);
-            let current_energy = top_lithosphere.energy_joules();
-            let energy_to_remove = total_radiated_energy.min(current_energy * 0.9); // Max 90% per step
-            top_lithosphere.remove_energy(energy_to_remove);
+            top_lithosphere.energy_mass_mut().radiate_to_space(area, years);
         } else {
-            // Radiate from top asthenosphere layer
-            let surface_temp = column.asth_layers_next[0].kelvin();
-
-            // Calculate radiated energy per km²
-            let radiated_energy_per_km2 = SIGMA_KM2_YEAR * surface_temp.powi(4) * years;
-            let total_radiated_energy = radiated_energy_per_km2 * column.area();
-
-            // Remove from top asthenosphere layer
             let (_, top_layer_next) = column.layer(0);
-            let current_energy = top_layer_next.energy_joules();
-            let energy_to_remove = total_radiated_energy.min(current_energy * ENERGY_THROTTLE); // Max 20% per step
-            top_layer_next.remove_energy(energy_to_remove);
+            top_layer_next.energy_mass_mut().radiate_to_space(area, years);
         }
     }
 }
@@ -227,8 +205,8 @@ mod tests {
     use super::*;
     use crate::constants::EARTH_RADIUS_KM;
     use crate::planet::Planet;
-    use crate::sim::{SimProps, Simulation};
     use h3o::Resolution;
+    use crate::sim::simulation::{SimProps, Simulation};
 
     #[test]
     fn test_thermal_diffusion_creation() {
@@ -248,7 +226,8 @@ mod tests {
             ops: vec![],
             res: Resolution::Two,
             layer_count: 3,
-            layer_height_km: 50.0,
+            asth_layer_height_km: 50.0,
+            lith_layer_height_km: 25.0,
             sim_steps: 1,
             years_per_step: 1000,
             debug: false,
