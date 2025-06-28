@@ -11,6 +11,7 @@ pub enum MaterialType {
     Granitic,   // Granitic rock (continental crust) - lowest melting point
     Metallic,   // Metallic materials (iron/nickel)
     Icy,        // Ice/water
+    Air,        // Atmospheric gases (N2, O2, CO2, etc.)
 }
 
 impl MaterialType {
@@ -21,6 +22,7 @@ impl MaterialType {
             MaterialType::Granitic => "granitic",
             MaterialType::Metallic => "metallic",
             MaterialType::Icy => "icy",
+            MaterialType::Air => "air",
         }
     }
 
@@ -28,8 +30,10 @@ impl MaterialType {
         match s {
             "silicate" => Some(MaterialType::Silicate),
             "basaltic" => Some(MaterialType::Basaltic),
+            "granitic" => Some(MaterialType::Granitic),
             "metallic" => Some(MaterialType::Metallic),
             "icy" => Some(MaterialType::Icy),
+            "air" => Some(MaterialType::Air),
             _ => None,
         }
     }
@@ -171,6 +175,22 @@ pub static MATERIAL_PROFILES: Lazy<HashMap<MaterialType, MaterialProfile>> = Laz
         melting_point_min_k: 273.15,       // Ice melting point (0°C)
         melting_point_max_k: 273.15,       // Ice melting point (0°C)
         melting_point_avg_k: 273.15,       // Ice melting point (0°C)
+    });
+
+    m.insert(Air, MaterialProfile {
+        kind: Air,
+        max_lith_formation_temp_kv: 0.0,    // Air doesn't form lithosphere
+        peak_lith_growth_temp_kv: 0.0,      // Air doesn't form lithosphere
+        max_lith_growth_km_per_year: 0.0,   // Air doesn't form lithosphere
+        max_lith_height_km: 100.0,          // Max atmosphere height (100km)
+        density_kg_m3: 1.225,               // Air density at sea level (15°C, 1 atm)
+        specific_heat_capacity_j_per_kg_k: 1005.0, // Air specific heat at constant pressure
+        thermal_conductivity_w_m_k: 0.0262, // Air thermal conductivity at 25°C
+        thermal_transmission_r0_min: 8.0,   // 8 km scale height (atmosphere)
+        thermal_transmission_r0_max: 12.0,  // 12 km scale height (atmosphere)
+        melting_point_min_k: 0.0,           // Air doesn't melt (gas phase)
+        melting_point_max_k: 0.0,           // Air doesn't melt (gas phase)
+        melting_point_avg_k: 0.0,           // Air doesn't melt (gas phase)
     });
 
     m
