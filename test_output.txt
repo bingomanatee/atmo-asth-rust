@@ -1,0 +1,25 @@
+🔬 Force-Directed Thermal Diffusion with Optimized Parameters
+==============================================================
+🎯 Deep geological time: 1 million years of thermal evolution
+   Realistic foundry heat: 1800K foundry with gradient to 1523K melting point
+   Foundry layers (0-20km): 1800K-1523K (realistic asthenosphere heat)
+   Surface radiation: Stefan-Boltzmann T^4 radiation to space (top layers only)
+📊 Initial Setup:
+   60 thermal nodes
+   🔥 HEAT SOURCE: Core heat input at bottom layer
+   ❄️  HEAT SINK: Space radiation cooling at top layer
+📊 Initial Setup:
+   60 thermal nodes (doubled depth to 200km)
+   🔥 HEAT SOURCE: Core heat engine (8 layers, 0-40km)
+   ❄️  HEAT SINK: Space cooling sink (8 layers, 160-200km)
+   ⚡ EXPONENTIAL DIFFUSION: 2 neighbors each side with falloff
+
+🌡️  Initial Temperature Profile (REALISTIC GEOLOGICAL HEAT):
+   Foundry layers (0-20km): 1800K → 1523K (realistic asthenosphere)
+   Lithosphere (20-160km): Variable geothermal gradient
+   Surface layers (160-300km): 400K → 80K (natural cooling + T^4 radiation)
+
+🌡️  Running scientifically calibrated thermal equilibration...
+   Step 0: Range=1935.2K, Surface=1800.0K, Core=200.0K, Boundary=(1835.7K,1842.9K)
+   Step 100000: Range=263.1K, Surface=1800.0K, Core=1536.9K, Boundary=(1601.9K,1601.5K)
+   Step 200000: Range=297.0K, Surface=1800.0K, Core=1503.0K, Boundary=(1595.0K,1593.4K)

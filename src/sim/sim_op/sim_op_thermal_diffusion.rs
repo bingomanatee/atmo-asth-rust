@@ -67,11 +67,11 @@ impl ThermalDiffusionOp {
 
     /// Process thermal diffusion for a single cell column
     fn process_cell_thermal_diffusion(&self, column: &mut AsthCellColumn, years: f64) {
-        // First, track phase transitions based on temperature
-        self.track_phase_transitions(column, years);
+        // TODO: Implement phase transition tracking
+        // self.track_phase_transitions(column, years);
 
-        // Process any phase transitions that have met the time criteria
-        self.process_phase_transitions(column);
+        // TODO: Process any phase transitions that have met the time criteria
+        // self.process_phase_transitions(column);
 
         // Then, radiate energy from the top layer to space
         self.radiate_top_layer_to_space(column, years);
@@ -140,18 +140,18 @@ impl ThermalDiffusionOp {
         }
 
         // Get thermal conductivities based on layer thermal states
-        let from_conductivity = self.get_layer_conductivity(column, from_pointer);
-        let to_conductivity = self.get_layer_conductivity(column, to_pointer);
+        let from_conductivity = from_mass.thermal_conductivity();
+        let to_conductivity = to_mass.thermal_conductivity();
 
         // SIMPLE 1% PER CENTURY MODEL:
         // 1% per century = 0.01 per 100 years = 0.0001 per year
-        let distance_km = (from_pointer.depth_km - to_pointer.depth_km).abs();
+        let distance_km = from_pointer.height_km + to_pointer.height_km; // Use layer heights as distance
         let base_percent_per_year = 0.0001; // 1% per century to adjacent neighbors
         let distance_factor = if distance_km <= 5.1 { 1.0 } else { 0.25 };
         let transfer_coefficient = base_percent_per_year * distance_factor;
         let temp_diff = from_mass.kelvin() - to_mass.kelvin();
 
-        let base_energy_transfer = temp_diff * from_mass.thermal_capacity() * transfer_coefficient * years;
+        let base_energy_transfer = temp_diff * from_mass.thermal_conductivity() * transfer_coefficient * years;
 
         let source_energy = if base_energy_transfer > 0.0 {
             from_pointer.energy_mass.energy() // from is hotter

@@ -10,6 +10,14 @@ extern crate atmo_asth_rust;
 use atmo_asth_rust::energy_mass::{EnergyMass, StandardEnergyMass};
 use atmo_asth_rust::material::MaterialType;
 
+/// Material phase state
+#[derive(Clone, Debug, PartialEq)]
+enum MaterialPhase {
+    Solid,
+    Liquid,
+    Gas,
+}
+
 /// Configuration parameters for thermal diffusion experiments
 #[derive(Clone, Debug)]
 struct ExperimentState {
@@ -88,7 +96,7 @@ impl ExperimentState {
 
             // Time parameters
             years_per_step: 100.0,
-            total_years: 1_000_000.0,
+            total_years: 1_000_000_000.0, // 1 billion years
         }
     }
 
@@ -216,26 +224,38 @@ impl PendingChanges {
 
 /// Experimental EnergyMass implementation for thermal experiments
 /// Adds max_density_factor for atmosphere and magma with variable density
-/// Adds state field for thermal state tracking
+/// Adds phase transition tracking
 #[derive(Clone, Debug)]
 struct ThermalEnergyMassExp {
     inner: StandardEnergyMass,
     max_density_factor: f64,  // 0.0-1.0: fraction of material's max density
-    state: u8,                // 1-4=solid, 5=cooling, 6=heating, 10=liquid, 11-15=atmosphere
+    phase: MaterialPhase,     // Current material phase
+    transition_state: i8,     // -100 to +100: % melted (-) or % solidified (+)
 }
 
 impl ThermalEnergyMassExp {
-    fn new(material_type: MaterialType, temperature_k: f64, volume_km3: f64, height_km: f64, state: u8) -> Self {
+    fn new(material_type: MaterialType, temperature_k: f64, volume_km3: f64, height_km: f64, initial_phase: MaterialPhase) -> Self {
         let inner = StandardEnergyMass::new_with_material_and_height(
             material_type,
             temperature_k,
             volume_km3,
             height_km,
         );
+
+        // Calculate initial thermal state based on temperature
+        let temp_instance = Self {
+            inner: inner.clone(),
+            max_density_factor: 1.0,
+            phase: initial_phase.clone(),
+            transition_state: 0, // Temporary value
+        };
+        let transition_state = temp_instance.calculate_thermal_state_from_temperature(&ExperimentState::default());
+
         Self {
             inner,
             max_density_factor: 1.0,  // Default: use full material density
-            state,
+            phase: initial_phase,
+            transition_state,
         }
     }
 
@@ -245,7 +265,7 @@ impl ThermalEnergyMassExp {
         volume_km3: f64,
         height_km: f64,
         max_density_factor: f64,
-        state: u8
+        initial_phase: MaterialPhase
     ) -> Self {
         let inner = StandardEnergyMass::new_with_material_and_height(
             material_type,
@@ -253,28 +273,69 @@ impl ThermalEnergyMassExp {
             volume_km3,
             height_km,
         );
+
+        // Calculate initial thermal state based on temperature
+        let temp_instance = Self {
+            inner: inner.clone(),
+            max_density_factor: max_density_factor.clamp(0.0, 1.0),
+            phase: initial_phase.clone(),
+            transition_state: 0, // Temporary value
+        };
+        let transition_state = temp_instance.calculate_thermal_state_from_temperature(&ExperimentState::default());
+
         Self {
             inner,
             max_density_factor: max_density_factor.clamp(0.0, 1.0),
-            state,
+            phase: initial_phase,
+            transition_state,
         }
     }
 
-    fn new_silicate(temperature_k: f64, volume_km3: f64, height_km: f64, state: u8) -> Self {
-        Self::new(MaterialType::Silicate, temperature_k, volume_km3, height_km, state)
+    fn new_silicate(temperature_k: f64, volume_km3: f64, height_km: f64, initial_phase: MaterialPhase) -> Self {
+        Self::new(MaterialType::Silicate, temperature_k, volume_km3, height_km, initial_phase)
     }
 
-    fn new_air(temperature_k: f64, volume_km3: f64, height_km: f64, state: u8) -> Self {
+    fn new_air(temperature_k: f64, volume_km3: f64, height_km: f64, initial_phase: MaterialPhase) -> Self {
         // Use Icy as a placeholder for Air since Air doesn't exist in MaterialType
-        Self::new(MaterialType::Icy, temperature_k, volume_km3, height_km, state)
+        Self::new(MaterialType::Icy, temperature_k, volume_km3, height_km, initial_phase)
     }
 
-    fn new_air_with_density(temperature_k: f64, volume_km3: f64, height_km: f64, density_factor: f64, state: u8) -> Self {
-        Self::new_with_density_factor(MaterialType::Icy, temperature_k, volume_km3, height_km, density_factor, state)
+    fn new_air_with_density(temperature_k: f64, volume_km3: f64, height_km: f64, density_factor: f64, initial_phase: MaterialPhase) -> Self {
+        Self::new_with_density_factor(MaterialType::Icy, temperature_k, volume_km3, height_km, density_factor, initial_phase)
     }
 
-    fn new_magma_with_density(temperature_k: f64, volume_km3: f64, height_km: f64, density_factor: f64, state: u8) -> Self {
-        Self::new_with_density_factor(MaterialType::Silicate, temperature_k, volume_km3, height_km, density_factor, state)
+    fn new_magma_with_density(temperature_k: f64, volume_km3: f64, height_km: f64, density_factor: f64, initial_phase: MaterialPhase) -> Self {
+        Self::new_with_density_factor(MaterialType::Silicate, temperature_k, volume_km3, height_km, density_factor, initial_phase)
+    }
+
+    /// Calculate thermal state based on temperature: -100=100% gas, 0=100% liquid, +100=100% solid
+    fn calculate_thermal_state_from_temperature(&self, config: &ExperimentState) -> i8 {
+        let temperature_k = self.kelvin();
+        const VAPORIZATION_TEMP: f64 = 3000.0; // Temperature for 100% gas
+
+        if temperature_k >= VAPORIZATION_TEMP {
+            // 100% gas
+            -100
+        } else if temperature_k > config.melting_point_k {
+            // Above melting point: 0 (100% liquid) to -100 (100% gas)
+            let temp_range = VAPORIZATION_TEMP - config.melting_point_k;
+            let temp_excess = temperature_k - config.melting_point_k;
+            let gas_percentage = (temp_excess / temp_range).clamp(0.0, 1.0);
+            -((gas_percentage * 100.0) as i8) // 0 to -100
+        } else if temperature_k == config.melting_point_k {
+            // Exactly at melting point: 100% liquid
+            0
+        } else if temperature_k > config.cooling_point_k {
+            // Between cooling and melting: 0 (100% liquid) to +100 (100% solid)
+            let transition_range = config.melting_point_k - config.cooling_point_k; // 50K range
+            let temp_above_cooling = temperature_k - config.cooling_point_k;
+            let liquid_ratio = temp_above_cooling / transition_range;
+            // Interpolate from +100 (at cooling point) to 0 (at melting point)
+            (100.0 * (1.0 - liquid_ratio)) as i8 // +100 to 0
+        } else {
+            // Below cooling point: 100% solid
+            100
+        }
     }
 
     /// Get the effective density (material density * max_density_factor)
@@ -294,91 +355,73 @@ impl ThermalEnergyMassExp {
         self.max_density_factor = factor.clamp(0.0, 1.0);
     }
 
-    /// Get the current thermal state
-    fn state(&self) -> u8 {
-        self.state
+    /// Get the current material phase
+    fn phase(&self) -> &MaterialPhase {
+        &self.phase
     }
 
-    /// Set the thermal state
-    fn set_state(&mut self, new_state: u8) {
-        self.state = new_state;
+    /// Get the transition state (-100 to +100)
+    fn transition_state(&self) -> i8 {
+        self.transition_state
     }
 
-    /// Update thermal state based on temperature with rate-dependent transitions
-    /// time_years: time step for calculating transition progress
-    /// config: experiment configuration with thermal parameters
-    fn update_state_from_temperature(&mut self, time_years: f64, config: &ExperimentState) {
-        let temp = self.kelvin();
+    /// Set the material phase
+    fn set_phase(&mut self, new_phase: MaterialPhase) {
+        self.phase = new_phase;
+    }
 
-        match self.state {
-            1..=4 => {
-                // Solid states - check for melting
-                if temp > config.melting_point_k {
-                    let temp_excess = temp - config.melting_point_k;
-                    let transition_rate = self.calculate_melting_rate(temp_excess, config);
+    /// Set the transition state
+    fn set_transition_state(&mut self, new_state: i8) {
+        self.transition_state = new_state.clamp(-100, 100);
+    }
 
-                    if self.should_transition(transition_rate, time_years) {
-                        self.state = 6; // Start heating transition
-                    }
-                }
-            },
-            5 => {
-                // Cooling transition state
-                if temp < config.cooling_point_k {
-                    // Cool enough to become solid
-                    let temp_deficit = config.cooling_point_k - temp;
-                    let transition_rate = self.calculate_cooling_rate(temp_deficit, config);
+    /// Get a readable string description of the thermal state
+    fn state_string(&self) -> String {
+        match self.transition_state {
+            -100..=-1 => format!("{}% Gas", -(self.transition_state)),
+            0 => "100% Liquid".to_string(),
+            1..=100 => format!("{}% Solid", self.transition_state),
+            _ => format!("Unknown({})", self.transition_state)
+        }
+    }
 
-                    if self.should_transition(transition_rate, time_years) {
-                        self.state = 4; // Fully solid
-                    }
-                } else if temp > config.melting_point_k {
-                    // Temperature rising again - back to liquid
-                    self.state = 10; // Switch back to liquid
-                }
-                // Stay in cooling state if between cooling_point and melting_point
-            },
-            6 => {
-                // Heating transition state
-                let temp_excess = temp - config.melting_point_k;
-                if temp_excess > 0.0 {
-                    let transition_rate = self.calculate_melting_rate(temp_excess, config);
 
-                    if self.should_transition(transition_rate, time_years) {
-                        self.state = 10; // Fully liquid
-                    }
-                } else if temp < config.cooling_point_k {
-                    // Temperature dropping again
-                    self.state = 5; // Switch to cooling transition
-                }
-            },
-            10 => {
-                // Liquid state - check for solidification
-                if temp < config.melting_point_k {
-                    // Below melting point - start cooling transition
-                    let temp_deficit = config.melting_point_k - temp;
-                    let transition_rate = self.calculate_cooling_rate(temp_deficit, config);
-                    let transition_probability = transition_rate * time_years;
 
-                    // Debug output for first few transitions
-                    if temp_deficit < 10.0 && transition_probability > 0.5 {
-                        println!("   🔄 Liquid->Cooling: {:.1}K (deficit {:.1}K), rate {:.4}, prob {:.2}",
-                                temp, temp_deficit, transition_rate, transition_probability);
-                    }
+    /// Calculate the target thermal state based on temperature position
+    fn calculate_proportional_state(&self, temp: f64, config: &ExperimentState) -> u8 {
+        if temp >= config.melting_point_k {
+            // Above melting point = fully liquid
+            10
+        } else if temp <= config.cooling_point_k {
+            // Below cooling point = fully solid (scale 1-4 based on how cold)
+            let cold_range = config.cooling_point_k - 273.0; // From absolute zero to cooling point
+            let temp_in_range = (temp - 273.0).max(0.0);
+            let cold_ratio = (temp_in_range / cold_range).clamp(0.0, 1.0);
+            ((cold_ratio * 3.0) + 1.0) as u8 // States 1-4
+        } else {
+            // In transition zone (cooling_point to melting_point)
+            let transition_range = config.melting_point_k - config.cooling_point_k; // 50K range
+            let temp_in_range = temp - config.cooling_point_k;
+            let transition_ratio = (temp_in_range / transition_range).clamp(0.0, 1.0);
 
-                    if self.should_transition(transition_rate, time_years) {
-                        self.state = 5; // Start cooling transition
-                        println!("   ✅ Transitioned to cooling state at {:.1}K", temp);
-                    }
-                }
-            },
-            11..=15 => {
-                // Atmosphere states - no temperature-based transitions
-            },
-            _ => {
-                // Unknown state - default to solid or liquid based on temperature
-                self.state = if temp > config.melting_point_k { 10 } else { 4 };
-            }
+            // States 5-9: 5=cooling point, 9=approaching melting point
+            ((transition_ratio * 4.0) + 5.0) as u8
+        }
+    }
+
+    /// Calculate transition rate based on temperature and current state
+    fn calculate_state_transition_rate(&self, temp: f64, config: &ExperimentState, time_years: f64) -> f64 {
+        if temp > config.melting_point_k {
+            // Heating: faster transitions when hotter
+            let temp_excess = temp - config.melting_point_k;
+            self.calculate_melting_rate(temp_excess, config)
+        } else if temp < config.cooling_point_k {
+            // Cooling: faster transitions when colder
+            let temp_deficit = config.cooling_point_k - temp;
+            self.calculate_cooling_rate(temp_deficit, config)
+        } else {
+            // Transition zone: moderate transition rate
+            config.base_cooling_rate * 2.0 // Faster transitions in hysteresis zone
         }
     }
 
@@ -403,24 +446,31 @@ impl ThermalEnergyMassExp {
         transition_probability >= 1.0
     }
 
-    /// Check if this cell can outgas (liquid state + hot enough)
+    /// Check if this cell can outgas (liquid/gas phase + hot enough)
     fn can_outgas(&self, config: &ExperimentState) -> bool {
-        self.state == 10 && self.kelvin() > config.outgassing_threshold_k
+        matches!(self.phase, MaterialPhase::Liquid | MaterialPhase::Gas) &&
+        self.kelvin() > config.outgassing_threshold_k
     }
 
-    /// Check if this is an atmosphere cell
-    fn is_atmosphere(&self) -> bool {
-        self.state >= 11 && self.state <= 15
+    /// Check if this is a gas cell
+    fn is_gas(&self) -> bool {
+        matches!(self.phase, MaterialPhase::Gas)
     }
 
     /// Check if this is a liquid cell
     fn is_liquid(&self) -> bool {
-        self.state == 10
+        matches!(self.phase, MaterialPhase::Liquid)
     }
 
     /// Check if this is a solid cell
     fn is_solid(&self) -> bool {
-        self.state >= 1 && self.state <= 4
+        matches!(self.phase, MaterialPhase::Solid)
+    }
+
+    /// Check if this is an atmosphere cell (for compatibility)
+    fn is_atmosphere(&self) -> bool {
+        // For now, consider gas phase as atmosphere
+        matches!(self.phase, MaterialPhase::Gas)
     }
 }
 
@@ -489,7 +539,8 @@ impl EnergyMass for ThermalEnergyMassExp {
                 removed.height_km(),
             ),
             max_density_factor: self.max_density_factor,
-            state: self.state, // Preserve the state
+            phase: self.phase.clone(), // Preserve the phase
+            transition_state: self.transition_state, // Preserve the transition state
         })
     }
 }
@@ -602,16 +653,44 @@ impl ThermalNode {
     }
 
     // Thermal state methods (delegate to EnergyMass)
-    fn thermal_state(&self) -> u8 {
-        self.energy_mass.state()
+    fn thermal_state(&self) -> i8 {
+        self.energy_mass.transition_state()
     }
 
-    fn set_thermal_state(&mut self, state: u8) {
-        self.energy_mass.set_state(state);
+    fn material_phase(&self) -> &MaterialPhase {
+        self.energy_mass.phase()
+    }
+
+    fn set_thermal_state(&mut self, state: i8) {
+        self.energy_mass.set_transition_state(state);
     }
 
     fn update_thermal_state(&mut self, time_years: f64, config: &ExperimentState) {
-        self.energy_mass.update_state_from_temperature(time_years, config);
+        // For now, use simple temperature-based transitions until energy capacity is stable
+        let temp = self.energy_mass.kelvin();
+        let target_state = if temp >= 3000.0 {
+            -100 // 100% gas
+        } else if temp > config.melting_point_k {
+            // Above melting: interpolate to gas
+            let temp_excess = temp - config.melting_point_k;
+            let gas_ratio = (temp_excess / (3000.0 - config.melting_point_k)).clamp(0.0, 1.0);
+            -((gas_ratio * 100.0) as i8)
+        } else if temp > config.cooling_point_k {
+            // Between cooling and melting: interpolate solid to liquid
+            let transition_range = config.melting_point_k - config.cooling_point_k;
+            let temp_above_cooling = temp - config.cooling_point_k;
+            let liquid_ratio = temp_above_cooling / transition_range;
+            (100.0 * (1.0 - liquid_ratio)) as i8 // +100 to 0
+        } else {
+            100 // 100% solid
+        };
+
+        // Gradual transition toward target
+        if target_state > self.energy_mass.transition_state() {
+            self.energy_mass.set_transition_state(self.energy_mass.transition_state() + 1);
+        } else if target_state < self.energy_mass.transition_state() {
+            self.energy_mass.set_transition_state(self.energy_mass.transition_state() - 1);
+        }
     }
 
     fn can_outgas(&self, config: &ExperimentState) -> bool {
@@ -827,12 +906,18 @@ impl ForceDirectedThermal {
             };
 
             // Create experimental EnergyMass for this layer
+            let initial_phase = if thermal_state == 10 {
+                MaterialPhase::Liquid
+            } else {
+                MaterialPhase::Solid
+            };
+
             let energy_mass = ThermalEnergyMassExp::new(
                 material_type,
                 temp,
                 volume_km3,
                 layer_thickness,
-                thermal_state,  // Include state in EnergyMass
+                initial_phase,
             );
 
             self.nodes.push(ThermalNode::new(
@@ -875,7 +960,7 @@ impl ForceDirectedThermal {
                     update.volume_km3,
                     node.height_km,
                     update.density_factor,
-                    node.thermal_state(), // Preserve current state
+                    node.material_phase().clone(), // Preserve current phase
                 );
 
                 // Update the node
@@ -951,7 +1036,9 @@ impl ForceDirectedThermal {
                 self.export_state(&mut file, step + 1, years);
             }
             
-            if step % 100 == 0 {
+            // Show progress every 10% of total duration
+            let progress_interval = (steps / 10).max(1);
+            if step % progress_interval == 0 {
                 let temp_range = self.calculate_temperature_range();
                 let surface_temp = self.nodes[0].temperature_k();
                 let core_temp = self.nodes[self.nodes.len()-1].temperature_k();
@@ -1177,23 +1264,17 @@ impl ForceDirectedThermal {
 
         println!("\n🌡️  Final Temperature Profile:");
         println!("   🔥 Melting Points: Basalt=1473K, Transition=1523K, Peridotite=1573K");
-        println!("   🌡️  Thermal States: 1-4=Solid, 5=Cooling, 6=Heating, 10=Liquid, 11-15=Atmosphere");
+        println!("   🌡️  Thermal States: -100=100%Gas, -50=50%Gas/50%Liq, 0=100%Liquid, +50=50%Liq/50%Sol, +100=100%Solid");
         for (i, node) in self.nodes.iter().enumerate() {
             let initial_temp = self.initial_nodes[i].temperature_k();
             let change = node.temperature_k() - initial_temp;
 
-            // Determine layer type based on temperature (ALL layers, not just < 32)
-            let layer_type = if i < 4 {
-                "FOUNDRY ENGINE".to_string()
-            } else {
-                // Check if above melting point (1523K) for asthenosphere vs lithosphere
-                if node.temperature_k() >= TRANSITION_THRESHOLD_K {
-                    let asth_layer = i - 4;
-                    format!("AL {} (Asth)", asth_layer)
-                } else {
-                    let lith_layer = i - 4;
-                    format!("EL {} (Lith)", lith_layer)
-                }
+            // Just the state word with colors
+            let state_word = match node.thermal_state() {
+                66..=100 => "\x1b[34mSolid\x1b[0m",     // Blue
+                -65..=65 => "\x1b[31mMagma\x1b[0m",     // Red
+                -100..=-75 => "\x1b[32mGas\x1b[0m",     // Green
+                _ => "Unknown"
             };
 
             // Show melting status with color coding: red for melting, blue for cooling
@@ -1209,18 +1290,10 @@ impl ForceDirectedThermal {
                 "\x1b[34m❄️COLD\x1b[0m"  // Blue for cooling
             };
 
-            // Show thermal state description
-            let state_desc = match node.thermal_state() {
-                1..=4 => "Solid",
-                5 => "Cool",
-                6 => "Heat",
-                10 => "Liquid",
-                11..=15 => "Atmo",
-                _ => "Unknown"
-            };
 
-            println!("   Layer {}: {:.1}K (Δ{:+.1}K) at {:.1}km depth - {} [State:{}={}] {}",
-                     i, node.temperature_k(), change, node.depth_km, layer_type, node.thermal_state(), state_desc, melting_status);
+
+            println!("   Layer {}: {}K (Δ{:+}K) at {}km depth - {} {}",
+                     i, node.temperature_k() as i32, change as i32, node.depth_km as i32, node.thermal_state(), state_word);
         }
         
         println!("\n🔥 Thermal equilibration complete!");
