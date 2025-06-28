@@ -3,18 +3,22 @@ use crate::energy_mass::{EnergyMass, StandardEnergyMass};
 use crate::sim::sim_op::{SimOp, SimOpHandle};
 use crate::sim::simulation::Simulation;
 
-/// Thermal Diffusion Operator
+/// Thermal Diffusion Operator with Phase Transitions
 ///
 /// Implements realistic thermal diffusion between layers with:
 /// - Energy cascading when layers reach thermal capacity limits
 /// - Material-based thermal conductivity
 /// - Temperature-driven energy flow (hot to cold)
+/// - Asthenosphere ↔ Lithosphere phase transitions based on temperature
 /// - Proper thermal equilibration between adjacent layers
 #[derive(Debug, Clone)]
 pub struct ThermalDiffusionOp {
     pub name: String,
     pub diffusion_rate: f64,           // Base diffusion rate (0.0 to 1.0)
     pub max_temp_change_per_step: f64, // Maximum temperature change per step (K)
+    pub cooling_threshold_k: f64,      // Temperature below which asthenosphere becomes lithosphere
+    pub heating_threshold_k: f64,      // Temperature above which lithosphere becomes asthenosphere
+    pub transition_time_years: f64,    // Time required below/above threshold for transition
 }
 
 struct Transfer {
@@ -34,13 +38,22 @@ struct LayerPointer {
     pub height_km: f64,
 }
 
+// Scientifically defensible melting points for phase transitions
+const PERIDOTITE_SOLIDUS_K: f64 = 1573.0; // 1300°C - asthenosphere material
+const BASALT_SOLIDUS_K: f64 = 1473.0;     // 1200°C - lithosphere material
+const TRANSITION_THRESHOLD_K: f64 = 1523.0; // 1250°C - transition point
+const PHASE_TRANSITION_TIME_YEARS: f64 = 1000.0; // Time required for phase change (doubled for more inertia)
+
 impl ThermalDiffusionOp {
-    /// Create a new thermal diffusion operator
+    /// Create a new thermal diffusion operator with phase transitions
     pub fn new(diffusion_rate: f64, max_temp_change_per_step: f64) -> Self {
         Self {
             name: "ThermalDiffusionOp".to_string(),
             diffusion_rate,
             max_temp_change_per_step,
+            cooling_threshold_k: TRANSITION_THRESHOLD_K,
+            heating_threshold_k: TRANSITION_THRESHOLD_K,
+            transition_time_years: PHASE_TRANSITION_TIME_YEARS,
         }
     }
 
@@ -54,7 +67,13 @@ impl ThermalDiffusionOp {
 
     /// Process thermal diffusion for a single cell column
     fn process_cell_thermal_diffusion(&self, column: &mut AsthCellColumn, years: f64) {
-        // First, radiate energy from the top layer to space
+        // First, track phase transitions based on temperature
+        self.track_phase_transitions(column, years);
+
+        // Process any phase transitions that have met the time criteria
+        self.process_phase_transitions(column);
+
+        // Then, radiate energy from the top layer to space
         self.radiate_top_layer_to_space(column, years);
 
         // Create a simplified thermal diffusion between adjacent asthenosphere layers
@@ -119,9 +138,20 @@ impl ThermalDiffusionOp {
         {
             return;
         }
-        // Delegate calculation
-        let base_energy_transfer =
-            from_mass.calculate_thermal_transfer(to_mass, self.diffusion_rate, years);
+
+        // Get thermal conductivities based on layer thermal states
+        let from_conductivity = self.get_layer_conductivity(column, from_pointer);
+        let to_conductivity = self.get_layer_conductivity(column, to_pointer);
+
+        // SIMPLE 1% PER CENTURY MODEL:
+        // 1% per century = 0.01 per 100 years = 0.0001 per year
+        let distance_km = (from_pointer.depth_km - to_pointer.depth_km).abs();
+        let base_percent_per_year = 0.0001; // 1% per century to adjacent neighbors
+        let distance_factor = if distance_km <= 5.1 { 1.0 } else { 0.25 };
+        let transfer_coefficient = base_percent_per_year * distance_factor;
+        let temp_diff = from_mass.kelvin() - to_mass.kelvin();
+
+        let base_energy_transfer = temp_diff * from_mass.thermal_capacity() * transfer_coefficient * years;
 
         let source_energy = if base_energy_transfer > 0.0 {
             from_pointer.energy_mass.energy() // from is hotter
@@ -174,23 +204,47 @@ impl ThermalDiffusionOp {
         }
     }
 
-    /// Radiate energy from the top layer to space using Stefan-Boltzmann law
+    /// Radiate energy from thin skin (2-3 layers) to space with sharp dropoff
     fn radiate_top_layer_to_space(&self, column: &mut AsthCellColumn, years: f64) {
         let area = column.area();
-        // Determine which layer is the surface and remove energy from it
-        if !column.lith_layers_t.is_empty()
-            && column.lith_layers_t.last().unwrap().1.height_km > 10.0
-        {
-            // Radiate from top lithosphere layer
-            let (_, top_lithosphere) = &mut column.lithosphere_mut(0);
-            top_lithosphere
-                .energy_mass_mut()
-                .radiate_to_space(area, years);
-        } else {
-            let (_, top_layer_next) = &mut column.layer_mut(0);
-            top_layer_next
-                .energy_mass_mut()
-                .radiate_to_space(area, years);
+
+        // THIN SKIN RADIATION: Only affect top 2-3 layers with sharp dropoff
+        if !column.lith_layers_t.is_empty() {
+            // Radiate from top 2-3 lithosphere layers with exponential dropoff
+            let max_layers = column.lith_layers_t.len().min(3);
+            for i in 0..max_layers {
+                let radiation_factor = match i {
+                    0 => 1.0,    // Full radiation from surface
+                    1 => 0.3,    // 30% radiation from second layer
+                    2 => 0.1,    // 10% radiation from third layer
+                    _ => 0.0,    // No radiation beyond thin skin
+                };
+
+                if radiation_factor > 0.0 {
+                    let (_, layer) = &mut column.lithosphere_mut(i);
+                    // Apply scaled radiation
+                    let scaled_area = area * radiation_factor;
+                    layer.energy_mass_mut().radiate_to_space(scaled_area, years);
+                }
+            }
+        } else if !column.asth_layers_t.is_empty() {
+            // Radiate from top 2-3 asthenosphere layers with exponential dropoff
+            let max_layers = column.asth_layers_t.len().min(3);
+            for i in 0..max_layers {
+                let radiation_factor = match i {
+                    0 => 1.0,    // Full radiation from surface
+                    1 => 0.3,    // 30% radiation from second layer
+                    2 => 0.1,    // 10% radiation from third layer
+                    _ => 0.0,    // No radiation beyond thin skin
+                };
+
+                if radiation_factor > 0.0 {
+                    let (_, layer) = &mut column.layer_mut(i);
+                    // Apply scaled radiation
+                    let scaled_area = area * radiation_factor;
+                    layer.energy_mass_mut().radiate_to_space(scaled_area, years);
+                }
+            }
         }
     }
 }

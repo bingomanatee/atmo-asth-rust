@@ -2,6 +2,8 @@ use crate::constants::{M2_PER_KM2, MANTLE_DENSITY_KGM3, SECONDS_PER_YEAR, SIGMA_
 use crate::material::{MaterialType, get_profile};
 use serde::{Deserialize, Serialize};
 
+
+
 /// Trait for objects that manage the relationship between energy, mass, and temperature
 /// Maintains consistency between these properties using thermodynamic relationships
 pub trait EnergyMass: std::any::Any {
@@ -65,6 +67,19 @@ pub trait EnergyMass: std::any::Any {
     /// Returns the amount of energy radiated (J)
     fn radiate_to_space(&mut self, area_km2: f64, time_years: f64) -> f64;
 
+    /// Radiate energy to space using Stefan-Boltzmann law with thermal skin depth limiting
+    /// Only the thermal skin depth participates in radiation, with rate limiting
+    /// Returns the amount of energy radiated (J)
+    fn radiate_to_space_with_skin_depth(&mut self, area_km2: f64, time_years: f64, energy_throttle: f64) -> f64;
+
+    /// Compute thermal-diffusive skin depth in kilometres for this material
+    /// Uses the material's thermal conductivity, density, and specific heat
+    ///
+    /// Formula: κ = k / (ρ·cp), d = sqrt(κ · dt), converted to km
+    fn skin_depth_km(&self, time_years: f64) -> f64;
+
+
+
     /// Remove volume (enforces zero minimum, maintains temperature)
     fn remove_volume_internal(&mut self, volume_to_remove: f64);
 
@@ -106,7 +121,7 @@ pub trait EnergyMass: std::any::Any {
     }
 
     /// Calculate thermal energy transfer between two materials based on conductivity and temperature difference
-    /// Includes height scaling: base rates are for 1km layers, scales by sqrt(height of source layer)
+    /// Includes specific heat capacity effects through thermal capacity moderation
     /// Returns the energy transfer amount (J)
     fn calculate_thermal_transfer(&self, other: &dyn EnergyMass, diffusion_rate: f64, years: f64) -> f64 {
         let interface_conductivity = 2.0 * self.thermal_conductivity() * other.thermal_conductivity()
@@ -128,8 +143,18 @@ pub trait EnergyMass: std::any::Any {
         // Height scaling factor: base rates are for 1km layers, scale by sqrt(height)
         let height_scale = (source_height_km/2.0).sqrt();
 
+        // Include specific heat capacity effects through thermal capacity moderation
+        // Materials with higher specific heat capacity resist temperature changes more
+        let self_specific_heat = self.specific_heat_j_kg_k();
+        let other_specific_heat = other.specific_heat_j_kg_k();
+        let avg_specific_heat = (self_specific_heat + other_specific_heat) / 2.0;
+
+        // Specific heat moderation: higher specific heat = slower energy transfer
+        // Normalize to typical mantle specific heat (~1000 J/kg/K)
+        let specific_heat_factor = (1000.0 / avg_specific_heat).sqrt().min(2.0).max(0.5);
+
         let base_transfer_rate = interface_conductivity * interface_r0 * diffusion_rate * years * crate::constants::SECONDS_PER_YEAR * crate::constants::M2_PER_KM2;
-        let energy_transfer = temp_diff * base_transfer_rate * height_scale;
+        let energy_transfer = temp_diff * base_transfer_rate * height_scale * specific_heat_factor;
 
         energy_transfer
     }
@@ -395,15 +420,40 @@ impl EnergyMass for StandardEnergyMass {
     /// Radiate energy to space using Stefan-Boltzmann law
     /// Returns the amount of energy radiated (J)
     fn radiate_to_space(&mut self, area_km2: f64, time_years: f64) -> f64 {
+        // Use skin depth method with no additional throttling (skin depth provides natural limit)
+        self.radiate_to_space_with_skin_depth(area_km2, time_years, 1.0)
+    }
+
+    /// Radiate energy to space using Stefan-Boltzmann law with thermal skin depth limiting
+    /// Only the thermal skin depth participates in radiation - no additional throttling needed
+    /// Returns the amount of energy radiated (J)
+    fn radiate_to_space_with_skin_depth(&mut self, area_km2: f64, time_years: f64, _energy_throttle: f64) -> f64 {
         let surface_temp = self.kelvin();
+
+        // Calculate thermal skin depth for this material and time step
+        let skin_depth = self.skin_depth_km(time_years);
+
+        // Limit skin depth to the actual layer height
+        let effective_skin_depth = skin_depth.min(self.height_km());
+
+        // Calculate the fraction of the layer that participates in radiation
+        let radiation_fraction = if self.height_km() > 0.0 {
+            effective_skin_depth / self.height_km()
+        } else {
+            1.0 // If no height, radiate everything
+        };
 
         // Calculate radiated energy per km² using Stefan-Boltzmann law
         let radiated_energy_per_km2 = SIGMA_KM2_YEAR * surface_temp.powi(4) * time_years;
         let total_radiated_energy = radiated_energy_per_km2 * area_km2;
 
-        // Remove energy (max 90% per step to prevent complete energy loss)
-        let current_energy = self.energy();
-        let energy_to_remove = total_radiated_energy.min(current_energy * 0.9);
+        // Only the skin depth fraction of energy is available for radiation
+        let skin_energy = self.energy() * radiation_fraction;
+
+        // Limit radiation to the smaller of: calculated radiation or available skin energy
+        // The skin depth naturally provides the physical constraint
+        let energy_to_remove = total_radiated_energy.min(skin_energy);
+
         self.remove_heat(energy_to_remove);
 
         energy_to_remove
@@ -493,6 +543,16 @@ impl EnergyMass for StandardEnergyMass {
     /// This is a randomized value within the material's range, set at creation
     fn thermal_transmission_r0(&self) -> f64 {
         self.thermal_transmission_r0
+    }
+
+    /// Compute thermal-diffusive skin depth in kilometres for this material
+    fn skin_depth_km(&self, time_years: f64) -> f64 {
+        // thermal diffusivity (m²/s)
+        let kappa = self.thermal_conductivity() / (self.density_kgm3() * self.specific_heat_j_kg_k());
+        // timestep in seconds
+        let dt_secs = time_years * SECONDS_PER_YEAR;
+        // skin depth in metres → convert to km
+        (kappa * dt_secs).sqrt() / 1000.0
     }
 }
 
@@ -786,5 +846,30 @@ mod tests {
             split_off.temperature(),
             split_off.volume()
         );
+    }
+
+    #[test]
+    fn test_skin_depth_calculation() {
+        let energy_mass = StandardEnergyMass::new_with_material(
+            MaterialType::Silicate,
+            1500.0, // Temperature
+            100.0,  // Volume
+        );
+
+        // Test skin depth for different time periods
+        let skin_depth_1_year = energy_mass.skin_depth_km(1.0);
+        let skin_depth_1000_years = energy_mass.skin_depth_km(1000.0);
+        let skin_depth_10000_years = energy_mass.skin_depth_km(10000.0);
+
+        // Skin depth should increase with time (sqrt relationship)
+        assert!(skin_depth_1000_years > skin_depth_1_year);
+        assert!(skin_depth_10000_years > skin_depth_1000_years);
+
+        // Verify reasonable values (should be much less than layer thickness for short times)
+        assert!(skin_depth_1_year < 1.0, "1-year skin depth should be less than 1km");
+        assert!(skin_depth_1000_years < 10.0, "1000-year skin depth should be less than 10km");
+
+        println!("Skin depths: 1yr={:.3}km, 1000yr={:.2}km, 10000yr={:.1}km",
+                 skin_depth_1_year, skin_depth_1000_years, skin_depth_10000_years);
     }
 }

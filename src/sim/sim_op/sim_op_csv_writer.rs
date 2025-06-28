@@ -15,7 +15,6 @@ pub trait CsvColumn {
 }
 
 /// Built-in column implementations
-pub struct StepColumn;
 pub struct YearsColumn;
 pub struct AvgSurfaceTempColumn;
 pub struct AvgLithosphereTempColumn;
@@ -37,14 +36,6 @@ pub struct AvgAsthLayerTempColumn {
 
 pub struct AvgLithLayerTempColumn {
     pub layer_index: usize,
-}
-
-// Column implementations
-impl CsvColumn for StepColumn {
-    fn header(&self) -> &str { "step" }
-    fn extract_value(&self, sim: &Simulation) -> String {
-        sim.current_step().to_string()
-    }
 }
 
 impl CsvColumn for YearsColumn {
@@ -268,7 +259,6 @@ impl CsvWriterOp {
     /// * `file_path` - Path to the CSV file to write (will be created/overwritten)
     pub fn new(file_path: String) -> Self {
         let default_columns: Vec<Box<dyn CsvColumn>> = vec![
-            Box::new(StepColumn),
             Box::new(YearsColumn),
             Box::new(AvgSurfaceTempColumn),
             Box::new(AvgLithosphereTempColumn),
@@ -294,7 +284,6 @@ impl CsvWriterOp {
     /// * `max_lith_layers` - Maximum number of lithosphere layers to include
     pub fn new_with_layer_temps(file_path: String, max_asth_layers: usize, max_lith_layers: usize) -> Self {
         let mut columns: Vec<Box<dyn CsvColumn>> = vec![
-            Box::new(StepColumn),
             Box::new(YearsColumn),
         ];
 

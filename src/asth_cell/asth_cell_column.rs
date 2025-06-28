@@ -26,6 +26,9 @@ pub struct AsthCellColumn {
     pub planet_radius_km: f64,
     pub layer_count: usize,
 
+    /// Layer thermal state: 0=space, 1-5=lithosphere, 6-9=asthenosphere, 10=fixed_engine
+    pub layer_thermal_states: Vec<u8>,
+
     #[serde(
         serialize_with = "serialize_neighbor_cells",
         deserialize_with = "deserialize_neighbor_cells"
@@ -60,11 +63,14 @@ impl AsthCellColumn {
             layer_volume,
             0,
         );
+        // Use realistic formation temperature for initial lithosphere (80% of formation threshold)
+        let profile = crate::material::get_profile(MaterialType::Silicate).unwrap();
+        let formation_temp_k = profile.max_lith_formation_temp_kv * 0.8;
         let initial_lith_layer = crate::asth_cell::asth_cell_lithosphere::AsthCellLithosphere::new(
             0.0,
             MaterialType::Silicate,
             0.0,
-            params.surface_temp_k, // Use surface temperature as formation temperature
+            formation_temp_k,
         );
 
         let cell_column = AsthCellColumn {
@@ -78,6 +84,8 @@ impl AsthCellColumn {
             layer_count: params.layer_count,
             planet_radius_km: params.planet_radius_km,
             lith_layers_t: vec![(initial_lith_layer.clone(), initial_lith_layer)],
+            // Initialize thermal states: all start as asthenosphere (state 7)
+            layer_thermal_states: vec![7; params.layer_count],
         };
 
         cell_column.project(
@@ -118,12 +126,9 @@ impl AsthCellColumn {
                 MaterialType::Silicate
             };
 
-            // Create empty lithosphere layer tuple with surface temperature
-            let formation_temp_k = if let Some((surface_layer, _)) = self.asth_layers_t.first() {
-                surface_layer.kelvin()
-            } else {
-                1673.15 // Default formation temperature for Silicate
-            };
+            // Create empty lithosphere layer tuple with realistic formation temperature
+            let profile = crate::material::get_profile(material_type).unwrap();
+            let formation_temp_k = profile.max_lith_formation_temp_kv * 0.8; // 80% of formation threshold
             let empty_layer = AsthCellLithosphere::new(0.0, material_type, 0.0, formation_temp_k);
             self.lith_layers_t.push((empty_layer.clone(), empty_layer));
         }
@@ -184,12 +189,9 @@ impl AsthCellColumn {
     /// Create a lithosphere with the specified material
     /// Used when operations need to create new lithosphere
     pub fn create_lithosphere(&mut self, material: MaterialType, height_km: f64, volume_km3: f64) {
-        // Get formation temperature from the surface asthenosphere layer
-        let formation_temp_k = if let Some((surface_layer, _)) = self.asth_layers_t.first() {
-            surface_layer.kelvin()
-        } else {
-            1673.15 // Default formation temperature for Silicate
-        };
+        // Use realistic formation temperature for newly solidified lithosphere
+        let profile = crate::material::get_profile(material).unwrap();
+        let formation_temp_k = profile.max_lith_formation_temp_kv * 0.8; // 80% of formation threshold
 
         let lithosphere = AsthCellLithosphere::new(height_km, material, volume_km3, formation_temp_k);
 
@@ -203,12 +205,10 @@ impl AsthCellColumn {
         let area = self.area();
         let volume_km3 = area * height_km;
 
-        // Get formation temperature from the surface asthenosphere layer
-        let formation_temp_k = if let Some((surface_layer, _)) = self.asth_layers_t.first() {
-            surface_layer.kelvin()
-        } else {
-            1673.15 // Default formation temperature
-        };
+        // Use a realistic formation temperature for newly solidified lithosphere
+        // This should be significantly cooler than the asthenosphere temperature
+        let profile = crate::material::get_profile(material).unwrap();
+        let formation_temp_k = profile.max_lith_formation_temp_kv * 0.8; // 80% of formation threshold
 
         let lithosphere = AsthCellLithosphere::new(height_km, material, volume_km3, formation_temp_k);
 
@@ -227,12 +227,9 @@ impl AsthCellColumn {
 
         // Ensure we always have at least one lithosphere layer
         if self.lith_layers_t.is_empty() {
-            // Get formation temperature from the surface asthenosphere layer
-            let formation_temp_k = if let Some((surface_layer, _)) = self.asth_layers_t.first() {
-                surface_layer.kelvin()
-            } else {
-                1673.15 // Default formation temperature for Silicate
-            };
+            // Use realistic formation temperature for newly solidified lithosphere
+            let profile = crate::material::get_profile(crate::material::MaterialType::Silicate).unwrap();
+            let formation_temp_k = profile.max_lith_formation_temp_kv * 0.8; // 80% of formation threshold
             let empty_layer = AsthCellLithosphere::new(0.0, crate::material::MaterialType::Silicate, 0.0, formation_temp_k);
             self.lith_layers_t.push((empty_layer.clone(), empty_layer));
         }
@@ -244,12 +241,9 @@ impl AsthCellColumn {
     pub fn insert_layer_height(&mut self, material_type: MaterialType, height_km: f64, _max_layer_height_km: f64) -> bool {
         let is_empty = height_km <= 0.001;
 
-        // Get formation temperature from the surface asthenosphere layer
-        let formation_temp_k = if let Some((surface_layer, _)) = self.asth_layers_t.first() {
-            surface_layer.kelvin()
-        } else {
-            1673.15 // Default formation temperature for Silicate
-        };
+        // Use realistic formation temperature for newly solidified lithosphere
+        let profile = crate::material::get_profile(material_type).unwrap();
+        let formation_temp_k = profile.max_lith_formation_temp_kv * 0.8; // 80% of formation threshold
 
         // Only allow empty layers when there are no layers at all (initial state)
         if is_empty {
@@ -307,6 +301,18 @@ impl AsthCellColumn {
     /// Process lithosphere formation/melting at the layer level
     /// Returns the energy released from melting (if any)
     pub fn process_lithosphere_layer_change(&mut self, surface_temp_k: f64, years_per_step: u32, max_layer_height_km: f64) -> f64 {
+        self.process_lithosphere_layer_change_with_modifier(surface_temp_k, years_per_step, max_layer_height_km, 1.0)
+    }
+
+    /// Process lithosphere formation/melting at the layer level with production rate modifier
+    /// Returns the energy released from melting (if any)
+    ///
+    /// # Arguments
+    /// * `surface_temp_k` - Surface temperature in Kelvin
+    /// * `years_per_step` - Number of years per simulation step
+    /// * `max_layer_height_km` - Maximum height per lithosphere layer
+    /// * `production_rate_modifier` - Rate modifier (0.0-1.0) to dampen formation/melting rates
+    pub fn process_lithosphere_layer_change_with_modifier(&mut self, surface_temp_k: f64, years_per_step: u32, max_layer_height_km: f64, production_rate_modifier: f64) -> f64 {
         let material_type = self.formation_material_type();
         let profile = crate::material::get_profile(material_type).unwrap();
 
@@ -317,30 +323,36 @@ impl AsthCellColumn {
             // FORMATION: Temperature below formation threshold
             if current_total_height < profile.max_lith_height_km {
                 // Use the existing layer growth_per_year method
-                let growth_rate_km_per_year = if let Some((bottom_layer, _)) = self.lith_layers_t.first() {
+                let base_growth_rate_km_per_year = if let Some((bottom_layer, _)) = self.lith_layers_t.first() {
                     bottom_layer.growth_per_year(surface_temp_k)
                 } else {
                     // Fallback to profile calculation if no layers exist
                     profile.growth_at_kelvin(surface_temp_k)
                 };
 
-                let growth_km = growth_rate_km_per_year * years_per_step as f64;
+                // Apply production rate modifier to dampen growth
+                let modified_growth_rate = base_growth_rate_km_per_year * production_rate_modifier;
+                let growth_km = modified_growth_rate * years_per_step as f64;
 
                 if growth_km > 0.0 {
-                    self.grow_lithosphere_stack(growth_km, max_layer_height_km, surface_temp_k);
+                    // Use realistic formation temperature for newly solidified lithosphere
+                    let formation_temp_k = profile.max_lith_formation_temp_kv * 0.8; // 80% of formation threshold
+                    self.grow_lithosphere_stack(growth_km, max_layer_height_km, formation_temp_k);
                 }
             }
         } else {
             // MELTING: Temperature above formation threshold
             if current_total_height > 0.0 {
                 // Use the existing layer melt_from_below_km_per_year method
-                let melt_rate_km_per_year = if let Some((bottom_layer, _)) = self.lith_layers_t.first() {
+                let base_melt_rate_km_per_year = if let Some((bottom_layer, _)) = self.lith_layers_t.first() {
                     bottom_layer.melt_from_below_km_per_year(surface_temp_k)
                 } else {
                     0.0
                 };
 
-                let melt_km = melt_rate_km_per_year * years_per_step as f64;
+                // Apply production rate modifier to dampen melting
+                let modified_melt_rate = base_melt_rate_km_per_year * production_rate_modifier;
+                let melt_km = modified_melt_rate * years_per_step as f64;
 
                 if melt_km > 0.0 {
                     energy_released = self.melt_lithosphere_stack(melt_km);
@@ -439,12 +451,9 @@ impl AsthCellColumn {
         // Ensure we always have at least one lithosphere layer (even if empty)
         if self.lith_layers_t.is_empty() {
             let material_type = self.formation_material_type();
-            // Get formation temperature from the surface asthenosphere layer
-            let formation_temp_k = if let Some((surface_layer, _)) = self.asth_layers_t.first() {
-                surface_layer.kelvin()
-            } else {
-                1673.15 // Default formation temperature for Silicate
-            };
+            // Use a realistic formation temperature for newly solidified lithosphere
+            let profile = crate::material::get_profile(material_type).unwrap();
+            let formation_temp_k = profile.max_lith_formation_temp_kv * 0.8; // 80% of formation threshold
             let empty_layer = AsthCellLithosphere::new(0.0, material_type, 0.0, formation_temp_k);
             self.lith_layers_t.push((empty_layer.clone(), empty_layer));
         }

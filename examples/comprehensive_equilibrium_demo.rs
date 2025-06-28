@@ -25,7 +25,10 @@ fn main() {
     // Create comprehensive operator suite with modern thermal physics
     let operators = vec![
         CoreRadianceOp::handle_earth(), // Core heat input from planetary interior
-        ThermalDiffusionOp::handle(1.0, 25.0), // Realistic thermal diffusion with cascading energy transfer
+        ThermalDiffusionOp::handle(
+            0.5,   // Higher diffusion rate for better asthenosphere equilibration
+            25.0,  // Higher max temp change for asthenosphere layers
+            0.8),  // Moderate energy change rate
         AtmosphereOp::handle_with_params(
             1300.0, // 1300K outgassing threshold
             5e-11,  // Lower outgassing rate
@@ -39,6 +42,7 @@ fn main() {
             ],
             123,   // Random seed
             0.15,  // Scale factor
+            0.3,   // Production rate modifier (30% to reduce chaos)
         ),
         ProgressReporterOp::handle(30), // Report every 30 steps
         CsvWriterOp::handle_with_layer_temps(csv_file.clone(), 4, 6), // 4 asth layers, up to 6 lith layers
@@ -56,8 +60,8 @@ fn main() {
         layer_count: 4,      // 4 asthenosphere layers (200km total)
         asth_layer_height_km: 50.0,
         lith_layer_height_km: 25.0,
-        sim_steps: 400,      // Run for 150 steps to show equilibrium
-        years_per_step: 1000, // 20,000 years per step = 3M years total
+        sim_steps: 500,
+        years_per_step: 5000,
         debug: false,
         alert_freq: 30,      // Report every 30 steps
         starting_surface_temp_k: 1600.0, // Moderate starting temperature

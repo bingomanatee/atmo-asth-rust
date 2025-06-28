@@ -30,6 +30,10 @@ pub struct LithosphereUnifiedOp {
 
     /// Noise scale for material variation
     pub scale: f64,
+
+    /// Production rate modifier (0.0-1.0) to dampen formation/melting rates and reduce chaos
+    /// Lower values create more stable, gradual changes
+    pub production_rate_modifier: f64,
 }
 
 impl LithosphereUnifiedOp {
@@ -39,17 +43,19 @@ impl LithosphereUnifiedOp {
     /// * `materials` - Vector of (MaterialType, frequency) pairs for lithosphere formation
     /// * `seed` - Random seed for material distribution
     /// * `scale` - Noise scale for material variation
-    pub fn new(materials: Vec<(MaterialType, f64)>, seed: u32, scale: f64) -> Self {
+    /// * `production_rate_modifier` - Rate modifier (0.0-1.0) to dampen formation/melting rates
+    pub fn new(materials: Vec<(MaterialType, f64)>, seed: u32, scale: f64, production_rate_modifier: f64) -> Self {
         Self {
             materials,
             seed,
             scale,
+            production_rate_modifier: production_rate_modifier.clamp(0.0, 1.0),
         }
     }
 
     /// Create a handle for the unified lithosphere operator
-    pub fn handle(materials: Vec<(MaterialType, f64)>, seed: u32, scale: f64) -> SimOpHandle {
-        SimOpHandle::new(Box::new(Self::new(materials, seed, scale)))
+    pub fn handle(materials: Vec<(MaterialType, f64)>, seed: u32, scale: f64, production_rate_modifier: f64) -> SimOpHandle {
+        SimOpHandle::new(Box::new(Self::new(materials, seed, scale, production_rate_modifier)))
     }
 
     /// Pick a material based on noise value and material frequencies
@@ -100,12 +106,9 @@ impl SimOp for LithosphereUnifiedOp {
 
             let material = self.pick_material(scaled_val);
 
-            // Get formation temperature from the surface asthenosphere layer
-            let formation_temp_k = if let Some((surface_layer, _)) = column.asth_layers_t.first() {
-                surface_layer.kelvin()
-            } else {
-                1673.15 // Default formation temperature for Silicate
-            };
+            // Use realistic formation temperature for newly solidified lithosphere
+            let profile = crate::material::get_profile(material).unwrap();
+            let formation_temp_k = profile.max_lith_formation_temp_kv * 0.8; // 80% of formation threshold
 
             let new_layer = AsthCellLithosphere::new(0.0, material, 0.0, formation_temp_k);
             column.lith_layers_t.push((new_layer.clone(), new_layer));
@@ -116,11 +119,12 @@ impl SimOp for LithosphereUnifiedOp {
         for column in sim.cells.values_mut() {
             let surface_temp_k = column.asth_layers_t[0].0.kelvin();
 
-            // Process lithosphere changes at the column level
-            let energy_released = column.process_lithosphere_layer_change(
+            // Process lithosphere changes at the column level with production rate modifier
+            let energy_released = column.process_lithosphere_layer_change_with_modifier(
                 surface_temp_k,
                 sim.years_per_step,
-                sim.lith_layer_height_km
+                sim.lith_layer_height_km,
+                self.production_rate_modifier
             );
 
             // Add any released energy back to the top asthenosphere layer
@@ -165,7 +169,7 @@ mod tests {
     #[test]
     fn test_formation_at_low_temperature() {
         let mut sim = create_test_simulation();
-        let mut op = LithosphereUnifiedOp::new(vec![(MaterialType::Silicate, 1.0)], 42, 0.1);
+        let mut op = LithosphereUnifiedOp::new(vec![(MaterialType::Silicate, 1.0)], 42, 0.1, 1.0);
 
         // Initialize lithosphere
         op.init_sim(&mut sim);
@@ -230,7 +234,7 @@ mod tests {
     #[test]
     fn test_melting_at_high_temperature() {
         let mut sim = create_test_simulation();
-        let mut op = LithosphereUnifiedOp::new(vec![(MaterialType::Silicate, 1.0)], 42, 0.1);
+        let mut op = LithosphereUnifiedOp::new(vec![(MaterialType::Silicate, 1.0)], 42, 0.1, 1.0);
 
         // Initialize
         op.init_sim(&mut sim);
@@ -318,7 +322,7 @@ mod tests {
     #[test]
     fn test_equilibrium_behavior() {
         let mut sim = create_test_simulation();
-        let mut op = LithosphereUnifiedOp::new(vec![(MaterialType::Silicate, 1.0)], 42, 0.1);
+        let mut op = LithosphereUnifiedOp::new(vec![(MaterialType::Silicate, 1.0)], 42, 0.1, 1.0);
 
         // Initialize lithosphere
         op.init_sim(&mut sim);
@@ -342,6 +346,59 @@ mod tests {
         for (column, &initial_height) in sim.cells.values().zip(initial_heights.iter()) {
             let final_height = column.lith_layers_t.last().unwrap().1.height_km;
             assert_abs_diff_eq!(final_height, initial_height, epsilon = 0.1);
+        }
+    }
+
+    #[test]
+    fn test_production_rate_modifier_reduces_chaos() {
+        let mut sim_fast = create_test_simulation();
+        let mut sim_slow = create_test_simulation();
+
+        // Create operators with different production rate modifiers
+        let mut op_fast = LithosphereUnifiedOp::new(vec![(MaterialType::Silicate, 1.0)], 42, 0.1, 1.0); // Full rate
+        let mut op_slow = LithosphereUnifiedOp::new(vec![(MaterialType::Silicate, 1.0)], 42, 0.1, 0.1); // 10% rate
+
+        // Initialize both simulations
+        op_fast.init_sim(&mut sim_fast);
+        op_slow.init_sim(&mut sim_slow);
+
+        // Set temperature that will cause formation
+        for column in sim_fast.cells.values_mut() {
+            column.asth_layers_t[0].0.set_temp_kelvin(1600.0); // Below formation temp
+        }
+        for column in sim_slow.cells.values_mut() {
+            column.asth_layers_t[0].0.set_temp_kelvin(1600.0); // Below formation temp
+        }
+
+        // Run multiple steps to see the difference in behavior
+        for _ in 0..5 {
+            op_fast.update_sim(&mut sim_fast);
+            op_slow.update_sim(&mut sim_slow);
+
+            // Commit changes
+            for column in sim_fast.cells.values_mut() {
+                column.commit_next_layers();
+            }
+            for column in sim_slow.cells.values_mut() {
+                column.commit_next_layers();
+            }
+        }
+
+        // The slow modifier should produce smaller, more gradual changes
+        let fast_heights: Vec<f64> = sim_fast.cells.values()
+            .map(|column| column.total_lithosphere_height())
+            .collect();
+        let slow_heights: Vec<f64> = sim_slow.cells.values()
+            .map(|column| column.total_lithosphere_height())
+            .collect();
+
+        // Slow simulation should have smaller heights (more gradual growth)
+        for (fast_height, slow_height) in fast_heights.iter().zip(slow_heights.iter()) {
+            assert!(
+                slow_height < fast_height,
+                "Slow production rate should result in smaller lithosphere growth. Fast: {}, Slow: {}",
+                fast_height, slow_height
+            );
         }
     }
 }

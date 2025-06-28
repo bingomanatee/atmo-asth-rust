@@ -193,12 +193,15 @@ impl AsthCellLithosphere {
             let new_volume = area_km2 * self.height_km;
             self.set_volume_km3(new_volume);
 
-            // Set temperature to formation temperature if layer has no energy
+            // Set temperature to a realistic formation temperature if layer has no energy
             if self.energy_joules() <= 0.0 {
                 let mass_kg = self.mass_kg();
                 let specific_heat = self.specific_heat();
                 if mass_kg > 0.0 && specific_heat > 0.0 {
-                    let target_energy = mass_kg * specific_heat * formation_temp_k;
+                    // Use 80% of formation threshold for realistic cooling
+                    let profile = self.profile();
+                    let realistic_temp = profile.max_lith_formation_temp_kv * 0.8;
+                    let target_energy = mass_kg * specific_heat * realistic_temp;
                     self.add_energy(target_energy);
                 }
             }
