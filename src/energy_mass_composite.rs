@@ -485,12 +485,12 @@ pub fn create_atmospheric_layer_for_cell(
 /// Standard implementation of EnergyMass using material composite profiles
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct StandardEnergyMassComposite {
-    energy_joules: f64,
-    volume_km3: f64,
-    height_km: f64, // Height in km (for layer calculations)
-    material_type: MaterialCompositeType,
-    phase: MaterialPhase, // Current material state (Solid/Liquid/Gas)
-    thermal_transmission_r0: f64, // R0 thermal transmission coefficient (set at creation)
+    pub energy_joules: f64,
+    pub volume_km3: f64,
+    pub height_km: f64, // Height in km (for layer calculations)
+    pub material_type: MaterialCompositeType,
+    pub phase: MaterialPhase, // Current material state (Solid/Liquid/Gas)
+    pub thermal_transmission_r0: f64, // R0 thermal transmission coefficient (set at creation)
 }
 
 impl StandardEnergyMassComposite {

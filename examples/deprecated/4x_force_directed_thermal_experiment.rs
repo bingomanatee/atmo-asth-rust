@@ -9,7 +9,7 @@ use std::io::Write;
 extern crate atmo_asth_rust;
 use atmo_asth_rust::energy_mass::EnergyMass;
 use atmo_asth_rust::example::{ExperimentState, ThermalLayerNode};
-use atmo_asth_rust::example::thermal_layer_node::ThermalLayerNodeParams;
+use atmo_asth_rust::example::thermal_layer_node::ThermalLayerNodeTempParams;
 use atmo_asth_rust::material_composite::{get_material_core};
 use atmo_asth_rust::energy_mass_composite::{StandardEnergyMassComposite, 
                                             get_profile_fast, 
@@ -56,25 +56,18 @@ impl OneKm2Simulation {
             let depth_km = (i as f64 + 0.5) * layer_height_km;
             let volume_km3 = 1.0 * layer_height_km; // 1 km² surface area
 
-            // Surface layers
+            // Calculate temperature using linear gradient from surface to foundry
             let temp_kelvin = {
                 let surface_temperature = config.surface_temperature_k;
                 let foundry_temperature = config.foundry_temperature_k;
                 let diff = foundry_temperature - surface_temperature;
                 surface_temperature + diff * (i as f64 / num_nodes as f64)
             };
-            
-            let material_profile = get_profile_fast(&MaterialCompositeType::Silicate,
-            &MaterialPhase::Liquid);
-            
-            let energy_joules = energy_from_kelvin(
-                temp_kelvin, volume_km3, 
-                material_profile.specific_heat_capacity_j_per_kg_k
-            );
 
-            let node = ThermalLayerNode::new(ThermalLayerNodeParams {
+            // Use simplified constructor that sets temperature directly
+            let node = ThermalLayerNode::new_with_temperature(ThermalLayerNodeTempParams {
                 material_type: MaterialCompositeType::Silicate,
-                energy_joules,
+                temperature_k: temp_kelvin,
                 volume_km3,
                 depth_km,
                 height_km: layer_height_km,
@@ -120,7 +113,7 @@ impl OneKm2Simulation {
     
     fn init_csv(&self) -> File {
         let mut file =
-            File::create("examples/data/4x_thermal_experiment.csv").expect("Could not create file");
+            File::create("../data/4x_thermal_experiment.csv").expect("Could not create file");
         // Write header - export key layers
         write!(file, "years").unwrap();
 

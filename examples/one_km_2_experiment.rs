@@ -8,23 +8,25 @@ use std::io::Write;
 // Import the real EnergyMass trait and material system
 extern crate atmo_asth_rust;
 use atmo_asth_rust::energy_mass::EnergyMass;
+use atmo_asth_rust::energy_mass_composite::{
+    EnergyMassComposite, MaterialCompositeType, MaterialPhase, StandardEnergyMassComposite,
+    get_profile_fast,
+};
+use atmo_asth_rust::example::thermal_layer_node::{ThermalLayerNodeParams, ThermalLayerNodeTempParams};
 use atmo_asth_rust::example::{ExperimentState, ThermalLayerNode};
-use atmo_asth_rust::example::thermal_layer_node::ThermalLayerNodeParams;
-use atmo_asth_rust::material_composite::{get_material_core};
-use atmo_asth_rust::energy_mass_composite::{StandardEnergyMassComposite, 
-                                            get_profile_fast, 
-                                            MaterialCompositeType, 
-                                            MaterialPhase,
-                                            EnergyMassComposite};
+use atmo_asth_rust::material_composite::get_material_core;
 // Re-export MaterialPhase for easier access
 use atmo_asth_rust::temp_utils::energy_from_kelvin;
+use atmo_asth_rust::math_utils::{lerp, deviation};
+use atmo_asth_rust::assert_deviation;
+use more_asserts::assert_lt;
 
 // Export layer indices - key layer positions for analysis
 const EXPORT_LAYER_INDICES: [usize; 9] = [10, 15, 20, 25, 30, 35, 40, 45, 50];
 
-///  This simulates a single km2 with only vertical flows up and down 
+///  This simulates a single km2 with only vertical flows up and down
 ///  with energy coming in from the highest/lowest cell in the array
-/// to the surface of the earth at cell 0 which radiates heat into space. 
+/// to the surface of the earth at cell 0 which radiates heat into space.
 /// the settings for the heat flow come in as ExperimentState
 struct OneKm2Experiment {
     nodes: Vec<ThermalLayerNode>,
@@ -59,25 +61,17 @@ impl OneKm2Experiment {
             let depth_km = (i as f64 + 0.5) * layer_height_km;
             let volume_km3 = 1.0 * layer_height_km; // 1 km² surface area
 
-            // Surface layers
-            let temp_kelvin = {
-                let surface_temperature = config.surface_temperature_k;
-                let foundry_temperature = config.foundry_temperature_k;
-                let diff = foundry_temperature - surface_temperature;
-                surface_temperature + diff * (i as f64 / num_nodes as f64)
-            };
-            
-            let material_profile = get_profile_fast(&MaterialCompositeType::Silicate,
-            &MaterialPhase::Liquid);
-            
-            let energy_joules = energy_from_kelvin(
-                temp_kelvin, volume_km3, 
-                material_profile.specific_heat_capacity_j_per_kg_k
+            // Calculate temperature using linear gradient from surface to foundry
+            let temp_kelvin = lerp(
+                config.surface_temperature_k,
+                config.foundry_temperature_k,
+                i as f64 / num_nodes as f64
             );
 
-            let node = ThermalLayerNode::new(ThermalLayerNodeParams {
+            // Use simplified constructor that sets temperature directly
+            let node = ThermalLayerNode::new_with_temperature(ThermalLayerNodeTempParams {
                 material_type: MaterialCompositeType::Silicate,
-                energy_joules,
+                temperature_k: temp_kelvin,
                 volume_km3,
                 depth_km,
                 height_km: layer_height_km,
@@ -120,7 +114,7 @@ impl OneKm2Experiment {
             self.config.foundry_temperature_k
         );
     }
-    
+
     fn init_csv(&self) -> File {
         let mut file =
             File::create("examples/data/4x_thermal_experiment.csv").expect("Could not create file");
@@ -139,13 +133,12 @@ impl OneKm2Experiment {
         writeln!(file).unwrap();
         file
     }
-    
-    pub fn years_per_step(&self)  -> f64{
+
+    pub fn years_per_step(&self) -> f64 {
         self.total_years as f64 / self.steps as f64
     }
 
     fn run(&mut self, steps: u64, total_years: u64) {
-        
         self.total_years = total_years;
         self.steps = steps;
         let mut file = self.init_csv();
@@ -207,13 +200,11 @@ impl OneKm2Experiment {
         }
 
         // Update thermal states based on temperature with time-dependent transitions
-        self.update_thermal_states();
+        self.update_node_phases();
     }
 
     fn apply_boundary_conditions(&mut self) {
-        self.nodes[0]
-            .energy_mass
-            .set_kelvin(self.config.foundry_temperature_k);
+        self.nodes[0].set_kelvin(self.config.foundry_temperature_k);
     }
 
     /// Energy-conservative exchange between two nodes
@@ -241,7 +232,7 @@ impl OneKm2Experiment {
             // 'to' node is hotter, energy flows from 'to' to 'from'
             energy_changes[from_idx] += energy_transfer;
             energy_changes[to_idx] -= energy_transfer;
-        } 
+        }
     }
 
     fn get_energy_change_from_node_to_node(
@@ -280,14 +271,18 @@ impl OneKm2Experiment {
             ((temp_diff / 100.0).powf(1.5)).max(0.33) * self.config.pressure_baseline;
 
         // DIFFUSION PHYSICS: Energy transfer based on temperature difference
-        let avg_thermal_capacity = (from_node.energy_mass.thermal_capacity() + to_node.energy_mass.thermal_capacity()) / 2.0;
+        let avg_thermal_capacity = (from_node.thermal_capacity()
+            + to_node.thermal_capacity())
+            / 2.0;
         let energy_difference = temp_diff * avg_thermal_capacity;
         let flow_coefficient =
             base_coefficient * distance_weight * conductivity_factor * pressure_factor;
         let energy_transfer = energy_difference * flow_coefficient * self.years_per_step();
 
         // Limit transfer to prevent instability (max 25% of smaller thermal capacity per step)
-        let min_capacity = from_node.energy_mass.thermal_capacity().min(to_node.energy_mass.thermal_capacity());
+        let min_capacity = from_node
+            .thermal_capacity()
+            .min(to_node.thermal_capacity());
         let max_transfer = min_capacity * 0.25;
         energy_transfer.min(max_transfer)
     }
@@ -337,13 +332,13 @@ impl OneKm2Experiment {
             ((temp_diff_abs / 100.0).powf(1.5)).max(0.33) * self.config.pressure_baseline;
 
         // DIFFUSION PHYSICS: Only the energy difference flows
-        let energy_difference = temp_diff * from_node.energy_mass.thermal_capacity();
+        let energy_difference = temp_diff * from_node.thermal_capacity();
         let flow_coefficient =
             base_coefficient * distance_weight * conductivity_factor * pressure_factor;
         let energy_transfer = energy_difference * flow_coefficient * years;
 
         // Limit transfer to prevent instability (max 25% of thermal capacity per step)
-        let max_transfer = from_node.energy_mass.thermal_capacity() * 0.25;
+        let max_transfer = from_node.thermal_capacity() * 0.25;
         let limited_transfer = energy_transfer.abs().min(max_transfer);
 
         if temp_diff > 0.0 {
@@ -353,17 +348,15 @@ impl OneKm2Experiment {
         }
     }
 
-    fn update_thermal_states(&mut self) {
+    fn update_node_phases(&mut self) {
+        // @TODO: transition slowly from solid to liquid
         for (i, node) in self.nodes.iter_mut().enumerate() {
-            let material_type = node.energy_mass.material_composite_type();
-            let composite = get_material_core(&material_type);
-
-            let temp = node.temp_kelvin();
-
-            if temp > composite.melting_point_min_k {
-                node.thermal_state = 0; // Liquid/magma
+            let temp = node.kelvin();
+            let melting_point = node.material_composite().melting_point_min_k;
+            if temp >= melting_point {
+                node.set_phase(MaterialPhase::Liquid);
             } else {
-                node.thermal_state = 100; // solid
+                node.set_phase(MaterialPhase::Solid);
             }
         }
     }
@@ -401,26 +394,30 @@ impl OneKm2Experiment {
         println!("\n🎯 Experiment Complete!");
         println!("==========================================");
 
-        let min_temp = self
-            .nodes
+        // Skip first 3 and last 2 nodes (influenced by boundary conditions)
+        let analysis_nodes = &self.nodes[3..self.nodes.len()-2];
+
+        let min_temp = analysis_nodes
             .iter()
             .map(|n| n.temp_kelvin())
             .fold(f64::INFINITY, f64::min);
-        let max_temp = self
-            .nodes
+        let max_temp = analysis_nodes
             .iter()
             .map(|n| n.temp_kelvin())
             .fold(f64::NEG_INFINITY, f64::max);
 
         println!(
-            "📊 Final Temperature Range: {:.1}K - {:.1}K",
+            "📊 Final Temperature Range (excluding boundary layers): {:.1}K - {:.1}K",
             min_temp, max_temp
         );
         println!(
-            "   Temperature span: {:.1}K ({} ...{})",
+            "   Temperature span: {:.1}K (analyzing layers 4-{} of {})",
             max_temp - min_temp,
-            min_temp,
-            max_temp
+            self.nodes.len() - 2,
+            self.nodes.len()
+        );
+        println!(
+            "   Skipped: first 3 layers (space influence) and last 2 layers (foundry influence)"
         );
 
         self.print_rows();
@@ -429,18 +426,27 @@ impl OneKm2Experiment {
         println!("   Deep geological time simulation complete!");
 
         let first_node = self.nodes.first().unwrap();
-        let composite = first_node.energy_mass.material_composite();
+        let composite = first_node.material_composite();
         println!("  melting temperature: {}", composite.melting_point_min_k);
     }
 
     fn print_rows(&self) {
         for (i, node) in self.nodes.iter().enumerate() {
+            let boundary_marker = if i < 3 {
+                " (space boundary)"
+            } else if i >= self.nodes.len() - 2 {
+                " (foundry boundary)"
+            } else {
+                ""
+            };
+
             println!(
-                "   Layer {}:  {}K  at {}km depth   {}",
+                "   Layer {}:  {}K  at {}km depth   {}{}",
                 i + 1,
                 node.temp_kelvin() as i32,
                 node.depth_km as i32,
-                node.format_thermal_state()
+                node.format_thermal_state(),
+                boundary_marker
             );
         }
     }
@@ -452,7 +458,7 @@ fn main() {
     println!("🎯 Deep geological time: 1 billion years of thermal evolution");
     let total_years = 1_000_000;
     let years_per_step = 10_000;
-    let steps  = total_years/years_per_step;
+    let steps = total_years / years_per_step;
     // Create experiment with 4x scaled parameters
     let mut experiment = OneKm2Experiment::new(steps, total_years);
     experiment.print_initial_state();
@@ -461,4 +467,143 @@ fn main() {
     println!("\n🌡️  Running 4x enhanced thermal equilibration...");
 
     experiment.run(100, 1_000_000);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_one_km_2_experiment_initial_temperature_gradient() {
+        // Create experiment instance
+        let experiment = OneKm2Experiment::new(100, 1_000_000);
+
+        // Get configuration values for expected gradient
+        let surface_temp = experiment.config.surface_temperature_k;
+        let foundry_temp = experiment.config.foundry_temperature_k;
+        let num_nodes = experiment.nodes.len();
+
+        // Validate that we have the expected number of nodes
+        assert_eq!(num_nodes, 60, "Expected 60 thermal nodes");
+
+        // Test temperature gradient from surface (index 0) to foundry (index 59)
+        let mut temperatures = Vec::new();
+        let mut depths = Vec::new();
+        let mut max_deviation_percent: f64 = 0.0;
+
+        for (i, node) in experiment.nodes.iter().enumerate() {
+            let temp = node.temp_kelvin();
+            let depth = node.depth_km();
+            temperatures.push(temp);
+            depths.push(depth);
+
+            // Calculate expected temperature for this layer using the same formula as the experiment
+            let expected_temp = lerp(surface_temp, foundry_temp, i as f64 / num_nodes as f64);
+
+            // Check that temperature is within ±2% of expected linear gradient
+            // Since we're setting temperature directly, it should be very precise
+            assert_deviation!(
+                temp, expected_temp, 2.0,
+                "Node {} at depth {:.1}km: expected temp {:.1}K, got {:.1}K",
+                i, depth, expected_temp, temp
+            );
+
+            max_deviation_percent = max_deviation_percent.max(deviation(temp, expected_temp));
+
+        }
+
+        // Verify gradient is monotonic (temperatures increase with depth)
+        for i in 1..temperatures.len() {
+            assert!(
+                temperatures[i] >= temperatures[i-1],
+                "Temperature gradient should be monotonic: layer {} ({:.1}K) should be >= layer {} ({:.1}K)",
+                i, temperatures[i], i-1, temperatures[i-1]
+            );
+        }
+
+        // Test specific boundary conditions
+        let surface_node_temp = experiment.nodes[0].temp_kelvin();
+        let foundry_node_temp = experiment.nodes[num_nodes - 1].temp_kelvin();
+
+
+
+        // Boundary conditions should be within ±2% of configured temperatures
+        assert_deviation!(
+            surface_node_temp, surface_temp, 2.0,
+            "Surface temperature should be within 2%: got {:.1}K, expected {:.1}K",
+            surface_node_temp, surface_temp
+        );
+
+        assert_deviation!(
+            foundry_node_temp, foundry_temp, 2.0,
+            "Foundry temperature should be within 2%: got {:.1}K, expected {:.1}K",
+            foundry_node_temp, foundry_temp
+        );
+
+        // Test temperature range
+        let temp_range = foundry_node_temp - surface_node_temp;
+        let expected_range = foundry_temp - surface_temp;
+
+        assert_deviation!(
+            temp_range, expected_range, 2.0,
+            "Temperature range should be within 2%: got {:.1}K, expected {:.1}K",
+            temp_range, expected_range
+        );
+
+        // Test some intermediate points for gradient linearity
+        let quarter_point = num_nodes / 4;
+        let half_point = num_nodes / 2;
+        let three_quarter_point = 3 * num_nodes / 4;
+
+        let quarter_temp = experiment.nodes[quarter_point].temp_kelvin();
+        let half_temp = experiment.nodes[half_point].temp_kelvin();
+        let three_quarter_temp = experiment.nodes[three_quarter_point].temp_kelvin();
+
+        let expected_quarter = lerp(surface_temp, foundry_temp, quarter_point as f64 / num_nodes as f64);
+        let expected_half = lerp(surface_temp, foundry_temp, half_point as f64 / num_nodes as f64);
+        let expected_three_quarter = lerp(surface_temp, foundry_temp, three_quarter_point as f64 / num_nodes as f64);
+
+        assert_deviation!(quarter_temp, expected_quarter, 2.0, "25% depth temperature should be within 2%");
+        assert_deviation!(half_temp, expected_half, 2.0, "50% depth temperature should be within 2%");
+        assert_deviation!(three_quarter_temp, expected_three_quarter, 2.0, "75% depth temperature should be within 2%");
+        
+    }
+
+    #[test]
+    fn test_one_km_2_experiment_node_properties() {
+        let experiment = OneKm2Experiment::new(100, 1_000_000);
+
+        // Test that all nodes have consistent properties
+        for (i, node) in experiment.nodes.iter().enumerate() {
+            // All nodes should have the same height
+            assert_eq!(
+                node.height_km(),
+                experiment.layer_height_km,
+                "Node {} should have consistent layer height", i
+            );
+
+            // All nodes should have 1 km² volume (height * 1 km²)
+            let expected_volume = experiment.layer_height_km * 1.0;
+            assert_deviation!(
+                node.volume_km3(), expected_volume, 0.1,
+                "Node {} should have volume {:.3} km³", i, expected_volume
+            );
+
+            // Depth should increase linearly
+            let expected_depth = (i as f64 + 0.5) * experiment.layer_height_km;
+            assert_deviation!(
+                node.depth_km(), expected_depth, 0.1,
+                "Node {} should have depth {:.3} km", i, expected_depth
+            );
+
+            // Temperature should be positive and reasonable
+            let temp = node.temp_kelvin();
+            assert!(
+                temp > 0.0 && temp < 10000.0,
+                "Node {} temperature {:.1}K should be reasonable", i, temp
+            );
+        }
+
+
+    }
 }
