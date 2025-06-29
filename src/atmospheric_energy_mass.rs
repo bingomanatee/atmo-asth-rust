@@ -93,7 +93,7 @@ impl EnergyMassComposite for AtmosphericEnergyMass {
     }
 
     fn density_kgm3(&self) -> f64 {
-        get_profile_fast(&self.material_type, &self.phase).density_kg_m3
+        self.custom_density_kg_m3
     }
 
     fn specific_heat_j_kg_k(&self) -> f64 {

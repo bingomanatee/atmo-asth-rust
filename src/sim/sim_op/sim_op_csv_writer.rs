@@ -435,19 +435,19 @@ mod tests {
         
         let content = fs::read_to_string(test_file).expect("Should be able to read CSV file");
         let lines: Vec<&str> = content.lines().collect();
-        
+
         // Should have header + initial state + 3 simulation steps = 5 lines total
         assert_eq!(lines.len(), 5, "Should have header + 4 data rows");
-        
-        // Check header - should contain step and avg_surface_temp_k columns
-        assert!(lines[0].contains("step") && lines[0].contains("avg_surface_temp_k"),
-                "Should have proper header with step and avg_surface_temp_k columns. Got: {}", lines[0]);
-        
-        // Check that we have data for steps 0, 1, 2, 3
-        assert!(lines[1].starts_with("0,"), "First data row should be step 0");
-        assert!(lines[2].starts_with("1,"), "Second data row should be step 1");
-        assert!(lines[3].starts_with("2,"), "Third data row should be step 2");
-        assert!(lines[4].starts_with("3,"), "Fourth data row should be step 3");
+
+        // Check header - should contain years and avg_surface_temp_k columns
+        assert!(lines[0].contains("years") && lines[0].contains("avg_surface_temp_k"),
+                "Should have proper header with years and avg_surface_temp_k columns. Got: {}", lines[0]);
+
+        // Check that we have data for years 0, 1000, 2000, 3000 (years_per_step = 1000)
+        assert!(lines[1].starts_with("0,"), "First data row should be year 0");
+        assert!(lines[2].starts_with("1000,"), "Second data row should be year 1000");
+        assert!(lines[3].starts_with("2000,"), "Third data row should be year 2000");
+        assert!(lines[4].starts_with("3000,"), "Fourth data row should be year 3000");
 
         // Clean up
         let _ = fs::remove_file(test_file);
