@@ -1,251 +1,34 @@
 #![allow(dead_code)]
 #![allow(unused_variables)]
 
+use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Write;
-use std::collections::VecDeque;
 
 // Import the real EnergyMass trait and material system
 extern crate atmo_asth_rust;
-use atmo_asth_rust::energy_mass::{EnergyMass, StandardEnergyMass};
-use atmo_asth_rust::material::MaterialType;
+use atmo_asth_rust::energy_mass::EnergyMass;
+use atmo_asth_rust::example::{ExperimentState, ThermalLayerNode};
+use atmo_asth_rust::example::thermal_layer_node::ThermalLayerNodeParams;
+use atmo_asth_rust::material_composite::{MATERIAL_COMPOSITES};
+use atmo_asth_rust::energy_mass_composite::{StandardEnergyMassComposite, 
+                                            get_profile_fast, 
+                                            MaterialCompositeType, 
+                                            MaterialPhase,
+                                            EnergyMassComposite};
+// Re-export MaterialPhase for easier access
+use atmo_asth_rust::temp_utils::energy_from_kelvin;
 
-/// Material phase state
-#[derive(Clone, Debug, PartialEq)]
-enum MaterialPhase {
-    Solid,
-    Liquid,
-    Gas,
-}
-
-/// Configuration parameters for thermal diffusion experiments
-#[derive(Clone, Debug)]
-struct ExperimentState {
-    // Thermal parameters
-    pub melting_point_k: f64,
-    pub cooling_point_k: f64,
-    pub outgassing_threshold_k: f64,
-
-    // Transition rates (base rates per year)
-    pub base_melting_rate: f64,      // Base rate for solid -> liquid transition
-    pub base_cooling_rate: f64,      // Base rate for liquid -> solid transition
-    pub melting_temp_factor: f64,    // Temperature sensitivity for melting
-    pub cooling_temp_factor: f64,    // Temperature sensitivity for cooling
-
-    // Thermal conductivity
-    pub solid_conductivity: f64,
-    pub liquid_conductivity: f64,
-    pub transition_conductivity: f64,
-
-    // Diffusion parameters
-    pub conductivity_factor: f64,
-    pub distance_length: f64,
-    pub pressure_baseline: f64,
-    pub max_change_rate: f64,        // Maximum energy change rate per step
-
-    // Boundary conditions
-    pub foundry_temperature_k: f64,
-    pub surface_temperature_k: f64,
-    pub core_heat_input: f64,        // J per year
-    pub surface_radiation_factor: f64,
-
-    // Outgassing parameters
-    pub outgassing_rate_multiplier: f64,
-    pub outgassing_energy_fraction: f64,
-
-    // Time parameters
-    pub years_per_step: f64,
-    pub total_years: f64,
-}
-
-impl ExperimentState {
-    /// Create 4x scaled experiment configuration for scientific accuracy
-    fn new_4x_scaled() -> Self {
-        Self {
-            // Thermal parameters (scaled by 4x)
-            melting_point_k: 1523.0 * 4.0,     // 6092K
-            cooling_point_k: 1473.0 * 4.0,     // 5892K
-            outgassing_threshold_k: 1400.0 * 4.0, // 5600K
-
-            // Transition rates (scaled by 4x for faster dynamics)
-            base_melting_rate: (1.0 / 50.0) * 4.0,     // 4x faster melting
-            base_cooling_rate: (1.0 / 100.0) * 4.0,    // 4x faster cooling
-            melting_temp_factor: (1.0 / 100.0) * 4.0,  // 4x temperature sensitivity
-            cooling_temp_factor: (1.0 / 200.0) * 4.0,  // 4x temperature sensitivity
-
-            // Thermal conductivity (scaled by 4x)
-            solid_conductivity: 2.5 * 4.0,      // 10.0
-            liquid_conductivity: 3.2 * 4.0,     // 12.8
-            transition_conductivity: 2.8 * 4.0, // 11.2
-
-            // Diffusion parameters (scaled by 4x)
-            conductivity_factor: 3.0 * 4.0,     // 12.0
-            distance_length: 4.0 * 4.0,         // 16.0
-            pressure_baseline: 1.0 * 4.0,       // 4.0
-            max_change_rate: 0.02 * 4.0,        // 8% max change per step
-
-            // Boundary conditions (4x core heat for early Earth conditions)
-            foundry_temperature_k: 1800.0 * 4.0,    // 7200K (4x foundry heat)
-            surface_temperature_k: 300.0,           // Keep surface temp realistic
-            core_heat_input: 2.52e12 * 4.0,         // 10.08e12 J per km² per year (4x core heat = ~270 mW/m²)
-            surface_radiation_factor: 1.0 * 4.0,    // 4x radiation cooling
-
-            // Outgassing parameters (scaled by 4x)
-            outgassing_rate_multiplier: 0.001 * 4.0,    // 4x outgassing rate
-            outgassing_energy_fraction: 0.1 * 4.0,      // 4x energy fraction (capped at reasonable levels)
-
-            // Time parameters (same geological time scale)
-            years_per_step: 100.0,
-            total_years: 1_000_000_000.0, // 1 billion years
-        }
-    }
-}
-
-/// Thermal node with enhanced state tracking
-#[derive(Clone, Debug)]
-struct ThermalNode {
-    energy_mass: StandardEnergyMass,
-    thermal_state: i32,          // -100 to +100 scale
-    phase: MaterialPhase,
-    depth_km: f64,
-    height_km: f64,
-    
-    // Thermal history for analysis
-    initial_temperature: f64,
-    max_temperature: f64,
-    min_temperature: f64,
-    
-    // Outgassing tracking
-    total_outgassed_mass: f64,
-    outgassing_rate: f64,
-}
-
-impl ThermalNode {
-    fn new(material_type: MaterialType, temperature_k: f64, volume_km3: f64, depth_km: f64, height_km: f64) -> Self {
-        let energy_mass = StandardEnergyMass::new_with_material(material_type, temperature_k, volume_km3);
-        
-        Self {
-            energy_mass,
-            thermal_state: 100, // Start as solid
-            phase: MaterialPhase::Solid,
-            depth_km,
-            height_km,
-            initial_temperature: temperature_k,
-            max_temperature: temperature_k,
-            min_temperature: temperature_k,
-            total_outgassed_mass: 0.0,
-            outgassing_rate: 0.0,
-        }
-    }
-
-    fn temperature_k(&self) -> f64 {
-        self.energy_mass.kelvin()
-    }
-
-    fn volume_km3(&self) -> f64 {
-        self.energy_mass.volume()
-    }
-
-    fn mass_kg(&self) -> f64 {
-        self.energy_mass.mass_kg()
-    }
-
-    fn add_energy(&mut self, energy_j: f64) {
-        self.energy_mass.add_energy(energy_j);
-        let temp = self.temperature_k();
-        if temp > self.max_temperature {
-            self.max_temperature = temp;
-        }
-    }
-
-    fn remove_energy(&mut self, energy_j: f64) {
-        if energy_j > 0.0 && energy_j <= self.energy_mass.energy() {
-            self.energy_mass.remove_heat(energy_j);
-            let temp = self.temperature_k();
-            if temp < self.min_temperature {
-                self.min_temperature = temp;
-            }
-        }
-    }
-
-    /// Update thermal state based on temperature and melting points
-    fn update_thermal_state(&mut self, config: &ExperimentState) {
-        let temp = self.temperature_k();
-        let melting_point = config.melting_point_k;
-        let cooling_point = config.cooling_point_k;
-        
-        // Calculate thermal state on -100 to +100 scale
-        // -100 = 100% gas, 0 = 100% liquid, +100 = 100% solid
-        if temp > melting_point {
-            // Above melting point: trending toward liquid/gas
-            let excess_temp = temp - melting_point;
-            let gas_fraction = (excess_temp / 1000.0).min(1.0); // 1000K range for full gas transition
-            self.thermal_state = -(gas_fraction * 100.0) as i32;
-            self.phase = if gas_fraction > 0.5 { MaterialPhase::Gas } else { MaterialPhase::Liquid };
-        } else if temp > cooling_point {
-            // Between cooling and melting: liquid state
-            self.thermal_state = 0;
-            self.phase = MaterialPhase::Liquid;
-        } else {
-            // Below cooling point: trending toward solid
-            let temp_deficit = cooling_point - temp;
-            let solid_fraction = (temp_deficit / 500.0).min(1.0); // 500K range for full solid transition
-            self.thermal_state = (solid_fraction * 100.0) as i32;
-            self.phase = MaterialPhase::Solid;
-        }
-    }
-
-    /// Calculate outgassing based on temperature
-    fn calculate_outgassing(&mut self, config: &ExperimentState, years: f64) -> f64 {
-        let temp = self.temperature_k();
-        if temp > config.outgassing_threshold_k {
-            let temp_excess = temp - config.outgassing_threshold_k;
-            let base_rate = config.outgassing_rate_multiplier * temp_excess * self.mass_kg();
-            self.outgassing_rate = base_rate * years;
-            self.total_outgassed_mass += self.outgassing_rate;
-            
-            // Remove energy corresponding to outgassed material
-            let energy_loss = self.outgassing_rate * config.outgassing_energy_fraction;
-            self.remove_energy(energy_loss);
-            
-            self.outgassing_rate
-        } else {
-            self.outgassing_rate = 0.0;
-            0.0
-        }
-    }
-
-    /// Get thermal conductivity based on current phase
-    fn thermal_conductivity(&self, config: &ExperimentState) -> f64 {
-        match self.phase {
-            MaterialPhase::Solid => config.solid_conductivity,
-            MaterialPhase::Liquid => config.liquid_conductivity,
-            MaterialPhase::Gas => config.transition_conductivity,
-        }
-    }
-
-    /// Format thermal state for display
-    fn format_thermal_state(&self) -> String {
-        let state_value = self.thermal_state;
-        if state_value <= -75 {
-            format!("{} Gas", (-state_value))
-        } else if state_value <= -25 {
-            format!("{} Magma", (-state_value))
-        } else if state_value <= 25 {
-            "Magma".to_string()
-        } else if state_value <= 65 {
-            format!("{} Magma", state_value)
-        } else {
-            format!("{} Solid", state_value)
-        }
-    }
-}
+// Export layer indices - key layer positions for analysis
+const EXPORT_LAYER_INDICES: [usize; 9] = [10, 15, 20, 25, 30, 35, 40, 45, 50];
 
 /// 4x Scaled Force-Directed Thermal Diffusion Experiment
 struct ScaledThermalExperiment {
-    nodes: Vec<ThermalNode>,
+    nodes: Vec<ThermalLayerNode>,
     config: ExperimentState,
-    step_count: usize,
+    layer_height_km: f64,
+    total_years: u64,
+    steps: u64,
 
     // Tracking for analysis
     temperature_history: VecDeque<Vec<f64>>,
@@ -260,8 +43,8 @@ struct ScaledThermalExperiment {
 }
 
 impl ScaledThermalExperiment {
-    fn new() -> Self {
-        let config = ExperimentState::new_4x_scaled();
+    fn new(steps: u64, total_years: u64) -> Self {
+        let config = ExperimentState::basic_experiment_state();
         let num_nodes = 60;
         let total_depth_km = 300.0; // 300km total depth
         let layer_height_km = total_depth_km / num_nodes as f64; // 5km per layer
@@ -273,69 +56,413 @@ impl ScaledThermalExperiment {
             let depth_km = (i as f64 + 0.5) * layer_height_km;
             let volume_km3 = 1.0 * layer_height_km; // 1 km² surface area
 
-            // Temperature profile: foundry -> geothermal gradient -> surface cooling
-            let temperature_k = if i < 4 {
-                // Foundry layers (0-20km): 7200K -> 6092K (4x scaled)
-                config.foundry_temperature_k - (i as f64 * (config.foundry_temperature_k - config.melting_point_k) / 4.0)
-            } else if i >= 52 {
-                // Surface layers (260-300km): cooling gradient
-                let surface_layer = i - 52;
-                config.surface_temperature_k * 4.0 - (surface_layer as f64 * 40.0) // Scaled surface cooling
-            } else {
-                // Middle layers: geothermal gradient (4x scaled)
-                let middle_temp_range = config.melting_point_k - (config.surface_temperature_k * 4.0);
-                let middle_layers = 52 - 4;
-                let layer_in_middle = i - 4;
-                config.melting_point_k - (layer_in_middle as f64 * middle_temp_range / middle_layers as f64)
+            // Surface layers
+            let temp_kelvin = {
+                let surface_temperature = config.surface_temperature_k;
+                let foundry_temperature = config.foundry_temperature_k;
+                let diff = foundry_temperature - surface_temperature;
+                surface_temperature + diff * (i as f64 / num_nodes as f64)
             };
+            
+            let material_profile = get_profile_fast(&MaterialCompositeType::Silicate,
+            &MaterialPhase::Liquid);
+            
+            let energy_joules = energy_from_kelvin(
+                temp_kelvin, volume_km3, 
+                material_profile.specific_heat_capacity_j_per_kg_k
+            );
 
-            let node = ThermalNode::new(
-                MaterialType::Silicate,
-                temperature_k,
+            let node = ThermalLayerNode::new(ThermalLayerNodeParams {
+                material_type: MaterialCompositeType::Silicate,
+                energy_joules,
                 volume_km3,
                 depth_km,
-                layer_height_km,
-            );
+                height_km: layer_height_km,
+            });
             nodes.push(node);
         }
+
+        // Get layer height from the first node (all nodes should have same height)
+        let layer_height_km = nodes[0].height_km();
 
         Self {
             nodes,
             config,
-            step_count: 0,
+            steps,
+            total_years,
+            layer_height_km,
             temperature_history: VecDeque::new(),
             energy_transfers: Vec::new(),
             total_outgassing: 0.0,
             foundry_start: 0,
-            foundry_end: 8,     // 8 foundry layers (0-40km)
-            surface_start: 52,  // Surface cooling starts at layer 52 (260km)
-            surface_end: 60,    // Surface cooling ends at layer 60 (300km)
+            foundry_end: 8,    // 8 foundry layers (0-40km)
+            surface_start: 52, // Surface cooling starts at layer 52 (260km)
+            surface_end: 60,   // Surface cooling ends at layer 60 (300km)
         }
     }
 
     fn print_initial_state(&self) {
         println!("🔬 4x Scaled Force-Directed Thermal Diffusion with Enhanced Parameters");
         println!("====================================================================");
-        println!("🎯 Deep geological time: 1 billion years of thermal evolution");
-        println!("   4x Enhanced foundry heat: {}K foundry with gradient to {}K melting point",
-                 self.config.foundry_temperature_k, self.config.melting_point_k);
-        println!("   Foundry layers (0-40km): {}K-{}K (4x enhanced asthenosphere heat)",
-                 self.config.foundry_temperature_k, self.config.melting_point_k);
-        println!("   Surface radiation: 4x Stefan-Boltzmann T^4 radiation to space (top layers only)");
+        println!(
+            "🎯 Deep geological time: {} years of thermal evolution",
+            self.total_years
+        );
         println!("📊 Initial Setup:");
         println!("   {} thermal nodes", self.nodes.len());
-        println!("   🔥 HEAT SOURCE: 4x Core heat input at bottom layer");
-        println!("   ❄️  HEAT SINK: 4x Space radiation cooling at top layer");
-        println!("📊 Initial Setup:");
-        println!("   {} thermal nodes (doubled depth to {}km)", self.nodes.len(), 300);
-        println!("   🔥 HEAT SOURCE: 4x Core heat engine ({} layers, 0-40km)", self.foundry_end);
-        println!("   ❄️  HEAT SINK: 4x Space cooling sink ({} layers, 260-300km)", self.surface_end - self.surface_start);
-        println!("   ⚡ EXPONENTIAL DIFFUSION: 2 neighbors each side with 4x falloff");
 
-        println!("\n🌡️  Initial Temperature Profile (4X ENHANCED GEOLOGICAL HEAT):");
-        println!("   Foundry layers (0-40km): {}K → {}K (4x enhanced asthenosphere)",
-                 self.config.foundry_temperature_k, self.config.melting_point_k);
-        println!("   Lithosphere (40-260km): Variable geothermal gradient");
-        println!("   Surface layers (260-300km): {}K → {}K (natural cooling + 4x T^4 radiation)",
-                 self.config.surface_temperature_k * 4.0, self.config.surface_temperature_k);
+        println!("\n🌡️  Initial Temperature Profile:");
+        println!(
+            "   Foundry layers (0-40km): {}K",
+            self.config.foundry_temperature_k
+        );
     }
+    
+    fn init_csv(&self) -> File {
+        let mut file =
+            File::create("examples/data/4x_thermal_experiment.csv").expect("Could not create file");
+        // Write header - export key layers
+        write!(file, "years").unwrap();
+
+        // Export key layers for analysis
+        for &layer_idx in &EXPORT_LAYER_INDICES {
+            let depth_km = (layer_idx as f64 + 0.5) * self.layer_height_km; // Convert layer index to depth
+            write!(file, ",temp_{}km", depth_km as i32).unwrap();
+        }
+        for &layer_idx in &EXPORT_LAYER_INDICES {
+            let depth_km = (layer_idx as f64 + 0.5) * self.layer_height_km; // Convert layer index to depth
+            write!(file, ",state_{}km", depth_km as i32).unwrap();
+        }
+        writeln!(file).unwrap();
+        file
+    }
+    
+    pub fn years_per_step(&self)  -> f64{
+        self.total_years as f64 / self.steps as f64
+    }
+
+    fn run(&mut self, steps: u64, total_years: u64) {
+        
+        self.total_years = total_years;
+        self.steps = steps;
+        let mut file = self.init_csv();
+
+        // Export initial state
+        self.export_state(&mut file, 0.0);
+
+        let mut last_progress: u32 = 0;
+        // Run force-directed thermal diffusion
+        for step in 0..steps {
+            self.force_directed_step();
+
+            let years = (step + 1) as f64 * self.years_per_step();
+            self.export_state(&mut file, years);
+
+            // Progress reporting every 10% of total steps
+            let progress = (step as f64 / steps as f64) * 100.0;
+            let pp = (progress / 10.0).floor() as u32;
+            if last_progress != pp {
+                println!(
+                    "    {}    Progress: {:.1}% - {:.0} years",
+                    step, progress, years
+                );
+                last_progress = pp;
+            }
+        }
+
+        self.print_final_analysis();
+    }
+
+    fn force_directed_step(&mut self) {
+        let mut energy_changes = vec![0.0; self.nodes.len()];
+
+        // BOUNDARY CONDITIONS: Heat source and heat sink
+        self.apply_boundary_conditions();
+
+        // EXPONENTIAL THERMAL DIFFUSION: Each layer exchanges with 2 neighbors on each side
+        for node_index in 1..self.nodes.len() {
+            // Exchange with 2 layers on each side (i-2, i-1, i+1, i+2) with exponential falloff
+            for offset in [-2, -1, 1, 2] {
+                let target_place = node_index as i32 + offset;
+                if target_place < 0 || target_place >= self.nodes.len() as i32 {
+                    continue;
+                }
+                let target_index = target_place as usize;
+
+                // Energy-conservative exchange between nodes (distance computed internally)
+                self.exchange_energy_between_nodes(node_index, target_index, &mut energy_changes);
+            }
+        }
+
+        // Apply energy changes
+        for (i, &energy_change) in energy_changes.iter().enumerate() {
+            if energy_change > 0.0 {
+                self.nodes[i].add_energy(energy_change);
+            } else if energy_change < 0.0 {
+                self.nodes[i].remove_energy(-energy_change);
+            }
+        }
+
+        // Update thermal states based on temperature with time-dependent transitions
+        self.update_thermal_states();
+    }
+
+    fn apply_boundary_conditions(&mut self) {
+        self.nodes[0]
+            .energy_mass
+            .set_kelvin(self.config.foundry_temperature_k);
+    }
+
+    /// Energy-conservative exchange between two nodes
+    /// Calculates energy transfer and updates both nodes in the energy_changes array
+    fn exchange_energy_between_nodes(
+        &self,
+        from_idx: usize,
+        to_idx: usize,
+        energy_changes: &mut Vec<f64>,
+    ) {
+        let from_node = &self.nodes[from_idx];
+        let to_node = &self.nodes[to_idx];
+
+        let temp_diff = to_node.temp_kelvin() - from_node.temp_kelvin();
+        if temp_diff < 0.1 {
+            // we only track the energy transfer from hot to cool nodes here
+            return; // No significant temperature difference
+        }
+
+        // Calculate energy transfer amount (positive = energy flows from 'from' to 'to')
+        let energy_transfer = self.get_energy_change_from_node_to_node(from_node, to_node);
+
+        // again - only track positive outflow from hotter nodes
+        if energy_transfer > 0.0 {
+            // 'to' node is hotter, energy flows from 'to' to 'from'
+            energy_changes[from_idx] += energy_transfer;
+            energy_changes[to_idx] -= energy_transfer;
+        } 
+    }
+
+    fn get_energy_change_from_node_to_node(
+        &self,
+        from_node: &ThermalLayerNode,
+        to_node: &ThermalLayerNode,
+    ) -> f64 {
+        let temp_diff = (to_node.temp_kelvin() - from_node.temp_kelvin()).abs();
+        // Calculate distance between nodes
+        let distance_km = (from_node.depth_km() - to_node.depth_km()).abs();
+        // Get material-based conductivities (4x scaled)
+        let from_conductivity = self.get_material_conductivity(from_node);
+        let to_conductivity = self.get_material_conductivity(to_node);
+
+        // Distance weights: 1.0, 0.25, 0.125 for neighbors 1, 2, 3 away
+        let distance_weight = if distance_km <= 5.1 {
+            1.0 // Adjacent neighbor
+        } else if distance_km <= 10.1 {
+            0.25 // Second neighbor
+        } else if distance_km <= 15.1 {
+            0.125 // Third neighbor
+        } else {
+            0.0 // Too far
+        };
+
+        // Conductivity factor: both sender and recipient must be conductive
+        let sender_factor = from_conductivity / self.config.conductivity_factor;
+        let recipient_factor = to_conductivity / self.config.conductivity_factor;
+        let conductivity_factor = sender_factor * recipient_factor;
+
+        // Base diffusion rate: 4x enhanced for faster heat transport
+        let base_coefficient = self.config.max_change_rate / self.years_per_step(); // @TODO: not sure about the scaling here investigate
+
+        // PRESSURE ACCELERATION: Help foundry heat reach farther (4x enhanced)
+        let pressure_factor =
+            ((temp_diff / 100.0).powf(1.5)).max(0.33) * self.config.pressure_baseline;
+
+        // DIFFUSION PHYSICS: Energy transfer based on temperature difference
+        let avg_thermal_capacity = (from_node.energy_mass.thermal_capacity() + to_node.energy_mass.thermal_capacity()) / 2.0;
+        let energy_difference = temp_diff * avg_thermal_capacity;
+        let flow_coefficient =
+            base_coefficient * distance_weight * conductivity_factor * pressure_factor;
+        let energy_transfer = energy_difference * flow_coefficient * self.years_per_step();
+
+        // Limit transfer to prevent instability (max 25% of smaller thermal capacity per step)
+        let min_capacity = from_node.energy_mass.thermal_capacity().min(to_node.energy_mass.thermal_capacity());
+        let max_transfer = min_capacity * 0.25;
+        energy_transfer.min(max_transfer)
+    }
+
+    /// deprecated
+    fn calculate_thermal_force(
+        &self,
+        from_idx: usize,
+        to_idx: usize,
+        distance_km: f64,
+        years: f64,
+    ) -> f64 {
+        let from_node = &self.nodes[from_idx];
+        let to_node = &self.nodes[to_idx];
+
+        let temp_diff = to_node.temp_kelvin() - from_node.temp_kelvin();
+        if temp_diff.abs() < 0.1 {
+            return 0.0;
+        }
+
+        // Get material-based conductivities (4x scaled)
+        let from_conductivity = self.get_material_conductivity(from_node);
+        let to_conductivity = self.get_material_conductivity(to_node);
+
+        // Distance weights: 1.0, 0.25, 0.125 for neighbors 1, 2, 3 away
+        let distance_weight = if distance_km <= 5.1 {
+            1.0 // Adjacent neighbor
+        } else if distance_km <= 10.1 {
+            0.25 // Second neighbor
+        } else if distance_km <= 15.1 {
+            0.125 // Third neighbor
+        } else {
+            0.0 // Too far
+        };
+
+        // Conductivity factor: both sender and recipient must be conductive
+        let sender_factor = from_conductivity / self.config.conductivity_factor;
+        let recipient_factor = to_conductivity / self.config.conductivity_factor;
+        let conductivity_factor = sender_factor * recipient_factor;
+
+        // Base diffusion rate: 4x enhanced for faster heat transport
+        let base_coefficient = self.config.max_change_rate / years;
+
+        // PRESSURE ACCELERATION: Help foundry heat reach farther (4x enhanced)
+        let temp_diff_abs = temp_diff.abs();
+        let pressure_factor =
+            ((temp_diff_abs / 100.0).powf(1.5)).max(0.33) * self.config.pressure_baseline;
+
+        // DIFFUSION PHYSICS: Only the energy difference flows
+        let energy_difference = temp_diff * from_node.energy_mass.thermal_capacity();
+        let flow_coefficient =
+            base_coefficient * distance_weight * conductivity_factor * pressure_factor;
+        let energy_transfer = energy_difference * flow_coefficient * years;
+
+        // Limit transfer to prevent instability (max 25% of thermal capacity per step)
+        let max_transfer = from_node.energy_mass.thermal_capacity() * 0.25;
+        let limited_transfer = energy_transfer.abs().min(max_transfer);
+
+        if temp_diff > 0.0 {
+            limited_transfer
+        } else {
+            -limited_transfer
+        }
+    }
+
+    fn update_thermal_states(&mut self) {
+        for (i, node) in self.nodes.iter_mut().enumerate() {
+            let material_type = node.energy_mass.material_composite_type();
+            let profile = node.energy_mass.material_composite_profile();
+            
+            let composite = MATERIAL_COMPOSITES.get(&node.energy_mass.material_composite_type()).unwrap();
+            
+            // @TODO: make melting and cooling take a nonzero time
+            let temp = node.temp_kelvin();
+
+                if temp > composite.melting_point_min_k {
+                    node.thermal_state = 0; // Liquid/magma
+                } else {
+                    node.thermal_state = 100; // solid
+                }
+            
+        }
+    }
+
+    fn get_material_conductivity(&self, node: &ThermalLayerNode) -> f64 {
+        match node.material_state() {
+            MaterialPhase::Solid => self.config.solid_conductivity,
+            MaterialPhase::Liquid => self.config.liquid_conductivity,
+            MaterialPhase::Gas => self.config.transition_conductivity,
+        }
+    }
+
+    fn export_state(&self, file: &mut std::fs::File, years: f64) {
+        write!(file, "{:.0}", years).unwrap();
+
+        // Export temperatures for selected layer indices
+        for &layer_idx in &EXPORT_LAYER_INDICES {
+            if layer_idx < self.nodes.len() {
+                write!(file, ",{:.1}", self.nodes[layer_idx].temp_kelvin()).unwrap();
+            } else {
+                write!(file, ",0.0").unwrap();
+            }
+        }
+
+        // Export thermal states for selected layer indices
+        for &layer_idx in &EXPORT_LAYER_INDICES {
+            if layer_idx < self.nodes.len() {
+                write!(file, ",{}", self.nodes[layer_idx].thermal_state).unwrap();
+            } else {
+                write!(file, ",0").unwrap();
+            }
+        }
+
+        writeln!(file).unwrap();
+    }
+
+    fn print_final_analysis(&self) {
+        println!("\n🎯 Experiment Complete!");
+        println!("==========================================");
+
+        let min_temp = self
+            .nodes
+            .iter()
+            .map(|n| n.temp_kelvin())
+            .fold(f64::INFINITY, f64::min);
+        let max_temp = self
+            .nodes
+            .iter()
+            .map(|n| n.temp_kelvin())
+            .fold(f64::NEG_INFINITY, f64::max);
+
+        println!(
+            "📊 Final Temperature Range: {:.1}K - {:.1}K",
+            min_temp, max_temp
+        );
+        println!(
+            "   Temperature span: {:.1}K ({} ...{})",
+            max_temp - min_temp,
+            min_temp,
+            max_temp
+        );
+
+        self.print_rows();
+        println!("\n📈 Results exported to examples/data/4x_thermal_experiment.csv");
+        println!("   Tracking thermal evolution with 4x enhanced parameters");
+        println!("   Deep geological time simulation complete!");
+
+        let first_node = self.nodes.first().unwrap();
+        let composite = first_node.energy_mass.material_composite();
+        println!("  melting temperature: {}", composite.melting_point_min_k);
+    }
+
+    fn print_rows(&self) {
+        for (i, node) in self.nodes.iter().enumerate() {
+            println!(
+                "   Layer {}:  {}K  at {}km depth   {}",
+                i + 1,
+                node.temp_kelvin() as i32,
+                node.depth_km as i32,
+                node.format_thermal_state()
+            );
+        }
+    }
+}
+
+fn main() {
+    println!("🔬 4x Scaled Force-Directed Thermal Diffusion with Enhanced Parameters");
+    println!("====================================================================");
+    println!("🎯 Deep geological time: 1 billion years of thermal evolution");
+    let total_years = 1_000_000;
+    let years_per_step = 10_000;
+    let steps  = total_years/years_per_step;
+    // Create experiment with 4x scaled parameters
+    let mut experiment = ScaledThermalExperiment::new(steps, total_years);
+    experiment.print_initial_state();
+
+    // Run force-directed thermal equilibration
+    println!("\n🌡️  Running 4x enhanced thermal equilibration...");
+
+    experiment.run(100, 1_000_000);
+}

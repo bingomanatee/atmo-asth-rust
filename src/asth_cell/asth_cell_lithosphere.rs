@@ -90,7 +90,7 @@ impl AsthCellLithosphere {
 
     /// Remove energy (temperature will decrease)
     pub fn remove_energy(&mut self, energy_joules: f64) {
-        self.energy_mass.remove_heat(energy_joules);
+        self.energy_mass.remove_energy(energy_joules);
     }
 
     /// Get the material profile for this layer's material

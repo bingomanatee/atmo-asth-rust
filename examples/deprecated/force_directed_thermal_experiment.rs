@@ -4,6 +4,10 @@
 use std::fs::File;
 use std::io::Write;
 use std::collections::VecDeque;
+/**
+note - this uses an unscientic input of energy from the core - the 4x_force_directed_thermal_experiement
+uses values closer to real world dynamics
+*/
 
 // Import the real EnergyMass trait and material system
 extern crate atmo_asth_rust;
@@ -494,7 +498,7 @@ impl EnergyMass for ThermalEnergyMassExp {
 
     // Delegate operations
     fn scale(&mut self, factor: f64) { self.inner.scale(factor) }
-    fn remove_heat(&mut self, heat_joules: f64) { self.inner.remove_heat(heat_joules) }
+    fn remove_energy(&mut self, heat_joules: f64) { self.inner.remove_energy(heat_joules) }
     fn add_energy(&mut self, energy_joules: f64) { self.inner.add_energy(energy_joules) }
 
     // Delegate thermal operations
@@ -1006,7 +1010,7 @@ impl ForceDirectedThermal {
     }
     
     fn run_force_directed_diffusion(&mut self, steps: usize, years_per_step: f64) {
-        let mut file = File::create("examples/data/thermal_experiment.csv").expect("Could not create file");
+        let mut file = File::create("../data/thermal_experiment.csv").expect("Could not create file");
         
         // Write header - only every 5th layer, excluding boundaries
         write!(file, "years").unwrap();

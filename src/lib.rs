@@ -6,4 +6,7 @@ pub mod material;
 pub mod sim;
 pub mod planet;
 pub mod temp_utils;
-mod material_composite;
+pub mod example;
+pub mod material_composite;
+pub mod energy_mass_composite;
+mod atmospheric_energy_mass;

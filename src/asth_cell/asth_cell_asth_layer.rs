@@ -94,7 +94,7 @@ impl AsthCellAsthLayer {
 
     /// Remove energy from this layer (temperature will decrease)
     pub fn remove_energy(&mut self, energy_to_remove: f64) {
-        self.energy_mass.remove_heat(energy_to_remove);
+        self.energy_mass.remove_energy(energy_to_remove);
     }
 
     /// Get the mass in kg
@@ -144,7 +144,7 @@ impl AsthCellAsthLayer {
 
     /// Remove energy in Joules (temperature will decrease)
     pub fn remove_energy_joules(&mut self, energy_to_remove: f64) {
-        self.energy_mass.remove_heat(energy_to_remove);
+        self.energy_mass.remove_energy(energy_to_remove);
     }
 
     /// Scale the layer by a factor (useful for splitting/combining)

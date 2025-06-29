@@ -22,7 +22,7 @@ fn main() {
     println!();
     
     // Ensure output directory exists
-    fs::create_dir_all("examples/data").expect("Failed to create output directory");
+    fs::create_dir_all("../data").expect("Failed to create output directory");
     
     let csv_file_chaotic = "examples/data/production_rate_chaotic.csv".to_string();
     let csv_file_stable = "examples/data/production_rate_stable.csv".to_string();

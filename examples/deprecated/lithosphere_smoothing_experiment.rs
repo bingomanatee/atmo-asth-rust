@@ -122,7 +122,7 @@ impl LithosphereSmoothing {
     }
     
     fn run_smoothing_with_export(&mut self, steps: usize, years_per_step: f64) {
-        let mut file = File::create("examples/data/thermal_experiment.csv").expect("Could not create file");
+        let mut file = File::create("../data/thermal_experiment.csv").expect("Could not create file");
         
         // Write header - show every 4th bucket (4km spacing) to keep manageable
         write!(file, "step,years").unwrap();

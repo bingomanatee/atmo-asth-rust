@@ -113,7 +113,7 @@ impl SimOp for ProgressReporterOp {
         let surface_temp = self.calculate_avg_surface_temp(sim);
         let lithosphere_thickness = self.calculate_avg_lithosphere_thickness(sim);
         
-        println!("   Step {}: Surface temp = {:.1}K, Lithosphere = {:.1}km", 
+        println!("Step {}: Surface temp = {:.1}K, Lithosphere = {:.1}km",
                  sim.current_step(), surface_temp, lithosphere_thickness);
         
         if self.show_atmosphere {

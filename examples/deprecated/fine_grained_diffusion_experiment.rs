@@ -169,7 +169,7 @@ impl FineGrainedDiffusion {
 
     fn run_diffusion_with_evolution_export(&mut self, steps: usize, years_per_step: f64) {
         // Create evolution CSV with step-by-step thermal profiles
-        let mut file = File::create("examples/data/thermal_experiment.csv").expect("Could not create file");
+        let mut file = File::create("../data/thermal_experiment.csv").expect("Could not create file");
 
         // Write header with depth columns (every 4km)
         write!(file, "step,years").unwrap();

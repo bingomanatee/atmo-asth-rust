@@ -88,9 +88,9 @@ fn test_material_transfer(
 
 /// Export tuning results to CSV for analysis
 fn export_results_to_csv(results: &[(f64, f64, f64, f64, f64, f64, f64)]) {
-    std::fs::create_dir_all("examples/data").expect("Failed to create data directory");
+    std::fs::create_dir_all("../data").expect("Failed to create data directory");
     
-    let mut file = File::create("examples/data/thermal_tuning_results.csv")
+    let mut file = File::create("../data/thermal_tuning_results.csv")
         .expect("Failed to create CSV file");
     
     // Write header

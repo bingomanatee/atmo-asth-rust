@@ -27,8 +27,7 @@ fn main() {
         CoreRadianceOp::handle_earth(), // Core heat input from planetary interior
         ThermalDiffusionOp::handle(
             0.5,   // Higher diffusion rate for better asthenosphere equilibration
-            25.0,  // Higher max temp change for asthenosphere layers
-            0.8),  // Moderate energy change rate
+            25.0), // Higher max temp change for asthenosphere layers
         AtmosphereOp::handle_with_params(
             1300.0, // 1300K outgassing threshold
             5e-11,  // Lower outgassing rate
@@ -95,7 +94,10 @@ fn main() {
     
     // Analyze final state
     analyze_final_state(&sim);
-    
+
+    // Row-by-row summary
+    analyze_row_by_row(&sim);
+
     // Analyze CSV data
     analyze_csv_data(&csv_file);
 }
@@ -146,6 +148,47 @@ fn analyze_final_state(sim: &Simulation) {
     if temp_range < 200.0 {
         println!("   ✅ Temperature distribution relatively uniform");
     }
+}
+
+fn analyze_row_by_row(sim: &Simulation) {
+    println!("\n📋 Row-by-Row Final State Summary:");
+    println!("==================================");
+
+    let mut cells: Vec<_> = sim.cells.iter().collect();
+    cells.sort_by_key(|(cell_id, _)| *cell_id);
+
+    println!("Cell | Surface Temp | Bottom Temp | Lith Thick | Total Energy");
+    println!("-----|--------------|-------------|------------|-------------");
+
+    for (i, (cell_id, cell)) in cells.iter().enumerate() {
+        // Surface temperature (top of lithosphere or top of asthenosphere)
+        let surface_temp = if !cell.lith_layers_t.is_empty() {
+            cell.lith_layers_t.last().unwrap().0.kelvin()
+        } else {
+            cell.asth_layers_t.first().unwrap().0.kelvin()
+        };
+
+        // Bottom temperature (bottom of asthenosphere)
+        let bottom_temp = cell.asth_layers_t.last().unwrap().0.kelvin();
+
+        // Lithosphere thickness
+        let lith_thickness = cell.total_lithosphere_height();
+
+        // Total energy in this cell
+        let mut total_energy = 0.0;
+        for (layer, _) in &cell.asth_layers_t {
+            total_energy += layer.energy_joules();
+        }
+        for (layer, _) in &cell.lith_layers_t {
+            total_energy += layer.energy_joules();
+        }
+
+        println!("{:4} | {:8.1}K    | {:7.1}K     | {:6.1} km  | {:9.2e} J",
+                 i + 1, surface_temp, bottom_temp, lith_thickness, total_energy);
+    }
+
+    println!("-----|--------------|-------------|------------|-------------");
+    println!("Total cells: {}", cells.len());
 }
 
 fn analyze_csv_data(csv_file: &str) {
