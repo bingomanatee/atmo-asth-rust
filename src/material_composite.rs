@@ -309,6 +309,8 @@ pub static MATERIAL_COMPOSITES: Lazy<HashMap<MaterialCompositeType, MaterialComp
     m
 });
 
+/// ------------------------- fast lookup index for profile ---------------------
+/// 
 /// Flat array for fast O(1) profile lookups
 /// Layout: [material_type_index * PHASE_COUNT + phase_index]
 /// Total size: MaterialCompositeType::COUNT * MaterialPhase::COUNT entries
@@ -334,6 +336,9 @@ static PROFILE_LOOKUP_TABLE: Lazy<[MaterialStateProfile; MaterialCompositeType::
     table
 });
 
+
+/// ------------------------ both of these methods take and return the same things 
+/// 
 /// Fast O(1) lookup for material profile by type and phase
 /// Uses flat array indexing: material_index * PHASE_COUNT + phase_index
 pub fn get_profile_fast(material_type: &MaterialCompositeType, phase: &MaterialPhase) -> &'static MaterialStateProfile {
@@ -345,4 +350,13 @@ pub fn get_profile_fast(material_type: &MaterialCompositeType, phase: &MaterialP
 pub fn get_profile_for_state(material_type: MaterialCompositeType, phase: MaterialPhase) -> Option<&'static MaterialStateProfile> {
     MATERIAL_COMPOSITES.get(&material_type)
         .and_then(|layers| layers.profiles.get(&phase))
+}
+
+/// ------------------------ get core ----------------------
+
+pub fn get_material_core(material_type: &MaterialCompositeType) -> &MaterialComposite {
+    match MATERIAL_COMPOSITES.get(material_type) {
+        None => { panic!("cannot get core")}
+        Some(composite) => { composite }
+    }
 }

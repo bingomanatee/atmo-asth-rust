@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::constants::{SECONDS_PER_YEAR, SIGMA_KM2_YEAR};
 use crate::energy_mass_composite::{get_profile_fast, EnergyMassComposite, MaterialCompositeType, MaterialPhase, MaterialStateProfile};
-use crate::material_composite::{MaterialComposite, MATERIAL_COMPOSITES};
+use crate::material_composite::{MaterialComposite, get_material_core};
 
 /// Atmospheric EnergyMass implementation using composite material system
 /// Uses dynamic property lookup based on current phase state
@@ -113,10 +113,7 @@ impl EnergyMassComposite for AtmosphericEnergyMass {
     }
 
     fn material_composite(&self) -> MaterialComposite {
-        match MATERIAL_COMPOSITES.get(&self.material_composite_type()) {
-            None => panic!("cannot find material type: {:?}", self.material_composite_type()),
-            Some(composite) => composite.clone()
-        }
+        get_material_core(&self.material_type).clone()
     }
 
     fn scale(&mut self, factor: f64) {

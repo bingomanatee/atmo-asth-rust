@@ -5,7 +5,7 @@ pub use crate::material_composite::{
 };
 use serde::{Deserialize, Serialize};
 use crate::atmospheric_energy_mass::AtmosphericEnergyMass;
-use crate::material_composite::{MaterialComposite, MATERIAL_COMPOSITES};
+use crate::material_composite::{MaterialComposite, get_material_core};
 /// Parameters for creating StandardEnergyMassComposite
 pub struct EnergyMassParams {
     pub material_type: MaterialCompositeType,
@@ -550,10 +550,7 @@ impl StandardEnergyMassComposite {
     }
     
     pub fn current_material_composite(&self) -> &MaterialComposite {
-        match  MATERIAL_COMPOSITES.get(&self.material_composite_type()) {
-            Some(composite) => composite,
-            _ => panic!("cannot find composite")
-        }
+        get_material_core(&self.material_type)
     }
     
 }
@@ -801,10 +798,7 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
         Box::new(removed)
     }
     fn material_composite(&self) -> MaterialComposite {
-        match MATERIAL_COMPOSITES.get(&self.material_composite_type()) {
-            None => panic!("cannot find material type: {:?}", self.material_composite_type()),
-            Some(composite) => composite.clone()
-        }
+        get_material_core(&self.material_type).clone()
     }
     /// Split this EnergyMass into two parts by volume fraction
     /// Returns a new EnergyMass with the specified fraction, this one keeps the remainder

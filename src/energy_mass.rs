@@ -4,90 +4,54 @@ use serde::{Deserialize, Serialize};
 
 
 
-/// Trait for objects that manage the relationship between energy, mass and temperature
-/// Maintains consistency between these properties using thermodynamic relationships
-/// @deprecated -- EnergyMass has a single uniform set of properites that in reality
-/// change between solid, liquid and gas form. 
-/// the energy_mass_composite module is more up to date because it respects physical tate properties. 
-/// 
 pub trait EnergyMass: std::any::Any {
-    /// Get the current temperature in Kelvin
     fn kelvin(&self) -> f64;
 
-    /// Get the current temperature in Kelvin (alias for kelvin() - deprecated, use kelvin())
     fn temperature(&self) -> f64 {
         self.kelvin()
     }
 
-    /// Get the current energy in Joules (read-only)
     fn energy(&self) -> f64;
 
-    /// Get the current volume in km³ (read-only)
     fn volume(&self) -> f64;
 
-    /// Get the height in km (for layer-based calculations)
     fn height_km(&self) -> f64;
 
-    /// Set the temperature in Kelvin (internal use only - maintains thermodynamic consistency)
     fn set_kelvin(&mut self, kelvin: f64);
 
-    /// Set the temperature in Kelvin (alias for set_kelvin() - deprecated, use set_kelvin())
     fn set_temperature(&mut self, temperature_k: f64) {
         self.set_kelvin(temperature_k);
     }
 
-    /// Get the mass in kg (derived from volume and density)
     fn mass_kg(&self) -> f64;
 
-    /// Get the density in kg/m³
     fn density_kgm3(&self) -> f64;
 
-    /// Get the specific heat in J/(kg·K)
     fn specific_heat_j_kg_k(&self) -> f64;
 
-    /// Get the thermal conductivity in W/(m·K)
     fn thermal_conductivity(&self) -> f64;
 
-    /// Get the thermal capacity in J/K (mass * specific_heat)
     fn thermal_capacity(&self) -> f64 {
         self.mass_kg() * self.specific_heat_j_kg_k()
     }
 
-    /// Get the material type
     fn material_type(&self) -> MaterialType;
 
-    /// Get the material profile
     fn material_profile(&self) -> &'static crate::material::MaterialProfile;
 
-    /// Scale the entire EnergyMass by a factor (useful for splitting/combining)
     fn scale(&mut self, factor: f64);
 
-    /// Remove heat energy (temperature will decrease, enforces zero minimum)
     fn remove_energy(&mut self, energy_joules: f64);
 
-    /// Add energy (temperature will increase)
     fn add_energy(&mut self, energy_joules: f64);
 
-    /// Radiate energy to another EnergyMass using conductive transfer
-    /// Returns the amount of energy transferred (positive = energy flows to other)
     fn radiate_to(&mut self, other: &mut dyn EnergyMass, distance_km: f64, area_km2: f64, time_years: f64) -> f64;
 
-    /// Radiate energy to space using Stefan-Boltzmann law
-    /// Returns the amount of energy radiated (J)
     fn radiate_to_space(&mut self, area_km2: f64, time_years: f64) -> f64;
 
-    /// Radiate energy to space using Stefan-Boltzmann law with thermal skin depth limiting
-    /// Only the thermal skin depth participates in radiation, with rate limiting
-    /// Returns the amount of energy radiated (J)
     fn radiate_to_space_with_skin_depth(&mut self, area_km2: f64, time_years: f64, energy_throttle: f64) -> f64;
 
-    /// Compute thermal-diffusive skin depth in kilometres for this material
-    /// Uses the material's thermal conductivity, density, and specific heat
-    ///
-    /// Formula: κ = k / (ρ·cp), d = sqrt(κ · dt), converted to km
     fn skin_depth_km(&self, time_years: f64) -> f64;
-
-
 
     /// Remove volume (enforces zero minimum, maintains temperature)
     fn remove_volume_internal(&mut self, volume_to_remove: f64);

@@ -10,7 +10,7 @@ extern crate atmo_asth_rust;
 use atmo_asth_rust::energy_mass::EnergyMass;
 use atmo_asth_rust::example::{ExperimentState, ThermalLayerNode};
 use atmo_asth_rust::example::thermal_layer_node::ThermalLayerNodeParams;
-use atmo_asth_rust::material_composite::{MATERIAL_COMPOSITES};
+use atmo_asth_rust::material_composite::{get_material_core};
 use atmo_asth_rust::energy_mass_composite::{StandardEnergyMassComposite, 
                                             get_profile_fast, 
                                             MaterialCompositeType, 
@@ -22,8 +22,11 @@ use atmo_asth_rust::temp_utils::energy_from_kelvin;
 // Export layer indices - key layer positions for analysis
 const EXPORT_LAYER_INDICES: [usize; 9] = [10, 15, 20, 25, 30, 35, 40, 45, 50];
 
-/// 4x Scaled Force-Directed Thermal Diffusion Experiment
-struct ScaledThermalExperiment {
+///  This simulates a single km2 with only vertical flows up and down 
+///  with energy coming in from the highest/lowest cell in the array
+/// to the surface of the earth at cell 0 which radiates heat into space. 
+/// the settings for the heat flow come in as ExperimentState
+struct OneKm2Experiment {
     nodes: Vec<ThermalLayerNode>,
     config: ExperimentState,
     layer_height_km: f64,
@@ -42,7 +45,7 @@ struct ScaledThermalExperiment {
     surface_end: usize,
 }
 
-impl ScaledThermalExperiment {
+impl OneKm2Experiment {
     fn new(steps: u64, total_years: u64) -> Self {
         let config = ExperimentState::basic_experiment_state();
         let num_nodes = 60;
@@ -353,28 +356,21 @@ impl ScaledThermalExperiment {
     fn update_thermal_states(&mut self) {
         for (i, node) in self.nodes.iter_mut().enumerate() {
             let material_type = node.energy_mass.material_composite_type();
-            let profile = node.energy_mass.material_composite_profile();
-            
-            let composite = MATERIAL_COMPOSITES.get(&node.energy_mass.material_composite_type()).unwrap();
-            
-            // @TODO: make melting and cooling take a nonzero time
+            let composite = get_material_core(&material_type);
+
             let temp = node.temp_kelvin();
 
-                if temp > composite.melting_point_min_k {
-                    node.thermal_state = 0; // Liquid/magma
-                } else {
-                    node.thermal_state = 100; // solid
-                }
-            
+            if temp > composite.melting_point_min_k {
+                node.thermal_state = 0; // Liquid/magma
+            } else {
+                node.thermal_state = 100; // solid
+            }
         }
     }
 
     fn get_material_conductivity(&self, node: &ThermalLayerNode) -> f64 {
-        match node.material_state() {
-            MaterialPhase::Solid => self.config.solid_conductivity,
-            MaterialPhase::Liquid => self.config.liquid_conductivity,
-            MaterialPhase::Gas => self.config.transition_conductivity,
-        }
+        // Use the material system to get conductivity based on phase
+        self.config.get_thermal_conductivity(node.material_state())
     }
 
     fn export_state(&self, file: &mut std::fs::File, years: f64) {
@@ -458,7 +454,7 @@ fn main() {
     let years_per_step = 10_000;
     let steps  = total_years/years_per_step;
     // Create experiment with 4x scaled parameters
-    let mut experiment = ScaledThermalExperiment::new(steps, total_years);
+    let mut experiment = OneKm2Experiment::new(steps, total_years);
     experiment.print_initial_state();
 
     // Run force-directed thermal equilibration
