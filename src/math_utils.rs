@@ -59,6 +59,8 @@ macro_rules! assert_deviation {
     };
 }
 
+
+
 /// Linear interpolation between two values
 /// 
 /// # Arguments
@@ -86,6 +88,15 @@ pub fn lerp(a: f64, b: f64, ratio: f64) -> f64 {
     a + (b - a) * ratio
 }
 
+pub fn un_lerp(a: f64, b: f64, value: f64) -> f64 {
+     if b > a {
+         un_lerp(b, a, value)
+     } else if b == a {
+         0.5
+     } else {
+         (value - a) / b - a
+     }
+}
 /// Linear interpolation with index-based ratio calculation
 /// 
 /// Convenience function for interpolating based on array indices.
@@ -233,6 +244,8 @@ pub fn deviation(actual: f64, expected: f64) -> f64 {
     }
 }
 
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,6 +322,5 @@ mod tests {
     fn test_assert_deviation_macro_fails() {
         assert_deviation!(120.0, 100.0, 10.0);  // 20% >= 10%, should panic
     }
-
 
 }

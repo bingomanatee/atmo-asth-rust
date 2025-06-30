@@ -184,9 +184,6 @@ mod tests {
 
                 // Should be very close (within 0.01 K)
                 assert_abs_diff_eq!(recovered_temp, temperature, epsilon = 0.01);
-
-                println!("Volume: {:.1} km³, Temp: {:.2} K -> Energy: {:.2e} J -> Temp: {:.2} K",
-                         volume, temperature, energy, recovered_temp);
             }
         }
     }
@@ -253,7 +250,6 @@ mod tests {
     #[test]
     fn test_lithosphere_relevant_temperatures() {
         let volume = 100.0; // km³
-        let specific_heat = SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K;
 
         // Test specific temperatures relevant to lithosphere formation
         let lithosphere_temps = vec![
@@ -267,7 +263,6 @@ mod tests {
             let recovered_temp = joules_volume_to_kelvin_mantle(energy, volume);
 
             assert_abs_diff_eq!(recovered_temp, temp, epsilon = 0.01);
-            println!("{}: {:.2} K <-> {:.2e} J", description, temp, energy);
         }
     }
 }

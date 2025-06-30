@@ -10,4 +10,5 @@ pub mod temp_utils;
 pub mod example;
 pub mod material_composite;
 pub mod energy_mass_composite;
-pub mod atmospheric_energy_mass;
+pub mod atmospheric_energy_mass_composite;
+pub mod phase_transition;

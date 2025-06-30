@@ -283,3 +283,144 @@ impl EnergyMassComposite for AtmosphericEnergyMass {
         self.energy_joules = (self.energy_joules - energy_joules).max(0.0);
     }
 }
+
+impl AtmosphericEnergyMass {
+    /// Create atmospheric layer with realistic mass distribution
+    /// Earth's total atmospheric mass: 5.15 × 10¹⁸ kg
+    /// Earth's surface area: ~510,072,000 km²
+    /// Target mass per km²: ~1.01 × 10¹⁰ kg/km²
+    pub fn create_layer_for_km2(
+        layer_index: usize,
+        base_height_km: f64,
+        temperature_k: f64,
+    ) -> Self {
+        // Scale height for Earth's atmosphere ≈ 8.5 km
+        let scale_height_km = 8.5;
+        let layer_height_km = base_height_km;
+
+        // Calculate mass for this layer (integrate over the layer thickness)
+        // For exponential atmosphere: mass = ∫ ρ₀ * exp(-z/H) dz from z₁ to z₂
+        // This gives: mass = ρ₀ * H * (exp(-z₁/H) - exp(-z₂/H)) * area
+        let z1 = layer_index as f64 * layer_height_km;
+        let z2 = (layer_index + 1) as f64 * layer_height_km;
+
+        // Base density at sea level (kg/m³) and convert to kg/km² for area calculation
+        let sea_level_density_kg_m3 = 1.225;
+        let sea_level_density_kg_km2 = sea_level_density_kg_m3 * 1e6; // kg/m³ * 1e6 m²/km² = kg/km²
+
+        // Calculate mass per km² for this layer using exponential integration
+        let layer_mass_per_km2 = sea_level_density_kg_km2
+            * scale_height_km
+            * ((-z1 / scale_height_km).exp() - (-z2 / scale_height_km).exp());
+
+        // Calculate average density for this layer (for volume calculation)
+        let layer_center_height = z1 + layer_height_km / 2.0;
+        let density_factor = (-layer_center_height / scale_height_km).exp();
+        let layer_avg_density_kg_m3 = sea_level_density_kg_m3 * density_factor;
+        let layer_avg_density_kg_km3 = layer_avg_density_kg_m3 * 1e9; // Convert to kg/km³
+
+        // Volume needed for this mass at this density (per km² of surface area)
+        let layer_volume_km3 = if layer_avg_density_kg_km3 > 0.0 {
+            layer_mass_per_km2 / layer_avg_density_kg_km3
+        } else {
+            0.001 // Minimum volume for very high altitude layers
+        };
+
+        // Create the atmospheric layer with custom density
+        Self::new(
+            temperature_k,
+            layer_volume_km3,
+            layer_height_km,
+            layer_avg_density_kg_m3,
+        )
+    }
+
+    /// Create atmospheric layer using simplified 0.88 decay model
+    /// Each layer above: 0.88 × previous layer's mass
+    /// Maximum total atmospheric mass: 1.0×10¹⁰ kg per km²
+    ///
+    /// This function creates atmospheric blocks with the same height as solid blocks
+    /// and distributes the atmospheric mass according to the 0.88 decay model.
+    /// The base mass is automatically scaled so the total series doesn't exceed the maximum.
+    pub fn create_layer_simple_decay(
+        layer_index: usize,
+        layer_height_km: f64,
+        temperature_k: f64,
+    ) -> Self {
+        // Maximum total atmospheric mass per km²
+        let max_total_mass_kg = 1.0e10;
+
+        // Calculate the sum of the geometric series for a reasonable number of layers (e.g., 100)
+        let decay_factor: f64 = 0.88;
+        let num_layers_for_scaling = 100; // Assume 100 layers for scaling calculation
+        let finite_series_sum: f64 = (0..num_layers_for_scaling)
+            .map(|i| decay_factor.powi(i as i32))
+            .sum();
+
+        // Base mass per layer (per km³) scaled to fit within maximum
+        let base_mass_per_layer_kg = max_total_mass_kg / finite_series_sum;
+
+        // Calculate mass for this specific layer using decay factor
+        let layer_mass_kg = base_mass_per_layer_kg * decay_factor.powi(layer_index as i32);
+
+        // Calculate volume for 1 km² surface area with given height
+        let layer_volume_km3 = layer_height_km; // height × 1 km² area = volume in km³
+
+        // Calculate density (kg/m³) from mass and volume
+        let volume_m3 = layer_volume_km3 * 1e9; // Convert km³ to m³
+        let layer_density_kg_m3 = layer_mass_kg / volume_m3;
+
+        // Create the atmospheric layer
+        Self::new(
+            temperature_k,
+            layer_volume_km3,
+            layer_height_km,
+            layer_density_kg_m3,
+        )
+    }
+
+    /// Create atmospheric layer for simulation cells with arbitrary area
+    /// Uses the same 0.88 decay model but scales for the actual cell area
+    ///
+    /// Parameters:
+    /// - layer_index: Height index (0 = surface, 1 = next layer up, etc.)
+    /// - layer_height_km: Height of this atmospheric layer (matches solid layer height)
+    /// - cell_area_km2: Area of the simulation cell (from H3 hexagon)
+    /// - temperature_k: Temperature for this atmospheric layer
+    pub fn create_layer_for_cell(
+        layer_index: usize,
+        layer_height_km: f64,
+        cell_area_km2: f64,
+        temperature_k: f64,
+    ) -> Self {
+        // Use the same 0.88 decay model as the simple decay function
+        let max_total_mass_per_km2 = 1.0e10; // kg per km²
+        let decay_factor: f64 = 0.88;
+        let num_layers_for_scaling = 100;
+        let finite_series_sum: f64 = (0..num_layers_for_scaling)
+            .map(|i| decay_factor.powi(i as i32))
+            .sum();
+
+        // Base mass per layer per km² scaled to fit within maximum
+        let base_mass_per_layer_per_km2 = max_total_mass_per_km2 / finite_series_sum;
+
+        // Calculate mass for this specific layer and scale by cell area
+        let layer_mass_per_km2 = base_mass_per_layer_per_km2 * decay_factor.powi(layer_index as i32);
+        let layer_total_mass_kg = layer_mass_per_km2 * cell_area_km2;
+
+        // Calculate volume for the actual cell area
+        let layer_volume_km3 = layer_height_km * cell_area_km2;
+
+        // Calculate density (kg/m³) from mass and volume
+        let volume_m3 = layer_volume_km3 * 1e9; // Convert km³ to m³
+        let layer_density_kg_m3 = layer_total_mass_kg / volume_m3;
+
+        // Create the atmospheric layer
+        Self::new(
+            temperature_k,
+            layer_volume_km3,
+            layer_height_km,
+            layer_density_kg_m3,
+        )
+    }
+}

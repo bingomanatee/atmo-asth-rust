@@ -4,6 +4,10 @@ use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// ---------- DEPERCATED -------------
+/// this was used in v1 of the libraries
+/// use material_composite in all cases
+/// 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MaterialType {
     Silicate,   // General silicate/peridotite (mantle material)

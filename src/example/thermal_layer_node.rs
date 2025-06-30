@@ -143,24 +143,13 @@ impl ThermalLayerNode {
     }
 
     /// Set the material phase (solid, liquid, gas)
+    /// Note: This method no longer forces temperature changes.
+    /// Phase transitions are now handled automatically by the energy bank system.
     pub fn set_material_phase(&mut self, phase: MaterialPhase) {
-        // Get the material composite which contains the phase transition temperatures
-        let composite = self.material_composite();
-        match phase {
-            MaterialPhase::Solid => {
-                // Set to a temperature well below the average melting point
-                self.set_kelvin(composite.melting_point_avg_k - 200.0);
-            },
-            MaterialPhase::Liquid => {
-                // Set to a temperature at the average melting point (best transition point)
-                self.set_kelvin(composite.melting_point_avg_k);
-            },
-            MaterialPhase::Gas => {
-                // Set to a very high temperature (no boiling point field available)
-                // Use a temperature well above typical material phase transitions
-                self.set_kelvin(composite.melting_point_avg_k + 1000.0);
-            },
-        }
+        // Phase transitions are now handled automatically by the energy mass system
+        // This method is kept for compatibility but doesn't force temperature changes
+        // The actual phase will be determined by the current temperature and energy bank state
+        self.log_extent();
     }
 
     /// Get the current material phase based on temperature

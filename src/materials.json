@@ -1,0 +1,177 @@
+{
+  "basalt": {
+    "solid": {
+      "density_kg_m3": 3000.0,
+      "specific_heat_capacity_j_per_kg_k": 840.0,
+      "thermal_conductivity_w_m_k": 1.8,
+      "thermal_transmission_r0_min": 1.0,
+      "thermal_transmission_r0_max": 5.0,
+      "melt_temp": 1473.0,
+      "latent_heat_fusion": 400000.0,
+      "boil_temp": 2900.0,
+      "latent_heat_vapor": 2000000.0
+    },
+    "liquid": {
+      "density_kg_m3": 2850.0,
+      "specific_heat_capacity_j_per_kg_k": 1100.0,
+      "thermal_conductivity_w_m_k": 1.2,
+      "thermal_transmission_r0_min": 0.5,
+      "thermal_transmission_r0_max": 3.0,
+      "melt_temp": 1473.0,
+      "latent_heat_fusion": 400000.0,
+      "boil_temp": 2900.0,
+      "latent_heat_vapor": 2000000.0
+    },
+    "gas": {
+      "density_kg_m3": 0.1,
+      "specific_heat_capacity_j_per_kg_k": 1200.0,
+      "thermal_conductivity_w_m_k": 0.1,
+      "thermal_transmission_r0_min": 0.1,
+      "thermal_transmission_r0_max": 1.0,
+      "melt_temp": 1473.0,
+      "latent_heat_fusion": 400000.0,
+      "boil_temp": 2900.0,
+      "latent_heat_vapor": 2000000.0
+    }
+  },
+  "granite": {
+    "solid": {
+      "density_kg_m3": 2700.0,
+      "specific_heat_capacity_j_per_kg_k": 790.0,
+      "thermal_conductivity_w_m_k": 2.5,
+      "thermal_transmission_r0_min": 1.0,
+      "thermal_transmission_r0_max": 5.0,
+      "melt_temp": 1215.0,
+      "latent_heat_fusion": 225000.0,
+      "boil_temp": 3000.0,
+      "latent_heat_vapor": 1750000.0
+    },
+    "liquid": {
+      "density_kg_m3": 2500.0,
+      "specific_heat_capacity_j_per_kg_k": 1000.0,
+      "thermal_conductivity_w_m_k": 1.5,
+      "thermal_transmission_r0_min": 0.5,
+      "thermal_transmission_r0_max": 3.0,
+      "melt_temp": 1215.0,
+      "latent_heat_fusion": 225000.0,
+      "boil_temp": 3000.0,
+      "latent_heat_vapor": 1750000.0
+    },
+    "gas": {
+      "density_kg_m3": 0.1,
+      "specific_heat_capacity_j_per_kg_k": 1100.0,
+      "thermal_conductivity_w_m_k": 0.1,
+      "thermal_transmission_r0_min": 0.1,
+      "thermal_transmission_r0_max": 1.0,
+      "melt_temp": 1215.0,
+      "latent_heat_fusion": 225000.0,
+      "boil_temp": 3000.0,
+      "latent_heat_vapor": 1750000.0
+    }
+  },
+  "silicate": {
+    "solid": {
+      "density_kg_m3": 2650.0,
+      "specific_heat_capacity_j_per_kg_k": 900.0,
+      "thermal_conductivity_w_m_k": 2.0,
+      "thermal_transmission_r0_min": 1.0,
+      "thermal_transmission_r0_max": 4.0,
+      "melt_temp": 1600.0,
+      "latent_heat_fusion": 300000.0,
+      "boil_temp": 3200.0,
+      "latent_heat_vapor": 1800000.0
+    },
+    "liquid": {
+      "density_kg_m3": 2600.0,
+      "specific_heat_capacity_j_per_kg_k": 1100.0,
+      "thermal_conductivity_w_m_k": 1.0,
+      "thermal_transmission_r0_min": 0.5,
+      "thermal_transmission_r0_max": 3.0,
+      "melt_temp": 1600.0,
+      "latent_heat_fusion": 300000.0,
+      "boil_temp": 3200.0,
+      "latent_heat_vapor": 1800000.0
+    },
+    "gas": {
+      "density_kg_m3": 0.1,
+      "specific_heat_capacity_j_per_kg_k": 1200.0,
+      "thermal_conductivity_w_m_k": 0.1,
+      "thermal_transmission_r0_min": 0.1,
+      "thermal_transmission_r0_max": 1.0,
+      "melt_temp": 1600.0,
+      "latent_heat_fusion": 300000.0,
+      "boil_temp": 3200.0,
+      "latent_heat_vapor": 1800000.0
+    }
+  },
+  "steel": {
+    "solid": {
+      "density_kg_m3": 7850.0,
+      "specific_heat_capacity_j_per_kg_k": 450.0,
+      "thermal_conductivity_w_m_k": 43.0,
+      "thermal_transmission_r0_min": 0.5,
+      "thermal_transmission_r0_max": 4.0,
+      "melt_temp": 1808.0,
+      "latent_heat_fusion": 272000.0,
+      "boil_temp": 3133.0,
+      "latent_heat_vapor": 6200000.0
+    },
+    "liquid": {
+      "density_kg_m3": 7000.0,
+      "specific_heat_capacity_j_per_kg_k": 500.0,
+      "thermal_conductivity_w_m_k": 35.0,
+      "thermal_transmission_r0_min": 0.3,
+      "thermal_transmission_r0_max": 3.0,
+      "melt_temp": 1808.0,
+      "latent_heat_fusion": 272000.0,
+      "boil_temp": 3133.0,
+      "latent_heat_vapor": 6200000.0
+    },
+    "gas": {
+      "density_kg_m3": 0.1,
+      "specific_heat_capacity_j_per_kg_k": 600.0,
+      "thermal_conductivity_w_m_k": 0.1,
+      "thermal_transmission_r0_min": 0.1,
+      "thermal_transmission_r0_max": 1.0,
+      "melt_temp": 1808.0,
+      "latent_heat_fusion": 272000.0,
+      "boil_temp": 3133.0,
+      "latent_heat_vapor": 6200000.0
+    }
+  },
+  "water": {
+    "solid": {
+      "density_kg_m3": 917.0,
+      "specific_heat_capacity_j_per_kg_k": 2100.0,
+      "thermal_conductivity_w_m_k": 2.2,
+      "thermal_transmission_r0_min": 0.2,
+      "thermal_transmission_r0_max": 2.0,
+      "melt_temp": 273.15,
+      "latent_heat_fusion": 334000.0,
+      "boil_temp": 373.15,
+      "latent_heat_vapor": 2260000.0
+    },
+    "liquid": {
+      "density_kg_m3": 1000.0,
+      "specific_heat_capacity_j_per_kg_k": 4186.0,
+      "thermal_conductivity_w_m_k": 0.6,
+      "thermal_transmission_r0_min": 0.2,
+      "thermal_transmission_r0_max": 2.0,
+      "melt_temp": 273.15,
+      "latent_heat_fusion": 334000.0,
+      "boil_temp": 373.15,
+      "latent_heat_vapor": 2260000.0
+    },
+    "gas": {
+      "density_kg_m3": 0.6,
+      "specific_heat_capacity_j_per_kg_k": 2010.0,
+      "thermal_conductivity_w_m_k": 0.02,
+      "thermal_transmission_r0_min": 0.1,
+      "thermal_transmission_r0_max": 1.0,
+      "melt_temp": 273.15,
+      "latent_heat_fusion": 334000.0,
+      "boil_temp": 373.15,
+      "latent_heat_vapor": 2260000.0
+    }
+  }
+}
