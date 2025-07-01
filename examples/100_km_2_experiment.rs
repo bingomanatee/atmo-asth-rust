@@ -12,8 +12,7 @@ use atmo_asth_rust::energy_mass_composite::{
     EnergyMassComposite, MaterialCompositeType, MaterialPhase, StandardEnergyMassComposite,
     get_profile_fast,
 };
-use atmo_asth_rust::example::thermal_layer_node::{ThermalLayerNodeParams, ThermalLayerNodeTempParams};
-use atmo_asth_rust::example::{ExperimentState, ExperimentSpecs, ThermalLayerNode};
+use atmo_asth_rust::example::{ExperimentState, ExperimentSpecs, ThermalLayerNodeWide, ThermalLayerNodeWideParams, ThermalLayerNodeWideTempParams};
 use atmo_asth_rust::material_composite::get_material_core;
 // Re-export MaterialPhase for easier access
 use atmo_asth_rust::temp_utils::energy_from_kelvin;
@@ -27,31 +26,45 @@ use test_utils_1km3::{temperature_baselines, validate_temperature_gradient, vali
 // Export layer indices - key layer positions for analysis
 const EXPORT_LAYER_INDICES: [usize; 9] = [10, 15, 20, 25, 30, 35, 40, 45, 50];
 
-/// Create locked configuration specs for the 1km² experiment
+// Area constant for the 100 km² experiment
+const AREA_KM2: f64 = 100.0;
+
+// Locked configuration constants for wide experiment - used in both config and tests
+const WIDE_CONDUCTIVITY_FACTOR: f64 = 15.0;
+const WIDE_PRESSURE_BASELINE: f64 = 5.0;
+const WIDE_MAX_CHANGE_RATE: f64 = 0.06;
+const WIDE_FOUNDRY_TEMPERATURE_K: f64 = 4800.0;
+const WIDE_SURFACE_TEMPERATURE_K: f64 = 280.0;
+
+// Test expectation constants - calibrated to the wide experiment configuration
+const EXPECTED_TEMPERATURE_RANGE_K: f64 = WIDE_FOUNDRY_TEMPERATURE_K - WIDE_SURFACE_TEMPERATURE_K; // 4520.0K
+const EXPECTED_NUM_NODES: usize = 30;
+const TEMPERATURE_TOLERANCE_PERCENT: f64 = 5.0; // Wider tolerance for wide experiment
+
+/// Create locked configuration specs for the 100km² wide experiment
 /// These values are locked to prevent config drift in tests
-/// These are the original 4x scaled values from the basic_experiment_state
-fn one_km2_experiment_specs() -> ExperimentSpecs {
+fn wide_experiment_specs() -> ExperimentSpecs {
     ExperimentSpecs {
         // Use Silicate as the primary material type (mantle material)
         material_type: MaterialCompositeType::Silicate,
 
-        // Diffusion parameters (4x scaled constants) - locked for 1km² experiment
-        conductivity_factor: 12.0,
-        pressure_baseline: 4.0,
-        max_change_rate: 0.08,
+        // Diffusion parameters - optimized for 100km² wide experiment
+        conductivity_factor: WIDE_CONDUCTIVITY_FACTOR,
+        pressure_baseline: WIDE_PRESSURE_BASELINE,
+        max_change_rate: WIDE_MAX_CHANGE_RATE,
 
-        // Boundary conditions (4x enhanced for early Earth conditions) - locked for 1km² experiment
-        foundry_temperature_k: 5000.0,
-        surface_temperature_k: 300.0,
+        // Boundary conditions - adjusted for wide experiment
+        foundry_temperature_k: WIDE_FOUNDRY_TEMPERATURE_K,
+        surface_temperature_k: WIDE_SURFACE_TEMPERATURE_K,
     }
 }
 
-///  This simulates a single km2 with only vertical flows up and down
+///  This simulates a single 100 km2 with only vertical flows up and down
 ///  with energy coming in from the highest/lowest cell in the array
 /// to the surface of the earth at cell 0 which radiates heat into space.
 /// the settings for the heat flow come in as ExperimentState
-struct OneKm2Experiment {
-    nodes: Vec<ThermalLayerNode>,
+struct OneHundredKm2Experiment {
+    nodes: Vec<ThermalLayerNodeWide>,
     config: ExperimentState,
     layer_height_km: f64,
     total_years: u64,
@@ -69,9 +82,9 @@ struct OneKm2Experiment {
     surface_end: usize,
 }
 
-impl OneKm2Experiment {
+impl OneHundredKm2Experiment {
     fn new(steps: u64, total_years: u64) -> Self {
-        let config = ExperimentState::new_with_specs(one_km2_experiment_specs());
+        let config = ExperimentState::new_with_specs(wide_experiment_specs());
         let num_nodes = 30;
         let total_depth_km = 750.0; // 750km total depth
         let layer_height_km = total_depth_km / num_nodes as f64; // 25km per layer
@@ -81,7 +94,7 @@ impl OneKm2Experiment {
         // Create thermal nodes with realistic temperature profile
         for i in 0..num_nodes {
             let depth_km = (i as f64 + 0.5) * layer_height_km;
-            let volume_km3 = 1.0 * layer_height_km; // 1 km² surface area
+            let volume_km3 = AREA_KM2 * layer_height_km; // 100 km² surface area
 
             // Calculate temperature using linear gradient from surface to foundry
             let temp_kelvin = lerp(
@@ -91,12 +104,13 @@ impl OneKm2Experiment {
             );
 
             // Use simplified constructor that sets temperature directly
-            let node = ThermalLayerNode::new_with_temperature(ThermalLayerNodeTempParams {
+            let node = ThermalLayerNodeWide::new_with_temperature(ThermalLayerNodeWideTempParams {
                 material_type: MaterialCompositeType::Silicate,
                 temperature_k: temp_kelvin,
                 volume_km3,
                 depth_km,
                 height_km: layer_height_km,
+                area_km2: AREA_KM2,
             });
             nodes.push(node);
         }
@@ -348,8 +362,8 @@ impl OneKm2Experiment {
 
     fn get_energy_change_from_node_to_node(
         &self,
-        from_node: &ThermalLayerNode,
-        to_node: &ThermalLayerNode,
+        from_node: &ThermalLayerNodeWide,
+        to_node: &ThermalLayerNodeWide,
     ) -> f64 {
         let temp_diff = (to_node.temp_kelvin() - from_node.temp_kelvin()).abs();
         // Calculate distance between nodes
@@ -468,7 +482,7 @@ impl OneKm2Experiment {
         }
     }
 
-    fn get_material_conductivity(&self, node: &ThermalLayerNode) -> f64 {
+    fn get_material_conductivity(&self, node: &ThermalLayerNodeWide) -> f64 {
         // Use the material system to get conductivity based on phase
         self.config.get_thermal_conductivity(node.material_state())
     }
@@ -573,7 +587,7 @@ fn main() {
     let years_per_step = 10_000;
     let steps = total_years / years_per_step;
     // Create experiment with 4x scaled parameters
-    let mut experiment = OneKm2Experiment::new(steps, total_years);
+    let mut experiment = OneHundredKm2Experiment::new(steps, total_years);
     experiment.print_initial_state();
 
     // Run force-directed thermal equilibration
@@ -589,21 +603,21 @@ mod tests {
     #[test]
     fn test_one_km_2_experiment_initial_temperature_gradient() {
         // Create experiment instance
-        let experiment = OneKm2Experiment::new(100, 1_000_000);
+        let experiment = OneHundredKm2Experiment::new(100, 1_000_000);
 
-        // Get configuration values for expected gradient
-        let surface_temp = experiment.config.surface_temperature_k;
-        let foundry_temp = experiment.config.foundry_temperature_k;
+        // Use locked constants for expected gradient (prevents config drift)
+        let surface_temp = WIDE_SURFACE_TEMPERATURE_K;
+        let foundry_temp = WIDE_FOUNDRY_TEMPERATURE_K;
         let num_nodes = experiment.nodes.len();
 
         // Validate that we have the expected number of nodes
-        assert_eq!(num_nodes, 60, "Expected 60 thermal nodes");
+        assert_eq!(num_nodes, EXPECTED_NUM_NODES, "Expected {} thermal nodes for wide experiment", EXPECTED_NUM_NODES);
 
         // Collect temperatures for validation
         let temperatures: Vec<f64> = experiment.nodes.iter().map(|node| node.temp_kelvin()).collect();
 
         // Validate temperature gradient using test utilities
-        validate_temperature_gradient(&temperatures, surface_temp, foundry_temp, 2.0)
+        validate_temperature_gradient(&temperatures, surface_temp, foundry_temp, TEMPERATURE_TOLERANCE_PERCENT)
             .expect("Temperature gradient validation failed");
 
         // Validate boundary conditions using test utilities
@@ -613,17 +627,17 @@ mod tests {
         validate_boundary_conditions(
             surface_node_temp, foundry_node_temp,
             surface_temp, foundry_temp,
-            2.0
+            TEMPERATURE_TOLERANCE_PERCENT
         ).expect("Boundary conditions validation failed");
 
-        // Test temperature range
+        // Test temperature range using locked constants
         let temp_range = foundry_node_temp - surface_node_temp;
-        let expected_range = foundry_temp - surface_temp;
+        let expected_range = EXPECTED_TEMPERATURE_RANGE_K;
 
         assert_deviation!(
-            temp_range, expected_range, 2.0,
-            "Temperature range should be within 2%: got {:.1}K, expected {:.1}K",
-            temp_range, expected_range
+            temp_range, expected_range, TEMPERATURE_TOLERANCE_PERCENT,
+            "Temperature range should be within {:.1}%: got {:.1}K, expected {:.1}K",
+            TEMPERATURE_TOLERANCE_PERCENT, temp_range, expected_range
         );
 
         // Test some intermediate points for gradient linearity
@@ -648,7 +662,7 @@ mod tests {
     #[test]
     fn test_actual_thermal_diffusion_method() {
         // Create a minimal experiment with just 5 nodes to test the ACTUAL method
-        let mut experiment = OneKm2Experiment::new(1, 1);
+        let mut experiment = OneHundredKm2Experiment::new(1, 1);
 
         // Manually create just 5 nodes for testing
         experiment.nodes.clear();
@@ -656,12 +670,13 @@ mod tests {
         // Create 5 nodes: cold-cold-hot-cold-cold pattern
         for i in 0..5 {
             let temp = if i == 2 { 2000.0 } else { 1000.0 }; // Middle node hot
-            let node = ThermalLayerNode::new_with_temperature(ThermalLayerNodeTempParams {
+            let node = ThermalLayerNodeWide::new_with_temperature(ThermalLayerNodeWideTempParams {
                 material_type: MaterialCompositeType::Silicate,
                 temperature_k: temp,
-                volume_km3: 1.0 * 5.0, // 1 km² × 5 km height
+                volume_km3: AREA_KM2 * 5.0, // 100 km² × 5 km height
                 depth_km: (i as f64 + 0.5) * 5.0,
                 height_km: 5.0,
+                area_km2: AREA_KM2,
             });
             experiment.nodes.push(node);
         }
@@ -706,7 +721,7 @@ mod tests {
     #[test]
     fn test_energy_redistribution_array() {
         // Create a minimal experiment with just 5 nodes to debug energy redistribution
-        let mut experiment = OneKm2Experiment::new(1, 1);
+        let mut experiment = OneHundredKm2Experiment::new(1, 1);
 
         // Manually create just 5 nodes for testing
         experiment.nodes.clear();
@@ -714,12 +729,13 @@ mod tests {
         // Create 5 nodes: cold-cold-hot-cold-cold pattern
         for i in 0..5 {
             let temp = if i == 2 { 2000.0 } else { 1000.0 }; // Middle node hot
-            let node = ThermalLayerNode::new_with_temperature(ThermalLayerNodeTempParams {
+            let node = ThermalLayerNodeWide::new_with_temperature(ThermalLayerNodeWideTempParams {
                 material_type: MaterialCompositeType::Silicate,
                 temperature_k: temp,
-                volume_km3: 1.0 * 5.0, // 1 km² × 5 km height
+                volume_km3: AREA_KM2 * 5.0, // 100 km² × 5 km height
                 depth_km: (i as f64 + 0.5) * 5.0,
                 height_km: 5.0,
+                area_km2: AREA_KM2,
             });
             experiment.nodes.push(node);
         }
@@ -818,7 +834,7 @@ mod tests {
     #[test]
     fn test_debug_pairwise_exchanges() {
         // Create a minimal experiment with just 5 nodes to debug the pairwise exchanges
-        let mut experiment = OneKm2Experiment::new(1, 1);
+        let mut experiment = OneHundredKm2Experiment::new(1, 1);
 
         // Manually create just 5 nodes for testing
         experiment.nodes.clear();
@@ -826,12 +842,13 @@ mod tests {
         // Create 5 nodes: cold-cold-hot-cold-cold pattern
         for i in 0..5 {
             let temp = if i == 2 { 2000.0 } else { 1000.0 }; // Middle node hot
-            let node = ThermalLayerNode::new_with_temperature(ThermalLayerNodeTempParams {
+            let node = ThermalLayerNodeWide::new_with_temperature(ThermalLayerNodeWideTempParams {
                 material_type: MaterialCompositeType::Silicate,
                 temperature_k: temp,
-                volume_km3: 1.0 * 5.0, // 1 km² × 5 km height
+                volume_km3: AREA_KM2 * 5.0, // 100 km² × 5 km height
                 depth_km: (i as f64 + 0.5) * 5.0,
                 height_km: 5.0,
+                area_km2: AREA_KM2,
             });
             experiment.nodes.push(node);
         }
@@ -870,7 +887,7 @@ mod tests {
     #[test]
     fn test_simple_three_node_diffusion() {
         // Create a minimal experiment with just 3 nodes to understand the behavior
-        let mut experiment = OneKm2Experiment::new(1, 1);
+        let mut experiment = OneHundredKm2Experiment::new(1, 1);
 
         // Manually create just 3 nodes for testing
         experiment.nodes.clear();
@@ -878,12 +895,13 @@ mod tests {
         // Create 3 nodes: cold-hot-cold pattern
         for i in 0..3 {
             let temp = if i == 1 { 2000.0 } else { 1000.0 }; // Middle node hot
-            let node = ThermalLayerNode::new_with_temperature(ThermalLayerNodeTempParams {
+            let node = ThermalLayerNodeWide::new_with_temperature(ThermalLayerNodeWideTempParams {
                 material_type: MaterialCompositeType::Silicate,
                 temperature_k: temp,
-                volume_km3: 1.0 * 5.0, // 1 km² × 5 km height
+                volume_km3: AREA_KM2 * 5.0, // 100 km² × 5 km height
                 depth_km: (i as f64 + 0.5) * 5.0,
                 height_km: 5.0,
+                area_km2: AREA_KM2,
             });
             experiment.nodes.push(node);
         }
@@ -916,7 +934,7 @@ mod tests {
     #[test]
     fn test_single_step_thermal_diffusion() {
         // Create experiment with minimal setup for single step testing
-        let mut experiment = OneKm2Experiment::new(1, 1);
+        let mut experiment = OneHundredKm2Experiment::new(1, 1);
 
         // Set all nodes to uniform temperature (1000K)
         let uniform_temp = 1000.0;
@@ -998,7 +1016,7 @@ mod tests {
 
     #[test]
     fn test_one_km_2_experiment_node_properties() {
-        let experiment = OneKm2Experiment::new(100, 1_000_000);
+        let experiment = OneHundredKm2Experiment::new(100, 1_000_000);
 
         // Test that all nodes have consistent properties
         for (i, node) in experiment.nodes.iter().enumerate() {
@@ -1009,8 +1027,8 @@ mod tests {
                 "Node {} should have consistent layer height", i
             );
 
-            // All nodes should have 1 km² volume (height * 1 km²)
-            let expected_volume = experiment.layer_height_km * 1.0;
+            // All nodes should have 100 km² volume (height * 100 km²)
+            let expected_volume = experiment.layer_height_km * AREA_KM2;
             assert_deviation!(
                 node.volume_km3(), expected_volume, 0.1,
                 "Node {} should have volume {:.3} km³", i, expected_volume

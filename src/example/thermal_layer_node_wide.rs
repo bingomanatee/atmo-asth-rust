@@ -4,30 +4,33 @@ use crate::material_composite::{get_profile_fast, MaterialCompositeType, Materia
 use crate::temp_utils::joules_volume_to_kelvin;
 
 /// Parameters for creating ThermalLayerNode
-pub struct ThermalLayerNodeParams {
+pub struct ThermalLayerNodeWideParams {
     pub material_type: MaterialCompositeType,
     pub energy_joules: f64,
     pub volume_km3: f64,
     pub depth_km: f64,
     pub height_km: f64,
+    pub area_km2: f64,
 }
 
 /// Parameters for creating ThermalLayerNode with direct temperature setting
-pub struct ThermalLayerNodeTempParams {
+pub struct ThermalLayerNodeWideTempParams {
     pub material_type: MaterialCompositeType,
     pub temperature_k: f64,
     pub volume_km3: f64,
     pub depth_km: f64,
     pub height_km: f64,
+    pub area_km2: f64,
 }
 
 /// Thermal node with enhanced state tracking
 #[derive(Clone, Debug)]
-pub struct ThermalLayerNode {
+pub struct ThermalLayerNodeWide {
     energy_mass: StandardEnergyMassComposite, // Private - access through trait methods
     pub thermal_state: i32,
     pub depth_km: f64,
     pub height_km: f64,
+    pub area_km2: f64,
 
     /// Thermal history for analysis
     pub initial_temperature: f64,
@@ -40,8 +43,15 @@ pub struct ThermalLayerNode {
     pub outgassing_rate: f64,
 }
 
-impl ThermalLayerNode {
-    pub fn new(params: ThermalLayerNodeParams) -> Self {
+impl ThermalLayerNodeWide {
+    pub fn new(params: ThermalLayerNodeWideParams) -> Self {
+        // Validate volume constraint: volume must not exceed height * area
+        let max_volume = params.height_km * params.area_km2;
+        if params.volume_km3 > max_volume {
+            panic!("Volume ({} km³) exceeds maximum allowed volume ({} km³) for height {} km and area {} km²",
+                   params.volume_km3, max_volume, params.height_km, params.area_km2);
+        }
+
         let profile = get_profile_fast(&params.material_type, &MaterialPhase::Liquid);
 
         let temperature_k = joules_volume_to_kelvin(
@@ -64,6 +74,7 @@ impl ThermalLayerNode {
             thermal_state: 100, // Start as solid
             depth_km: params.depth_km,
             height_km: params.height_km,
+            area_km2: params.area_km2,
             initial_temperature: temperature_k,
             max_temperature: temperature_k,
             min_temperature: temperature_k,
@@ -74,7 +85,14 @@ impl ThermalLayerNode {
 
     /// Create a new ThermalLayerNode with direct temperature setting (simplified)
     /// This avoids the energy conversion round-trip and sets temperature directly
-    pub fn new_with_temperature(params: ThermalLayerNodeTempParams) -> Self {
+    pub fn new_with_temperature(params: ThermalLayerNodeWideTempParams) -> Self {
+        // Validate volume constraint: volume must not exceed height * area
+        let max_volume = params.height_km * params.area_km2;
+        if params.volume_km3 > max_volume {
+            panic!("Volume ({} km³) exceeds maximum allowed volume ({} km³) for height {} km and area {} km²",
+                   params.volume_km3, max_volume, params.height_km, params.area_km2);
+        }
+
         // Create energy mass with minimal energy, then set temperature directly
         let mut energy_mass = StandardEnergyMassComposite::new_with_material_state_and_energy(
             EnergyMassParams {
@@ -94,6 +112,7 @@ impl ThermalLayerNode {
             thermal_state: 100, // Start as solid
             depth_km: params.depth_km,
             height_km: params.height_km,
+            area_km2: params.area_km2,
             initial_temperature: params.temperature_k,
             max_temperature: params.temperature_k,
             min_temperature: params.temperature_k,
@@ -120,6 +139,16 @@ impl ThermalLayerNode {
     /// Get the depth in km (specific to ThermalLayerNode)
     pub fn depth_km(&self) -> f64 {
         self.depth_km
+    }
+
+    /// Get the area in km² (specific to ThermalLayerNode)
+    pub fn area_km2(&self) -> f64 {
+        self.area_km2
+    }
+
+    /// Get the maximum allowed volume based on height and area
+    pub fn max_volume_km3(&self) -> f64 {
+        self.height_km * self.area_km2
     }
 
     /// Setter methods for controlled access to internal properties
@@ -214,7 +243,7 @@ impl ThermalLayerNode {
 
 /// Extent logging for debugging
 
-impl ThermalLayerNode {
+impl ThermalLayerNodeWide {
     fn log_extent(&mut self) {
         let temp = self.temp_kelvin();
         self.max_temperature = self.max_temperature.max(temp);
@@ -224,7 +253,7 @@ impl ThermalLayerNode {
 
 /// Material and thermal State
 
-impl ThermalLayerNode {
+impl ThermalLayerNodeWide {
     /// Format thermal state for display
     pub fn format_thermal_state(&self) -> String {
         let temp = self.thermal_state;
@@ -252,7 +281,7 @@ impl ThermalLayerNode {
 
 /// Implement EnergyMassComposite trait for ThermalLayerNode
 /// This allows ThermalLayerNode to be used anywhere an EnergyMassComposite is expected
-impl EnergyMassComposite for ThermalLayerNode {
+impl EnergyMassComposite for ThermalLayerNodeWide {
     /// Get the current temperature in Kelvin
     fn kelvin(&self) -> f64 {
         self.energy_mass.kelvin()

@@ -1,5 +1,16 @@
 use crate::material_composite::MaterialCompositeType;
 
+/// Specification parameters for creating ExperimentState
+#[derive(Clone, Debug)]
+pub struct ExperimentSpecs {
+    pub material_type: MaterialCompositeType,
+    pub conductivity_factor: f64,
+    pub pressure_baseline: f64,
+    pub max_change_rate: f64,
+    pub surface_temperature_k: f64,
+    pub foundry_temperature_k: f64,
+}
+
 /// Configuration parameters for thermal diffusion experiments
 /// Simplified to use the new multi-state material system
 #[derive(Clone, Debug)]
@@ -11,33 +22,46 @@ pub struct ExperimentState {
     pub conductivity_factor: f64,
     pub pressure_baseline: f64,
     pub max_change_rate: f64, // max change per cell
-    // from 0 (no cell) 
+    // from 0 (no cell)
     // to 1 (can change from 2x energy to 0x energy
 
-    // ---------- thermal initialization 
-    
+    // ---------- thermal initialization
+
     // start heat at cell [0]
     pub surface_temperature_k: f64,
-    // start heat at cell  [len - 1] 
+    // start heat at cell  [len - 1]
     pub foundry_temperature_k: f64,
 }
 
 impl ExperimentState {
-    /// Create 4x scaled experiment configuration for scientific accuracy
-    pub fn basic_experiment_state() -> Self {
+    /// Create experiment configuration with specified parameters
+    pub fn new_with_specs(specs: ExperimentSpecs) -> Self {
         Self {
+            material_type: specs.material_type,
+            conductivity_factor: specs.conductivity_factor,
+            pressure_baseline: specs.pressure_baseline,
+            max_change_rate: specs.max_change_rate,
+            surface_temperature_k: specs.surface_temperature_k,
+            foundry_temperature_k: specs.foundry_temperature_k,
+        }
+    }
+
+    /// Create basic experiment configuration for 1km² experiments
+    /// These values are locked for the 1km experiment to prevent config drift
+    pub fn basic_experiment_state() -> Self {
+        Self::new_with_specs(ExperimentSpecs {
             // Use Silicate as the primary material type (mantle material)
             material_type: MaterialCompositeType::Silicate,
 
-            // Diffusion parameters (4x scaled constants)
+            // Diffusion parameters (4x scaled constants) - locked for 1km² experiment
             conductivity_factor: 12.0,
             pressure_baseline: 4.0,
             max_change_rate: 0.08,
 
-            // Boundary conditions (4x enhanced for early Earth conditions)
-            foundry_temperature_k: 7200.0,
+            // Boundary conditions (4x enhanced for early Earth conditions) - locked for 1km² experiment
+            foundry_temperature_k: 5000.0,
             surface_temperature_k: 300.0,
-        }
+        })
     }
 
     /// Get thermal conductivity for a specific material phase

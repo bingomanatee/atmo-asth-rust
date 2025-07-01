@@ -693,6 +693,7 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
     }
 
     /// Get the thermal conductivity in W/(m·K)
+    /// Uses temperature-dependent thermal conductivity based on material phase and temperature
     fn thermal_conductivity(&self) -> f64 {
         self.material_composite_profile().thermal_conductivity_w_m_k
     }
