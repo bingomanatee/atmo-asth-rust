@@ -1,4 +1,5 @@
 pub mod asth_cell;
+pub mod global_thermal;
 pub mod h3_utils;
 pub mod constants;
 pub mod energy_mass;

@@ -63,9 +63,22 @@ pub enum MaterialCompositeType {
 impl MaterialCompositeType {
     pub const COUNT: usize = 6;
     /// index is used in creating the flattened array used for optimizing retrieval from a flat array of a sate profile
-    /// via get_profile_fast. 
+    /// via get_profile_fast.
     pub fn as_index(self) -> usize {
         self as usize
+    }
+}
+
+impl std::fmt::Display for MaterialCompositeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MaterialCompositeType::Silicate => write!(f, "Silicate"),
+            MaterialCompositeType::Basaltic => write!(f, "Basaltic"),
+            MaterialCompositeType::Granitic => write!(f, "Granitic"),
+            MaterialCompositeType::Metallic => write!(f, "Metallic"),
+            MaterialCompositeType::Icy => write!(f, "Icy"),
+            MaterialCompositeType::Air => write!(f, "Air"),
+        }
     }
 }
 

@@ -1,25 +1,25 @@
 use crate::asth_cell::{AsthCellColumn, AsthCellParams};
+use crate::global_thermal::global_h3_cell::{GlobalH3Cell, GlobalH3CellConfig, LayerConfig};
+use crate::energy_mass_composite::MaterialCompositeType;
 use crate::h3_utils::H3Utils;
 use crate::planet::Planet;
 use crate::sim::sim_op::{SimOp, SimOpHandle};
 use h3o::{CellIndex, Resolution};
 use std::collections::HashMap;
+use std::rc::Rc;
+use crate::global_thermal::global_h3_cell::GlobalH3CellConfig;
 
 pub struct Simulation {
     pub planet: Planet,
     pub resolution: Resolution,
     ops: Vec<Box<dyn SimOp>>,
-    pub cells: HashMap<CellIndex, AsthCellColumn>,
+    pub cells: HashMap<CellIndex, GlobalH3Cell>,
     pub layer_count: usize,
-    pub asth_layer_height_km: f64,
-    pub lith_layer_height_km: f64,
     pub step: i32,
     pub sim_steps: i32,
     pub years_per_step: u32,
     pub name: String,
     pub debug: bool,
-    alert_freq: usize,
-    starting_surface_temp_k: f64,
 }
 
 pub struct SimProps {
@@ -28,12 +28,12 @@ pub struct SimProps {
     pub ops: Vec<SimOpHandle>,
     pub res: Resolution,
     pub layer_count: usize,
-    pub asth_layer_height_km: f64,
-    pub lith_layer_height_km: f64, 
+  //  pub asth_layer_height_km: f64,
+   // pub lith_layer_height_km: f64, 
     pub sim_steps: i32,
     pub years_per_step: u32,
-    pub alert_freq: usize,
-    pub starting_surface_temp_k: f64,
+  //  pub alert_freq: usize,
+   // pub starting_surface_temp_k: f64,
     pub debug: bool,
 }
 
@@ -46,73 +46,29 @@ impl Simulation {
             resolution: props.res,
             cells: HashMap::new(),
             layer_count: props.layer_count,
-            asth_layer_height_km: props.asth_layer_height_km,
-            lith_layer_height_km: props.lith_layer_height_km,
             step: -1,
             sim_steps: props.sim_steps,
             years_per_step: props.years_per_step,
             name: props.name.to_string(),
-            alert_freq: props.alert_freq,
             debug: props.debug,
-            starting_surface_temp_k: props.starting_surface_temp_k,
         };
-        sim.make_cells();
         sim
     }
 
-    pub fn make_cells(&mut self) {
+    pub fn make_cells<F>(&mut self, config_fn: F)
+    where
+        F: Fn(CellIndex, Rc<Planet>) -> GlobalH3CellConfig
+    {
+        // Create shared planet reference
+        let planet = Rc::new(self.planet.clone());
+
         for (cell_index, _base) in H3Utils::iter_cells_with_base(self.resolution) {
-            let volume = H3Utils::cell_area(self.resolution, self.planet.radius_km);
-            // Create cells with surface temperature - projection will handle geothermal gradient
-            let cell = AsthCellColumn::new(AsthCellParams {
-                cell_index,
-                volume,
-                energy: 0.0, // This will be ignored by the constructor
-                layer_count: self.layer_count,
-                layer_height_km: self.asth_layer_height_km,
-                planet_radius_km: self.planet.radius_km,
-                surface_temp_k: self.starting_surface_temp_k,
-            });
+            // Use the provided function to create configuration for this cell
+            let config = config_fn(cell_index, planet.clone());
+
+            let cell = GlobalH3Cell::new_with_config(config);
             self.cells.insert(cell_index, cell);
         }
-    }
-
-    fn report_step(&self) {
-        if !self.debug {
-            return;
-        }
-
-        match self.alert_freq {
-            0 => {
-                return;
-            }
-            1 => {}
-            _ => {
-                if (self.step % self.alert_freq as i32) > 0 {
-                    return;
-                }
-            }
-        }
-
-        let global_energy = self.energy_at_layer(0);
-        let cells = self.cells.iter().len();
-        println!(
-            "{} STEP {}: surface global energy (J) {:.3e}, per cell {:.3e} J",
-            self.name,
-            self.step,
-            global_energy,
-            global_energy / cells as f64
-        );
-    }
-
-    pub fn energy_at_layer(&self, layer: usize) -> f64 {
-        self.cells
-            .iter()
-            .map(|(_index, cell)| match cell.asth_layers_t.get(layer) {
-                None => 0.0,
-                Some((current, _)) => current.energy_joules(),
-            })
-            .sum()
     }
 
     /// Get the current simulation step number
@@ -122,14 +78,9 @@ impl Simulation {
 
     /// Run a single step with custom operators (for testing)
     pub fn step_with_ops(&mut self, ops: &mut [&mut dyn SimOp]) {
-        // Copy current to next within tuples (this is now automatic with tuple structure)
-        for column in self.cells.values_mut() {
-            for (current, next) in column.asth_layers_t.iter_mut() {
-                *next = current.clone();
-            }
-            for (current, next) in column.lith_layers_t.iter_mut() {
-                *next = current.clone();
-            }
+        // Reset next state to current state for all global cells
+        for cell in self.cells.values_mut() {
+            cell.reset_next_state();
         }
 
         // Run operators on next arrays
@@ -147,6 +98,9 @@ impl Simulation {
         if self.step > -1 {
             panic!("Simulation.simulate can only execute once");
         }
+    }
+
+    pub fn run(&mut self) {
         self.step = 0;
         self.simulate_init();
         loop {
@@ -154,8 +108,6 @@ impl Simulation {
 
             self.simulate_step();
             self.advance();
-
-            self.report_step();
 
             if self.step >= self.sim_steps {
                 break;
@@ -165,8 +117,8 @@ impl Simulation {
     }
 
     fn advance(&mut self) {
-        for column in self.cells.values_mut() {
-            column.commit_next_layers();
+        for cell in self.cells.values_mut() {
+            cell.commit_next_state();
         }
     }
 
