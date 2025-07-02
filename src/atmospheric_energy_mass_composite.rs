@@ -282,6 +282,20 @@ impl EnergyMassComposite for AtmosphericEnergyMass {
     fn remove_energy(&mut self, energy_joules: f64) {
         self.energy_joules = (self.energy_joules - energy_joules).max(0.0);
     }
+
+    fn send_energy(&mut self, energy_joules: f64, recipient: &mut dyn EnergyMassComposite) {
+        if energy_joules <= 0.0 {
+            return;
+        }
+        // Remove energy from sender
+        self.energy_joules = (self.energy_joules - energy_joules).max(0.0);
+        // Add energy to recipient
+        recipient.add_energy(energy_joules);
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 impl AtmosphericEnergyMass {

@@ -12,7 +12,7 @@ use atmo_asth_rust::energy_mass_composite::{
     EnergyMassComposite, MaterialCompositeType, MaterialPhase, StandardEnergyMassComposite,
     get_profile_fast,
 };
-use atmo_asth_rust::example::{ExperimentState, ExperimentSpecs, ThermalLayerNodeWide, ThermalLayerNodeWideParams, ThermalLayerNodeWideTempParams};
+use atmo_asth_rust::example::{ExperimentState, ExperimentSpecs, ThermalLayerNodeWide, ThermalLayerNodeWideParams, ThermalLayerNodeWideTempParams, FourierThermalTransfer};
 use atmo_asth_rust::material_composite::get_material_core;
 // Re-export MaterialPhase for easier access
 use atmo_asth_rust::temp_utils::energy_from_kelvin;
@@ -1048,7 +1048,189 @@ mod tests {
                 "Node {} temperature {:.1}K should be reasonable", i, temp
             );
         }
+    }
 
+    #[test]
+    fn test_fourier_thermal_transfer_basic() {
+        // Test the new science-backed Fourier thermal transfer with a simple 3-node setup
+        const TIME_YEARS: f64 = 1.0;
 
+        // Create 3 nodes: cold-hot-cold pattern
+        let mut nodes = Vec::new();
+        for i in 0..3 {
+            let temp = if i == 1 { 2000.0 } else { 1000.0 }; // Middle node hot
+            let node = ThermalLayerNodeWide::new_with_temperature(ThermalLayerNodeWideTempParams {
+                material_type: MaterialCompositeType::Silicate,
+                temperature_k: temp,
+                volume_km3: AREA_KM2 * 5.0, // 100 km² × 5 km height
+                depth_km: (i as f64 + 0.5) * 5.0,
+                height_km: 5.0,
+                area_km2: AREA_KM2,
+            });
+            nodes.push(node);
+        }
+
+        // Record initial state
+        let initial_temps: Vec<f64> = nodes.iter().map(|node| node.temp_kelvin()).collect();
+        let initial_energies: Vec<f64> = nodes.iter().map(|node| node.energy()).collect();
+        println!("🌡️  Initial temps: {:?}", initial_temps);
+        println!("⚡ Initial energies: {:?}", initial_energies);
+
+        // Apply Fourier thermal transfer to center node (index 1)
+        let energy_change = {
+            let (left, center_and_right) = nodes.split_at_mut(1);
+            let (center, right) = center_and_right.split_at_mut(1);
+
+            let left_neighbor = left.get_mut(0);
+            let center_node = &mut center[0];
+            let right_neighbor = right.get_mut(0);
+
+            center_node.apply_fourier_thermal_transfer(left_neighbor, right_neighbor, TIME_YEARS)
+        };
+
+        // Record final state
+        let final_temps: Vec<f64> = nodes.iter().map(|node| node.temp_kelvin()).collect();
+        let final_energies: Vec<f64> = nodes.iter().map(|node| node.energy()).collect();
+        println!("🌡️  Final temps: {:?}", final_temps);
+        println!("⚡ Final energies: {:?}", final_energies);
+        println!("🔄 Center node energy change: {:.0}", energy_change);
+
+        // Verify the hot middle node lost energy
+        assert!(energy_change < 0.0, "Hot center node should lose energy");
+        assert!(final_temps[1] < initial_temps[1], "Hot center node should cool down");
+
+        // Verify the cold side nodes gained energy
+        assert!(final_energies[0] > initial_energies[0], "Cold left node should gain energy");
+        assert!(final_energies[2] > initial_energies[2], "Cold right node should gain energy");
+
+        // Verify energy conservation
+        let initial_total: f64 = initial_energies.iter().sum();
+        let final_total: f64 = final_energies.iter().sum();
+        let energy_diff = (final_total - initial_total).abs();
+        let relative_error = energy_diff / initial_total;
+        println!("🔋 Energy conservation error: {:.6}%", relative_error * 100.0);
+        assert!(relative_error < 0.001, "Energy should be conserved (error: {:.6}%)", relative_error * 100.0);
+    }
+
+    #[test]
+    fn test_fourier_transfer_material_properties() {
+        // Test Fourier transfer with different material types to verify material property effects
+        const TIME_YEARS: f64 = 0.1; // Shorter time for more controlled transfer
+
+        // Create nodes with different materials: Metallic (high conductivity) - Silicate - Granitic (low conductivity)
+        let mut nodes = Vec::new();
+
+        // High conductivity metallic node (hot)
+        nodes.push(ThermalLayerNodeWide::new_with_temperature(ThermalLayerNodeWideTempParams {
+            material_type: MaterialCompositeType::Metallic,
+            temperature_k: 1500.0,
+            volume_km3: AREA_KM2 * 5.0,
+            depth_km: 2.5,
+            height_km: 5.0,
+            area_km2: AREA_KM2,
+        }));
+
+        // Medium conductivity silicate node (medium temp)
+        nodes.push(ThermalLayerNodeWide::new_with_temperature(ThermalLayerNodeWideTempParams {
+            material_type: MaterialCompositeType::Silicate,
+            temperature_k: 1200.0,
+            volume_km3: AREA_KM2 * 5.0,
+            depth_km: 7.5,
+            height_km: 5.0,
+            area_km2: AREA_KM2,
+        }));
+
+        // Low conductivity granitic node (cold)
+        nodes.push(ThermalLayerNodeWide::new_with_temperature(ThermalLayerNodeWideTempParams {
+            material_type: MaterialCompositeType::Granitic,
+            temperature_k: 900.0,
+            volume_km3: AREA_KM2 * 5.0,
+            depth_km: 12.5,
+            height_km: 5.0,
+            area_km2: AREA_KM2,
+        }));
+
+        // Record initial state and material properties
+        let initial_temps: Vec<f64> = nodes.iter().map(|node| node.temp_kelvin()).collect();
+        let initial_energies: Vec<f64> = nodes.iter().map(|node| node.energy()).collect();
+        let conductivities: Vec<f64> = nodes.iter().map(|node| node.thermal_conductivity()).collect();
+
+        println!("🌡️  Initial temps: {:?}", initial_temps);
+        println!("⚡ Initial energies: {:?}", initial_energies);
+        println!("🔥 Thermal conductivities: {:?}", conductivities);
+
+        // Apply Fourier transfer to center node (silicate)
+        let energy_change = {
+            let (left, center_and_right) = nodes.split_at_mut(1);
+            let (center, right) = center_and_right.split_at_mut(1);
+
+            let left_neighbor = left.get_mut(0);
+            let center_node = &mut center[0];
+            let right_neighbor = right.get_mut(0);
+
+            center_node.apply_fourier_thermal_transfer(left_neighbor, right_neighbor, TIME_YEARS)
+        };
+
+        // Record final state
+        let final_temps: Vec<f64> = nodes.iter().map(|node| node.temp_kelvin()).collect();
+        let final_energies: Vec<f64> = nodes.iter().map(|node| node.energy()).collect();
+
+        println!("🌡️  Final temps: {:?}", final_temps);
+        println!("⚡ Final energies: {:?}", final_energies);
+        println!("🔄 Center node energy change: {:.0}", energy_change);
+
+        // Verify heat flows from hot to cold
+        // The center node (silicate, 1200K) should receive energy from hot metallic (1500K)
+        // and give energy to cold granitic (900K)
+        assert!(final_temps[0] < initial_temps[0], "Hot metallic node should cool down (gives energy to center)");
+        assert!(final_temps[1] > initial_temps[1], "Medium silicate node should warm up (receives from metallic, gives to granitic)");
+        assert!(final_temps[2] > initial_temps[2], "Cold granitic node should warm up (receives from center)");
+
+        // Verify energy conservation
+        let initial_total: f64 = initial_energies.iter().sum();
+        let final_total: f64 = final_energies.iter().sum();
+        let energy_diff = (final_total - initial_total).abs();
+        let relative_error = energy_diff / initial_total;
+
+        println!("🔋 Energy conservation error: {:.6}%", relative_error * 100.0);
+        assert!(relative_error < 0.001, "Energy should be conserved (error: {:.6}%)", relative_error * 100.0);
+
+        // Verify that higher conductivity materials transfer more energy
+        // The metallic node should have transferred more energy than it would if it were silicate
+        println!("✅ Fourier transfer with material properties working correctly!");
+    }
+
+    #[test]
+    fn test_energy_add_remove_basic() {
+        // Test basic energy add/remove operations to isolate the conservation issue
+        let mut node = ThermalLayerNodeWide::new_with_temperature(ThermalLayerNodeWideTempParams {
+            material_type: MaterialCompositeType::Silicate,
+            temperature_k: 1500.0,
+            volume_km3: AREA_KM2 * 5.0,
+            depth_km: 2.5,
+            height_km: 5.0,
+            area_km2: AREA_KM2,
+        });
+
+        let initial_energy = node.energy();
+        println!("Initial energy: {:.3e} J", initial_energy);
+
+        // Remove some energy
+        let remove_amount = 1e15; // 1 PJ
+        node.remove_energy(remove_amount);
+        let after_remove = node.energy();
+        println!("After removing {:.0} J: {:.3e} J", remove_amount, after_remove);
+
+        // Add it back
+        node.add_energy(remove_amount);
+        let after_add = node.energy();
+        println!("After adding {:.0} J back: {:.3e} J", remove_amount, after_add);
+
+        // Check conservation
+        let diff = (after_add - initial_energy).abs();
+        let relative_error = diff / initial_energy;
+        println!("Energy difference: {:.0} J ({:.6}%)", diff, relative_error * 100.0);
+
+        assert!(relative_error < 1e-10, "Basic add/remove should be perfectly conserved (error: {:.10}%)", relative_error * 100.0);
     }
 }

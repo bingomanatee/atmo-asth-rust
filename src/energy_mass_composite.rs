@@ -107,6 +107,13 @@ pub trait EnergyMassComposite: std::any::Any {
     /// Remove energy from this energy mass
     fn remove_energy(&mut self, energy_joules: f64);
 
+    /// Send energy to another energy mass composite in a single atomic operation
+    /// This ensures perfect energy conservation by transferring exactly the amount removed
+    fn send_energy(&mut self, energy_joules: f64, recipient: &mut dyn EnergyMassComposite);
+
+    /// Get mutable reference as Any for downcasting
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
+
     /// Remove heat energy (temperature will decrease, enforces zero minimum)
     fn remove_joules(&mut self, heat_joules: f64);
 
@@ -950,6 +957,34 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
                 self.handle_transition_logic();
             }
         }
+    }
+
+    fn send_energy(&mut self, energy_joules: f64, recipient: &mut dyn EnergyMassComposite) {
+        // Atomic energy transfer: remove from sender and add to recipient
+        // This ensures perfect energy conservation by using direct manipulation only
+
+        if energy_joules <= 0.0 {
+            return; // No transfer needed
+        }
+
+        // Direct energy manipulation without any side effects or transition logic
+        // This is the most conservative approach for energy conservation
+        self.energy_joules -= energy_joules;
+
+        // Add energy to recipient using direct manipulation if possible
+        if let Some(standard_recipient) = recipient.as_any_mut().downcast_mut::<StandardEnergyMassComposite>() {
+            // Direct manipulation for StandardEnergyMassComposite
+            standard_recipient.energy_joules += energy_joules;
+        } else {
+            // Fallback to add_energy for other types
+            recipient.add_energy(energy_joules);
+        }
+
+        // NO transition logic or other side effects - pure energy transfer only
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 
 }

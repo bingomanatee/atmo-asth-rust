@@ -337,6 +337,17 @@ impl EnergyMassComposite for ThermalLayerNode {
         self.log_extent();
     }
 
+    /// Send energy to another energy mass composite in a single atomic operation
+    fn send_energy(&mut self, energy_joules: f64, recipient: &mut dyn EnergyMassComposite) {
+        self.energy_mass.send_energy(energy_joules, recipient);
+        self.update_phase_from_kelvin(); // Update phase after energy change
+        self.log_extent();
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     /// Remove heat energy (temperature will decrease, enforces zero minimum)
     fn remove_joules(&mut self, heat_joules: f64) {
         self.energy_mass.remove_joules(heat_joules);
