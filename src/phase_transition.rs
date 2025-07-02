@@ -277,6 +277,7 @@ mod tests {
             energy_joules: 0.0, // We'll set temperature directly
             volume_km3,
             height_km,
+            pressure_gpa: 0.0,
         });
         material_cold.set_kelvin(300.0); // Room temperature
         let energy_at_300k = material_cold.energy();
@@ -288,6 +289,7 @@ mod tests {
             energy_joules: 0.0,
             volume_km3,
             height_km,
+            pressure_gpa: 0.0,
         });
         material_min.set_kelvin(1100.0);
         let energy_at_min = material_min.energy();
@@ -299,6 +301,7 @@ mod tests {
             energy_joules: 0.0,
             volume_km3,
             height_km,
+            pressure_gpa: 0.0,
         });
         material_max.set_kelvin(1350.0);
         let energy_at_max = material_max.energy();
@@ -330,6 +333,7 @@ mod tests {
             energy_joules: 0.0,
             volume_km3,
             height_km,
+            pressure_gpa: 0.0,
         });
         test_material.set_kelvin(300.0);
 

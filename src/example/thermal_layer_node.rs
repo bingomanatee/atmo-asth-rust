@@ -1,6 +1,6 @@
 use super::experiment_state::ExperimentState;
 use crate::energy_mass_composite::{EnergyMassComposite, EnergyMassParams, StandardEnergyMassComposite};
-use crate::material_composite::{get_profile_fast, MaterialCompositeType, MaterialPhase, MaterialComposite, MaterialStateProfile};
+use crate::material_composite::{get_profile_fast, MaterialCompositeType, MaterialPhase, MaterialStateProfile};
 use crate::temp_utils::joules_volume_to_kelvin;
 
 /// Parameters for creating ThermalLayerNode
@@ -56,6 +56,7 @@ impl ThermalLayerNode {
                 energy_joules: params.energy_joules,
                 volume_km3: params.volume_km3,
                 height_km: params.height_km,
+                pressure_gpa: 0.0, // Default surface pressure
             }
         );
 
@@ -83,6 +84,7 @@ impl ThermalLayerNode {
                 energy_joules: 1.0, // Minimal energy, will be overridden
                 volume_km3: params.volume_km3,
                 height_km: params.height_km,
+                pressure_gpa: 0.0, // Default surface pressure
             }
         );
 
@@ -137,6 +139,7 @@ impl ThermalLayerNode {
                 energy_joules: current_energy,
                 volume_km3: current_volume,
                 height_km: self.height_km,
+                pressure_gpa: self.energy_mass.pressure_gpa(), // Preserve current pressure
             }
         );
         self.log_extent();
@@ -312,10 +315,8 @@ impl EnergyMassComposite for ThermalLayerNode {
         self.energy_mass.material_composite_profile()
     }
 
-    /// Get the material composite
-    fn material_composite(&self) -> MaterialComposite {
-        self.energy_mass.material_composite()
-    }
+    // material_composite() method removed - MaterialComposite struct no longer exists
+    // Use material_composite_type() and get_profile_fast() instead
 
     /// Scale the entire EnergyMass by a factor (useful for splitting/combining)
     fn scale(&mut self, factor: f64) {
@@ -417,5 +418,21 @@ impl EnergyMassComposite for ThermalLayerNode {
     /// Get the R0 thermal transmission coefficient for this material
     fn thermal_transmission_r0(&self) -> f64 {
         self.energy_mass.thermal_transmission_r0()
+    }
+
+    /// Get the current pressure in GPa
+    fn pressure_gpa(&self) -> f64 {
+        self.energy_mass.pressure_gpa()
+    }
+
+    /// Set the pressure in GPa and update phase accordingly
+    fn set_pressure_gpa(&mut self, pressure_gpa: f64) {
+        self.energy_mass.set_pressure_gpa(pressure_gpa);
+        self.log_extent();
+    }
+
+    /// Get the current material phase (pressure-aware)
+    fn phase(&self) -> MaterialPhase {
+        self.energy_mass.phase()
     }
 }

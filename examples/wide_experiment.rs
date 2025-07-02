@@ -13,7 +13,7 @@ use atmo_asth_rust::energy_mass_composite::{
     get_profile_fast,
 };
 use atmo_asth_rust::example::{ExperimentState, ExperimentSpecs, ThermalLayerNodeWide, ThermalLayerNodeWideParams, ThermalLayerNodeWideTempParams, FourierThermalTransfer};
-use atmo_asth_rust::material_composite::get_material_core;
+use atmo_asth_rust::material_composite::{get_melting_point_k, get_boiling_point_k};
 // Re-export MaterialPhase for easier access
 use atmo_asth_rust::temp_utils::energy_from_kelvin;
 use atmo_asth_rust::math_utils::lerp;
@@ -33,12 +33,12 @@ const AREA_KM2: f64 = 100.0;
 const WIDE_CONDUCTIVITY_FACTOR: f64 = 15.0;
 const WIDE_PRESSURE_BASELINE: f64 = 5.0;
 const WIDE_MAX_CHANGE_RATE: f64 = 0.06;
-const WIDE_FOUNDRY_TEMPERATURE_K: f64 = 4800.0;
+const WIDE_FOUNDRY_TEMPERATURE_K: f64 = 5500.0; // Realistic core temperature
 const WIDE_SURFACE_TEMPERATURE_K: f64 = 280.0;
 
 // Test expectation constants - calibrated to the wide experiment configuration
 const EXPECTED_TEMPERATURE_RANGE_K: f64 = WIDE_FOUNDRY_TEMPERATURE_K - WIDE_SURFACE_TEMPERATURE_K; // 4520.0K
-const EXPECTED_NUM_NODES: usize = 30;
+const EXPECTED_NUM_NODES: usize = 40;
 const TEMPERATURE_TOLERANCE_PERCENT: f64 = 5.0; // Wider tolerance for wide experiment
 
 /// Create locked configuration specs for the 100km² wide experiment
@@ -63,7 +63,7 @@ fn wide_experiment_specs() -> ExperimentSpecs {
 ///  with energy coming in from the highest/lowest cell in the array
 /// to the surface of the earth at cell 0 which radiates heat into space.
 /// the settings for the heat flow come in as ExperimentState
-struct OneHundredKm2Experiment {
+struct WideExperiment {
     nodes: Vec<ThermalLayerNodeWide>,
     config: ExperimentState,
     layer_height_km: f64,
@@ -82,10 +82,10 @@ struct OneHundredKm2Experiment {
     surface_end: usize,
 }
 
-impl OneHundredKm2Experiment {
+impl WideExperiment {
     fn new(steps: u64, total_years: u64) -> Self {
         let config = ExperimentState::new_with_specs(wide_experiment_specs());
-        let num_nodes = 30;
+        let num_nodes = EXPECTED_NUM_NODES;
         let total_depth_km = 750.0; // 750km total depth
         let layer_height_km = total_depth_km / num_nodes as f64; // 25km per layer
 
@@ -146,8 +146,8 @@ impl OneHundredKm2Experiment {
 
         println!("\n🌡️  Initial Temperature Profile:");
         println!(
-            "   Foundry layers (bottom 75km): {}K each (energy divided by 3)",
-            (self.config.foundry_temperature_k / 3.0) as i32
+            "   Foundry layer (bottom 25km): {}K (realistic core temperature)",
+            self.config.foundry_temperature_k as i32
         );
     }
 
@@ -317,19 +317,110 @@ impl OneHundredKm2Experiment {
         self.update_node_phases();
     }
 
-    fn apply_boundary_conditions(&mut self) {
-        // Foundry heat source divided equally across bottom three layers
-        let num_layers = self.nodes.len();
-        let foundry_base_temp = self.config.foundry_temperature_k;
-        let distributed_temp = foundry_base_temp / 3.0;  // Divide foundry energy by 3
+    /// Calculate pressure at a given layer index based on cumulative mass above
+    /// Returns pressure in GPa (Gigapascals)
+    fn calculate_pressure_at_layer(&self, layer_index: usize) -> f64 {
+        if layer_index == 0 {
+            return 0.0; // Surface pressure is essentially zero
+        }
 
-        // Bottom three layers with equal distributed temperatures
-        self.nodes[num_layers - 1].set_kelvin(distributed_temp);    // Bottom layer
-        self.nodes[num_layers - 2].set_kelvin(distributed_temp);    // Middle layer
-        self.nodes[num_layers - 3].set_kelvin(distributed_temp);    // Top layer
+        // Sum up the mass of all layers above this one
+        let mut cumulative_mass_kg = 0.0;
+        for i in 0..layer_index {
+            cumulative_mass_kg += self.nodes[i].mass_kg();
+        }
+
+        // Calculate pressure using P = ρgh, but with cumulative mass
+        // P = (cumulative_mass / area) * g
+        let area_m2 = self.nodes[layer_index].area_km2 * 1_000_000.0; // Convert km² to m²
+        let g = 9.81; // m/s² (Earth's gravity)
+
+        let pressure_pa = (cumulative_mass_kg * g) / area_m2; // Pascals
+        let pressure_gpa = pressure_pa / 1e9; // Convert to GPa
+
+        pressure_gpa
+    }
+
+    /// Calculate pressure-modified thermal properties for a layer
+    /// Returns (effective_height_km, thermal_conductivity_multiplier, density_multiplier)
+    fn calculate_pressure_effects(&self, layer_index: usize) -> (f64, f64, f64) {
+        let pressure_gpa = self.calculate_pressure_at_layer(layer_index);
+        let base_height = self.nodes[layer_index].height_km;
+        let material_type = self.nodes[layer_index].material_composite_type();
+
+        // 1. Layer compression: height reduces with pressure
+        // Bulk modulus approximation: ΔV/V = -P/K, where K is bulk modulus
+        let bulk_modulus_gpa = match material_type {
+            MaterialCompositeType::Silicate => 100.0,  // ~100 GPa for silicates
+            MaterialCompositeType::Basaltic => 80.0,   // ~80 GPa for basalt
+            MaterialCompositeType::Granitic => 60.0,   // ~60 GPa for granite
+            MaterialCompositeType::Metallic => 180.0,  // ~180 GPa for iron
+            _ => 90.0,  // Default
+        };
+
+        let compression_ratio = 1.0 - (pressure_gpa / bulk_modulus_gpa).min(0.3); // Max 30% compression
+        let effective_height = base_height * compression_ratio;
+
+        // 2. Thermal conductivity increases with pressure (atoms closer together)
+        let conductivity_multiplier = match material_type {
+            MaterialCompositeType::Silicate => 1.0 + pressure_gpa * 0.02,  // 2% per GPa
+            MaterialCompositeType::Basaltic => 1.0 + pressure_gpa * 0.015, // 1.5% per GPa
+            MaterialCompositeType::Granitic => 1.0 + pressure_gpa * 0.01,  // 1% per GPa
+            MaterialCompositeType::Metallic => 1.0 + pressure_gpa * 0.05,  // 5% per GPa (metals more sensitive)
+            _ => 1.0 + pressure_gpa * 0.02,  // Default
+        }.min(3.0); // Cap at 3x increase
+
+        // 3. Density increases with compression
+        let density_multiplier = 1.0 / compression_ratio; // Inverse of volume change
+
+        (effective_height, conductivity_multiplier, density_multiplier)
+    }
+
+    /// Update pressure for all nodes based on cumulative mass above
+    fn update_all_pressures(&mut self) {
+        for i in 0..self.nodes.len() {
+            let pressure_gpa = self.calculate_pressure_at_layer(i);
+            self.nodes[i].set_pressure_gpa(pressure_gpa);
+        }
+    }
+
+    /// Update all node phases based on temperature and calculated pressure
+    fn update_all_phases_with_pressure(&mut self) {
+        for i in 0..self.nodes.len() {
+            let pressure_gpa = self.calculate_pressure_at_layer(i);
+            let temp_k = self.nodes[i].temp_kelvin();
+            let material_type = self.nodes[i].material_composite_type();
+
+            // Use pressure-aware phase resolution
+            let new_phase = atmo_asth_rust::material_composite::resolve_phase_from_temperature_and_pressure(
+                &material_type,
+                temp_k,
+                pressure_gpa
+            );
+
+            // Update the node's phase if it changed
+            if new_phase != self.nodes[i].phase() {
+                self.nodes[i].set_material_phase(new_phase);
+            }
+        }
+    }
+
+    fn apply_boundary_conditions(&mut self) {
+        // Foundry heat source at realistic core temperature
+        let num_layers = self.nodes.len();
+        let foundry_temp = self.config.foundry_temperature_k;
+
+        // Bottom layer gets full foundry temperature (core boundary)
+        self.nodes[num_layers - 1].set_kelvin(foundry_temp);
 
         // Space cooling at the top (index 0)
         self.nodes[0].set_kelvin(self.config.surface_temperature_k);
+
+        // Update pressure for all nodes based on cumulative mass
+        self.update_all_pressures();
+
+        // Update phases based on pressure after temperature changes
+        self.update_all_phases_with_pressure();
     }
 
     /// Energy-conservative exchange between two nodes
@@ -366,18 +457,31 @@ impl OneHundredKm2Experiment {
         to_node: &ThermalLayerNodeWide,
     ) -> f64 {
         let temp_diff = (to_node.temp_kelvin() - from_node.temp_kelvin()).abs();
-        // Calculate distance between nodes
-        let distance_km = (from_node.depth_km() - to_node.depth_km()).abs();
-        // Get material-based conductivities (4x scaled)
-        let from_conductivity = self.get_material_conductivity(from_node);
-        let to_conductivity = self.get_material_conductivity(to_node);
+
+        // Find layer indices for pressure calculations
+        let from_idx = self.nodes.iter().position(|n| std::ptr::eq(n, from_node)).unwrap_or(0);
+        let to_idx = self.nodes.iter().position(|n| std::ptr::eq(n, to_node)).unwrap_or(0);
+
+        // Calculate pressure effects for both layers
+        let (from_height, from_conductivity_mult, _from_density_mult) = self.calculate_pressure_effects(from_idx);
+        let (to_height, to_conductivity_mult, _to_density_mult) = self.calculate_pressure_effects(to_idx);
+
+        // Calculate effective distance using pressure-compressed heights
+        let effective_distance_km = (from_height + to_height) * 0.5;
+
+        // Get base material conductivities and apply pressure multipliers
+        let base_from_conductivity = self.get_material_conductivity(from_node);
+        let base_to_conductivity = self.get_material_conductivity(to_node);
+        let from_conductivity = base_from_conductivity * from_conductivity_mult;
+        let to_conductivity = base_to_conductivity * to_conductivity_mult;
 
         // Distance weights: 1.0, 0.25, 0.125 for neighbors 1, 2, 3 away
-        let distance_weight = if distance_km <= 5.1 {
+        // Use effective distance for more accurate pressure-based calculations
+        let distance_weight = if effective_distance_km <= 5.1 {
             1.0 // Adjacent neighbor
-        } else if distance_km <= 10.1 {
+        } else if effective_distance_km <= 10.1 {
             0.25 // Second neighbor
-        } else if distance_km <= 15.1 {
+        } else if effective_distance_km <= 15.1 {
             0.125 // Third neighbor
         } else {
             0.0 // Too far
@@ -389,25 +493,25 @@ impl OneHundredKm2Experiment {
         let conductivity_factor = sender_factor * recipient_factor;
 
         // Base diffusion rate: 4x enhanced for faster heat transport
-        let base_coefficient = self.config.max_change_rate / self.years_per_step(); // @TODO: not sure about the scaling here investigate
+        let base_coefficient = self.config.max_change_rate / self.years_per_step();
 
-        // PRESSURE ACCELERATION: Help foundry heat reach farther (4x enhanced)
-        let pressure_factor =
-            ((temp_diff / 100.0).powf(1.5)).max(0.33) * self.config.pressure_baseline;
+        // PRESSURE ACCELERATION: Enhanced by actual pressure calculations
+        let avg_pressure_gpa = (self.calculate_pressure_at_layer(from_idx) + self.calculate_pressure_at_layer(to_idx)) * 0.5;
+        let pressure_factor = ((temp_diff / 100.0).powf(1.5)).max(0.33) *
+                             self.config.pressure_baseline *
+                             (1.0 + avg_pressure_gpa * 0.1); // 10% boost per GPa
 
         // DIFFUSION PHYSICS: Energy transfer based on temperature difference
-        let avg_thermal_capacity = (from_node.thermal_capacity()
-            + to_node.thermal_capacity())
-            / 2.0;
+        // Shorter effective distance means faster heat transfer
+        let distance_factor = 1.0 / effective_distance_km.max(0.1); // Prevent division by zero
+        let avg_thermal_capacity = (from_node.thermal_capacity() + to_node.thermal_capacity()) / 2.0;
         let energy_difference = temp_diff * avg_thermal_capacity;
-        let flow_coefficient =
-            base_coefficient * distance_weight * conductivity_factor * pressure_factor;
+        let flow_coefficient = base_coefficient * distance_weight * conductivity_factor *
+                              pressure_factor * distance_factor;
         let energy_transfer = energy_difference * flow_coefficient * self.years_per_step();
 
         // Limit transfer to prevent instability (max 25% of smaller thermal capacity per step)
-        let min_capacity = from_node
-            .thermal_capacity()
-            .min(to_node.thermal_capacity());
+        let min_capacity = from_node.thermal_capacity().min(to_node.thermal_capacity());
         let max_transfer = min_capacity * 0.25;
         energy_transfer.min(max_transfer)
     }
@@ -515,8 +619,8 @@ impl OneHundredKm2Experiment {
         println!("\n🎯 Experiment Complete!");
         println!("==========================================");
 
-        // Skip first 3 and last 2 nodes (influenced by boundary conditions)
-        let analysis_nodes = &self.nodes[3..self.nodes.len()-2];
+        // Skip first and last 3 nodes (boundary conditions)
+        let analysis_nodes = &self.nodes[1..self.nodes.len()-3];
 
         let min_temp = analysis_nodes
             .iter()
@@ -532,13 +636,13 @@ impl OneHundredKm2Experiment {
             min_temp, max_temp
         );
         println!(
-            "   Temperature span: {:.1}K (analyzing layers 4-{} of {})",
+            "   Temperature span: {:.1}K (analyzing layers 2-{} of {})",
             max_temp - min_temp,
-            self.nodes.len() - 2,
+            self.nodes.len() - 3,
             self.nodes.len()
         );
         println!(
-            "   Skipped: first 3 layers (space influence) and last 2 layers (foundry influence)"
+            "   Skipped: layer 1 (space cooling reset) and last 3 layers (foundry heat source reset)"
         );
 
         self.print_rows();
@@ -547,22 +651,22 @@ impl OneHundredKm2Experiment {
         println!("   Deep geological time simulation complete!");
 
         let first_node = self.nodes.first().unwrap();
-        let composite = first_node.material_composite();
-        println!("  melting temperature: {}", composite.melting_point_min_k);
+        let material_type = first_node.material_composite_type();
+        let melting_temp = get_melting_point_k(&material_type);
+        println!("  melting temperature: {}", melting_temp);
     }
 
     fn print_rows(&self) {
         for (i, node) in self.nodes.iter().enumerate() {
-            let boundary_marker = if i == 0 {
-                " (top layer under space)"
-            } else if i == self.nodes.len() - 1 {
-                " (foundry cell 1/3)"
-            } else if i == self.nodes.len() - 2 {
-                " (foundry cell 2/3)"
-            } else if i == self.nodes.len() - 3 {
-                " (foundry cell 3/3)"
-            } else if i < 3 {
-                " (space boundary)"
+            // Skip boundary layers that are artificially reset
+            if i == 0 || i >= self.nodes.len() - 3 {
+                continue;
+            }
+
+            let boundary_marker = if i == 1 {
+                " (influenced by space cooling)"
+            } else if i == 2 {
+                " (influenced by space cooling)"
             } else {
                 ""
             };
@@ -576,6 +680,19 @@ impl OneHundredKm2Experiment {
                 boundary_marker
             );
         }
+
+        // Show skipped boundary layers separately
+        println!("\n🚫 Skipped boundary layers (artificially reset each step):");
+        println!("   Layer 1:  {}K  (space cooling - reset to {}K)",
+                 self.nodes[0].temp_kelvin() as i32,
+                 self.config.surface_temperature_k as i32);
+
+        let num_layers = self.nodes.len();
+        let foundry_temp = self.config.foundry_temperature_k;
+        println!("   Layer {}:  {}K  (foundry heat source - reset to {}K)",
+                 num_layers,
+                 self.nodes[num_layers - 1].temp_kelvin() as i32,
+                 foundry_temp as i32);
     }
 }
 
@@ -587,7 +704,7 @@ fn main() {
     let years_per_step = 10_000;
     let steps = total_years / years_per_step;
     // Create experiment with 4x scaled parameters
-    let mut experiment = OneHundredKm2Experiment::new(steps, total_years);
+    let mut experiment = WideExperiment::new(steps, total_years);
     experiment.print_initial_state();
 
     // Run force-directed thermal equilibration
@@ -603,7 +720,7 @@ mod tests {
     #[test]
     fn test_one_km_2_experiment_initial_temperature_gradient() {
         // Create experiment instance
-        let experiment = OneHundredKm2Experiment::new(100, 1_000_000);
+        let experiment = WideExperiment::new(100, 1_000_000);
 
         // Use locked constants for expected gradient (prevents config drift)
         let surface_temp = WIDE_SURFACE_TEMPERATURE_K;
@@ -662,7 +779,7 @@ mod tests {
     #[test]
     fn test_actual_thermal_diffusion_method() {
         // Create a minimal experiment with just 5 nodes to test the ACTUAL method
-        let mut experiment = OneHundredKm2Experiment::new(1, 1);
+        let mut experiment = WideExperiment::new(1, 1);
 
         // Manually create just 5 nodes for testing
         experiment.nodes.clear();
@@ -721,7 +838,7 @@ mod tests {
     #[test]
     fn test_energy_redistribution_array() {
         // Create a minimal experiment with just 5 nodes to debug energy redistribution
-        let mut experiment = OneHundredKm2Experiment::new(1, 1);
+        let mut experiment = WideExperiment::new(1, 1);
 
         // Manually create just 5 nodes for testing
         experiment.nodes.clear();
@@ -834,7 +951,7 @@ mod tests {
     #[test]
     fn test_debug_pairwise_exchanges() {
         // Create a minimal experiment with just 5 nodes to debug the pairwise exchanges
-        let mut experiment = OneHundredKm2Experiment::new(1, 1);
+        let mut experiment = WideExperiment::new(1, 1);
 
         // Manually create just 5 nodes for testing
         experiment.nodes.clear();
@@ -887,7 +1004,7 @@ mod tests {
     #[test]
     fn test_simple_three_node_diffusion() {
         // Create a minimal experiment with just 3 nodes to understand the behavior
-        let mut experiment = OneHundredKm2Experiment::new(1, 1);
+        let mut experiment = WideExperiment::new(1, 1);
 
         // Manually create just 3 nodes for testing
         experiment.nodes.clear();
@@ -934,7 +1051,7 @@ mod tests {
     #[test]
     fn test_single_step_thermal_diffusion() {
         // Create experiment with minimal setup for single step testing
-        let mut experiment = OneHundredKm2Experiment::new(1, 1);
+        let mut experiment = WideExperiment::new(1, 1);
 
         // Set all nodes to uniform temperature (1000K)
         let uniform_temp = 1000.0;
@@ -1016,7 +1133,7 @@ mod tests {
 
     #[test]
     fn test_one_km_2_experiment_node_properties() {
-        let experiment = OneHundredKm2Experiment::new(100, 1_000_000);
+        let experiment = WideExperiment::new(100, 1_000_000);
 
         // Test that all nodes have consistent properties
         for (i, node) in experiment.nodes.iter().enumerate() {

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::constants::{SECONDS_PER_YEAR, SIGMA_KM2_YEAR};
 use crate::energy_mass_composite::{get_profile_fast, EnergyMassComposite, MaterialCompositeType, MaterialPhase, MaterialStateProfile};
-use crate::material_composite::{MaterialComposite, get_material_core};
+// MaterialComposite and get_material_core removed - no longer needed
 
 /// Atmospheric EnergyMass implementation using composite material system
 /// Uses dynamic property lookup based on current phase state
@@ -112,9 +112,7 @@ impl EnergyMassComposite for AtmosphericEnergyMass {
         get_profile_fast(&self.material_type, &self.phase)
     }
 
-    fn material_composite(&self) -> MaterialComposite {
-        get_material_core(&self.material_type).clone()
-    }
+    // material_composite() method removed - MaterialComposite struct no longer exists
 
     fn scale(&mut self, factor: f64) {
         self.energy_joules *= factor;
@@ -295,6 +293,22 @@ impl EnergyMassComposite for AtmosphericEnergyMass {
 
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
+    }
+
+    /// Get the current pressure in GPa (atmospheric pressure is essentially zero)
+    fn pressure_gpa(&self) -> f64 {
+        0.0 // Atmospheric pressure is negligible compared to geological pressures
+    }
+
+    /// Set the pressure in GPa (no-op for atmosphere)
+    fn set_pressure_gpa(&mut self, _pressure_gpa: f64) {
+        // Atmospheric pressure doesn't affect phase transitions significantly
+        // This is a no-op for atmospheric energy mass
+    }
+
+    /// Get the current material phase (always gas for atmosphere)
+    fn phase(&self) -> MaterialPhase {
+        MaterialPhase::Gas // Atmosphere is always gaseous
     }
 }
 

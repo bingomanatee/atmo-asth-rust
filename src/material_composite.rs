@@ -1,6 +1,5 @@
 use once_cell::sync::Lazy;
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json;
 
 /// JSON structure for loading material data
@@ -70,26 +69,7 @@ impl MaterialCompositeType {
     }
 }
 
-/// MaterialComposite is the state of a material in
-/// three phases - solid, liquid, and gas.
-/// It keeps this information in profiles.
-/// There are a few trans-state properties like melting point that are kept in the root Composite container.
-///
-#[derive(Clone, Debug)]
-pub struct MaterialComposite {
-    pub kind: MaterialCompositeType,
-    // Melting and lithosphere formation stats (root)
-    pub melting_point_min_k: f64,
-    pub melting_point_max_k: f64,
-    pub melting_point_avg_k: f64,
-    pub max_lith_formation_temp_kv: f64,
-    pub peak_lith_growth_temp_kv: f64,
-    pub max_lith_growth_km_per_year: f64,
-    pub max_lith_height_km: f64,
-
-    /// Material profiles indexed by phase state
-    pub profiles: HashMap<MaterialPhase, MaterialStateProfile>,
-}
+// MaterialComposite struct removed - all functionality now uses direct profile lookups
 
 /// this is the profile of a material in a specific phase - liquid, gas, solid
 #[derive(Clone, Copy, Debug)]
@@ -107,183 +87,12 @@ pub struct MaterialStateProfile {
     pub latent_heat_vapor: f64,   // J/kg for liquid->gas transition
 }
 
-/// Load materials from JSON file
-fn load_materials_from_json() -> HashMap<MaterialCompositeType, MaterialComposite> {
+/// Load material profiles directly from JSON into the lookup table
+fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::COUNT * MaterialPhase::COUNT] {
     let json_str = include_str!("materials.json");
     let materials_json: MaterialsJson = serde_json::from_str(json_str)
         .expect("Failed to parse materials.json");
 
-    let mut materials = HashMap::new();
-
-    // Helper function to convert JSON phase data to our MaterialStateProfile
-    let convert_phase = |props: &MaterialPhaseProperties| -> MaterialStateProfile {
-        MaterialStateProfile {
-            density_kg_m3: props.density_kg_m3,
-            specific_heat_capacity_j_per_kg_k: props.specific_heat_capacity_j_per_kg_k,
-            thermal_conductivity_w_m_k: props.thermal_conductivity_w_m_k,
-            thermal_transmission_r0_min: props.thermal_transmission_r0_min,
-            thermal_transmission_r0_max: props.thermal_transmission_r0_max,
-            melt_temp: props.melt_temp,
-            latent_heat_fusion: props.latent_heat_fusion,
-            boil_temp: props.boil_temp,
-            latent_heat_vapor: props.latent_heat_vapor,
-        }
-    };
-
-    // Convert granite
-    let mut granite_profiles = HashMap::new();
-    granite_profiles.insert(MaterialPhase::Solid, convert_phase(&materials_json.granite.solid));
-    granite_profiles.insert(MaterialPhase::Liquid, convert_phase(&materials_json.granite.liquid));
-    granite_profiles.insert(MaterialPhase::Gas, convert_phase(&materials_json.granite.gas));
-
-    materials.insert(MaterialCompositeType::Granitic, MaterialComposite {
-        kind: MaterialCompositeType::Granitic,
-        melting_point_min_k: materials_json.granite.solid.melt_temp,  // Solid->Liquid transition
-        melting_point_max_k: materials_json.granite.solid.boil_temp,  // Liquid->Gas transition
-        melting_point_avg_k: (materials_json.granite.solid.melt_temp + materials_json.granite.solid.boil_temp) / 2.0,
-        max_lith_formation_temp_kv: 0.0,
-        peak_lith_growth_temp_kv: 0.0,
-        max_lith_growth_km_per_year: 0.0,
-        max_lith_height_km: 0.0,
-        profiles: granite_profiles,
-    });
-
-    // Convert water (Icy)
-    let mut water_profiles = HashMap::new();
-    water_profiles.insert(MaterialPhase::Solid, convert_phase(&materials_json.water.solid));
-    water_profiles.insert(MaterialPhase::Liquid, convert_phase(&materials_json.water.liquid));
-    water_profiles.insert(MaterialPhase::Gas, convert_phase(&materials_json.water.gas));
-
-    materials.insert(MaterialCompositeType::Icy, MaterialComposite {
-        kind: MaterialCompositeType::Icy,
-        melting_point_min_k: materials_json.water.solid.melt_temp,  // Ice->Water transition (273.15K)
-        melting_point_max_k: materials_json.water.solid.boil_temp,  // Water->Steam transition (373.15K)
-        melting_point_avg_k: (materials_json.water.solid.melt_temp + materials_json.water.solid.boil_temp) / 2.0,
-        max_lith_formation_temp_kv: 0.0,
-        peak_lith_growth_temp_kv: 0.0,
-        max_lith_growth_km_per_year: 0.0,
-        max_lith_height_km: 0.0,
-        profiles: water_profiles,
-    });
-
-    // Convert basalt (Basaltic)
-    let mut basalt_profiles = HashMap::new();
-    basalt_profiles.insert(MaterialPhase::Solid, convert_phase(&materials_json.basalt.solid));
-    basalt_profiles.insert(MaterialPhase::Liquid, convert_phase(&materials_json.basalt.liquid));
-    basalt_profiles.insert(MaterialPhase::Gas, convert_phase(&materials_json.basalt.gas));
-
-    materials.insert(MaterialCompositeType::Basaltic, MaterialComposite {
-        kind: MaterialCompositeType::Basaltic,
-        melting_point_min_k: materials_json.basalt.solid.melt_temp,  // Solid->Liquid transition (1473K)
-        melting_point_max_k: materials_json.basalt.solid.boil_temp,  // Liquid->Gas transition (2900K)
-        melting_point_avg_k: (materials_json.basalt.solid.melt_temp + materials_json.basalt.solid.boil_temp) / 2.0,
-        max_lith_formation_temp_kv: 0.0,
-        peak_lith_growth_temp_kv: 0.0,
-        max_lith_growth_km_per_year: 0.0,
-        max_lith_height_km: 0.0,
-        profiles: basalt_profiles,
-    });
-
-    // Convert steel (Metallic)
-    let mut steel_profiles = HashMap::new();
-    steel_profiles.insert(MaterialPhase::Solid, convert_phase(&materials_json.steel.solid));
-    steel_profiles.insert(MaterialPhase::Liquid, convert_phase(&materials_json.steel.liquid));
-    steel_profiles.insert(MaterialPhase::Gas, convert_phase(&materials_json.steel.gas));
-
-    materials.insert(MaterialCompositeType::Metallic, MaterialComposite {
-        kind: MaterialCompositeType::Metallic,
-        melting_point_min_k: materials_json.steel.solid.melt_temp,  // Solid->Liquid transition (1808K)
-        melting_point_max_k: materials_json.steel.solid.boil_temp,  // Liquid->Gas transition (3133K)
-        melting_point_avg_k: (materials_json.steel.solid.melt_temp + materials_json.steel.solid.boil_temp) / 2.0,
-        max_lith_formation_temp_kv: 0.0,
-        peak_lith_growth_temp_kv: 0.0,
-        max_lith_growth_km_per_year: 0.0,
-        max_lith_height_km: 0.0,
-        profiles: steel_profiles,
-    });
-
-    // Convert silicate (Silicate)
-    let mut silicate_profiles = HashMap::new();
-    silicate_profiles.insert(MaterialPhase::Solid, convert_phase(&materials_json.silicate.solid));
-    silicate_profiles.insert(MaterialPhase::Liquid, convert_phase(&materials_json.silicate.liquid));
-    silicate_profiles.insert(MaterialPhase::Gas, convert_phase(&materials_json.silicate.gas));
-
-    materials.insert(MaterialCompositeType::Silicate, MaterialComposite {
-        kind: MaterialCompositeType::Silicate,
-        melting_point_min_k: materials_json.silicate.solid.melt_temp,  // Solid->Liquid transition (1600K)
-        melting_point_max_k: materials_json.silicate.solid.boil_temp,  // Liquid->Gas transition (3200K)
-        melting_point_avg_k: (materials_json.silicate.solid.melt_temp + materials_json.silicate.solid.boil_temp) / 2.0,
-        max_lith_formation_temp_kv: 0.0,
-        peak_lith_growth_temp_kv: 0.0,
-        max_lith_growth_km_per_year: 0.0,
-        max_lith_height_km: 0.0,
-        profiles: silicate_profiles,
-    });
-
-    // Add remaining materials that aren't in JSON (Air) with default values
-
-    // Air profiles (atmospheric gases)
-    let mut air_profiles = HashMap::new();
-    air_profiles.insert(MaterialPhase::Solid, MaterialStateProfile {
-        density_kg_m3: 1.5,
-        specific_heat_capacity_j_per_kg_k: 1000.0,
-        thermal_conductivity_w_m_k: 0.02,
-        thermal_transmission_r0_min: 0.001,
-        thermal_transmission_r0_max: 0.003,
-        melt_temp: 54.36,
-        latent_heat_fusion: 25000.0,
-        boil_temp: 90.20,
-        latent_heat_vapor: 200000.0,
-    });
-    air_profiles.insert(MaterialPhase::Liquid, MaterialStateProfile {
-        density_kg_m3: 0.9,
-        specific_heat_capacity_j_per_kg_k: 1200.0,
-        thermal_conductivity_w_m_k: 0.15,
-        thermal_transmission_r0_min: 0.0008,
-        thermal_transmission_r0_max: 0.002,
-        melt_temp: 54.36,
-        latent_heat_fusion: 25000.0,
-        boil_temp: 90.20,
-        latent_heat_vapor: 200000.0,
-    });
-    air_profiles.insert(MaterialPhase::Gas, MaterialStateProfile {
-        density_kg_m3: 1.225,
-        specific_heat_capacity_j_per_kg_k: 1005.0,
-        thermal_conductivity_w_m_k: 0.026,
-        thermal_transmission_r0_min: 0.0005,
-        thermal_transmission_r0_max: 0.0015,
-        melt_temp: 54.36,
-        latent_heat_fusion: 25000.0,
-        boil_temp: 90.20,
-        latent_heat_vapor: 200000.0,
-    });
-
-    materials.insert(MaterialCompositeType::Air, MaterialComposite {
-        kind: MaterialCompositeType::Air,
-        melting_point_min_k: 54.36,
-        melting_point_max_k: 90.20,
-        melting_point_avg_k: 72.28,
-        max_lith_formation_temp_kv: 0.0,
-        peak_lith_growth_temp_kv: 0.0,
-        max_lith_growth_km_per_year: 0.0,
-        max_lith_height_km: 0.0,
-        profiles: air_profiles,
-    });
-
-    materials
-}
-
-/// Material layers for each base MaterialType
-pub static MATERIAL_COMPOSITES: Lazy<HashMap<MaterialCompositeType, MaterialComposite>> = Lazy::new(|| {
-    load_materials_from_json()
-});
-
-/// ------------------------- fast lookup index for profile ---------------------
-/// 
-/// Flat array for fast O(1) profile lookups
-/// Layout: [material_type_index * PHASE_COUNT + phase_index]
-/// Total size: MaterialCompositeType::COUNT * MaterialPhase::COUNT entries
-static PROFILE_LOOKUP_TABLE: Lazy<[MaterialStateProfile; MaterialCompositeType::COUNT * MaterialPhase::COUNT]> = Lazy::new(|| {
     let mut table = [MaterialStateProfile {
         density_kg_m3: 0.0,
         specific_heat_capacity_j_per_kg_k: 0.0,
@@ -296,17 +105,112 @@ static PROFILE_LOOKUP_TABLE: Lazy<[MaterialStateProfile; MaterialCompositeType::
         latent_heat_vapor: 0.0,
     }; MaterialCompositeType::COUNT * MaterialPhase::COUNT];
 
-    // Populate the flat array from the HashMap data
-    for (material_type, layers) in MATERIAL_COMPOSITES.iter() {
-        for (phase, profile) in &layers.profiles {
-            let pi = phase.clone().as_index();
-            let mi =  material_type.clone().as_index();
-            let index = mi * MaterialPhase::COUNT + pi;
-            table[index] = *profile;
-        }
-    }
+    // Helper function to populate profiles from JSON data directly into table
+    let populate_material = |table: &mut [MaterialStateProfile], material_type: MaterialCompositeType, data: &MaterialPhaseData| {
+        let base_index = material_type.as_index() * MaterialPhase::COUNT;
+
+        // Solid phase
+        table[base_index + MaterialPhase::Solid.as_index()] = MaterialStateProfile {
+            density_kg_m3: data.solid.density_kg_m3,
+            specific_heat_capacity_j_per_kg_k: data.solid.specific_heat_capacity_j_per_kg_k,
+            thermal_conductivity_w_m_k: data.solid.thermal_conductivity_w_m_k,
+            thermal_transmission_r0_min: data.solid.thermal_transmission_r0_min,
+            thermal_transmission_r0_max: data.solid.thermal_transmission_r0_max,
+            melt_temp: data.solid.melt_temp,
+            latent_heat_fusion: data.solid.latent_heat_fusion,
+            boil_temp: data.solid.boil_temp,
+            latent_heat_vapor: data.solid.latent_heat_vapor,
+        };
+
+        // Liquid phase
+        table[base_index + MaterialPhase::Liquid.as_index()] = MaterialStateProfile {
+            density_kg_m3: data.liquid.density_kg_m3,
+            specific_heat_capacity_j_per_kg_k: data.liquid.specific_heat_capacity_j_per_kg_k,
+            thermal_conductivity_w_m_k: data.liquid.thermal_conductivity_w_m_k,
+            thermal_transmission_r0_min: data.liquid.thermal_transmission_r0_min,
+            thermal_transmission_r0_max: data.liquid.thermal_transmission_r0_max,
+            melt_temp: data.liquid.melt_temp,
+            latent_heat_fusion: data.liquid.latent_heat_fusion,
+            boil_temp: data.liquid.boil_temp,
+            latent_heat_vapor: data.liquid.latent_heat_vapor,
+        };
+
+        // Gas phase
+        table[base_index + MaterialPhase::Gas.as_index()] = MaterialStateProfile {
+            density_kg_m3: data.gas.density_kg_m3,
+            specific_heat_capacity_j_per_kg_k: data.gas.specific_heat_capacity_j_per_kg_k,
+            thermal_conductivity_w_m_k: data.gas.thermal_conductivity_w_m_k,
+            thermal_transmission_r0_min: data.gas.thermal_transmission_r0_min,
+            thermal_transmission_r0_max: data.gas.thermal_transmission_r0_max,
+            melt_temp: data.gas.melt_temp,
+            latent_heat_fusion: data.gas.latent_heat_fusion,
+            boil_temp: data.gas.boil_temp,
+            latent_heat_vapor: data.gas.latent_heat_vapor,
+        };
+    };
+
+    // Populate all materials from JSON
+    populate_material(&mut table, MaterialCompositeType::Silicate, &materials_json.silicate);
+    populate_material(&mut table, MaterialCompositeType::Basaltic, &materials_json.basalt);
+    populate_material(&mut table, MaterialCompositeType::Granitic, &materials_json.granite);
+    populate_material(&mut table, MaterialCompositeType::Metallic, &materials_json.steel);
+    populate_material(&mut table, MaterialCompositeType::Icy, &materials_json.water);
+
+    // Manually populate Air profiles (not in JSON)
+    let air_base_index = MaterialCompositeType::Air.as_index() * MaterialPhase::COUNT;
+
+    // Air solid phase (frozen nitrogen at very low temps)
+    table[air_base_index + MaterialPhase::Solid.as_index()] = MaterialStateProfile {
+        density_kg_m3: 1026.5,  // Solid nitrogen density
+        specific_heat_capacity_j_per_kg_k: 1040.0,  // Solid nitrogen specific heat
+        thermal_conductivity_w_m_k: 0.234,  // Solid nitrogen thermal conductivity
+        thermal_transmission_r0_min: 0.1,
+        thermal_transmission_r0_max: 0.3,
+        melt_temp: 63.15,  // Nitrogen melting point
+        latent_heat_fusion: 25500.0,  // Nitrogen latent heat of fusion
+        boil_temp: 77.36,  // Nitrogen boiling point
+        latent_heat_vapor: 199000.0,  // Nitrogen latent heat of vaporization
+    };
+
+    // Air liquid phase (liquid nitrogen)
+    table[air_base_index + MaterialPhase::Liquid.as_index()] = MaterialStateProfile {
+        density_kg_m3: 808.5,  // Liquid nitrogen density
+        specific_heat_capacity_j_per_kg_k: 2042.0,  // Liquid nitrogen specific heat
+        thermal_conductivity_w_m_k: 0.1404,  // Liquid nitrogen thermal conductivity
+        thermal_transmission_r0_min: 0.05,
+        thermal_transmission_r0_max: 0.15,
+        melt_temp: 63.15,  // Same transition temperatures
+        latent_heat_fusion: 25500.0,
+        boil_temp: 77.36,
+        latent_heat_vapor: 199000.0,
+    };
+
+    // Air gas phase (normal atmospheric conditions)
+    table[air_base_index + MaterialPhase::Gas.as_index()] = MaterialStateProfile {
+        density_kg_m3: 1.225,  // Air density at sea level
+        specific_heat_capacity_j_per_kg_k: 1005.0,  // Air specific heat at constant pressure
+        thermal_conductivity_w_m_k: 0.0262,  // Air thermal conductivity
+        thermal_transmission_r0_min: 0.01,
+        thermal_transmission_r0_max: 0.05,
+        melt_temp: 63.15,  // Same transition temperatures
+        latent_heat_fusion: 25500.0,
+        boil_temp: 77.36,
+        latent_heat_vapor: 199000.0,
+    };
 
     table
+}
+
+/// Material layers for each base MaterialType
+// MaterialComposite HashMap removed - all functionality now uses direct profile lookups
+
+/// ------------------------- fast lookup index for profile ---------------------
+/// 
+/// Flat array for fast O(1) profile lookups
+/// Layout: [material_type_index * PHASE_COUNT + phase_index]
+/// Total size: MaterialCompositeType::COUNT * MaterialPhase::COUNT entries
+static PROFILE_LOOKUP_TABLE: Lazy<[MaterialStateProfile; MaterialCompositeType::COUNT * MaterialPhase::COUNT]> = Lazy::new(|| {
+    load_profiles_from_json()
 });
 
 
@@ -319,14 +223,10 @@ pub fn get_profile_fast(material_type: &MaterialCompositeType, phase: &MaterialP
     &PROFILE_LOOKUP_TABLE[index]
 }
 
-/// Get material profile for a specific material type and phase state (HashMap version - slower)
-pub fn get_profile_for_state(material_type: MaterialCompositeType, phase: MaterialPhase) -> Option<&'static MaterialStateProfile> {
-    MATERIAL_COMPOSITES.get(&material_type)
-        .and_then(|layers| layers.profiles.get(&phase))
-}
+// Old HashMap-based lookup removed - use get_profile_fast() instead
 
-/// Determine the correct phase for a material at a given temperature
-/// This ensures temperature and phase are always consistent
+/// Determine the correct phase for a material at a given temperature and depth
+/// This ensures temperature and phase are always consistent, accounting for pressure effects
 pub fn resolve_phase_from_temperature(material_type: &MaterialCompositeType, temp_k: f64) -> MaterialPhase {
     // Get the solid phase profile to access transition temperatures
     let solid_profile = get_profile_fast(material_type, &MaterialPhase::Solid);
@@ -340,13 +240,55 @@ pub fn resolve_phase_from_temperature(material_type: &MaterialCompositeType, tem
     }
 }
 
-/// ------------------------ get core ----------------------
+/// Determine the correct phase for a material at a given temperature and depth
+/// Accounts for pressure effects on phase transitions (more realistic for deep Earth)
+pub fn resolve_phase_from_temperature_and_depth(material_type: &MaterialCompositeType, temp_k: f64, depth_km: f64) -> MaterialPhase {
+    // Calculate pressure from depth using average Earth gradient
+    let pressure_gpa = depth_km * 0.033; // ~0.033 GPa per km depth
+    resolve_phase_from_temperature_and_pressure(material_type, temp_k, pressure_gpa)
+}
 
-pub fn get_material_core(material_type: &MaterialCompositeType) -> &MaterialComposite {
-    match MATERIAL_COMPOSITES.get(material_type) {
-        None => { panic!("cannot get core")}
-        Some(composite) => { composite }
+/// Determine the correct phase for a material at a given temperature and pressure
+/// Uses actual calculated pressure from cumulative mass above (most realistic)
+pub fn resolve_phase_from_temperature_and_pressure(material_type: &MaterialCompositeType, temp_k: f64, pressure_gpa: f64) -> MaterialPhase {
+    // Get the solid phase profile to access base transition temperatures
+    let solid_profile = get_profile_fast(material_type, &MaterialPhase::Solid);
+
+    // Pressure effect on melting point: Clausius-Clapeyron relation
+    // Enhanced for deep Earth conditions - much stronger pressure effects
+    let pressure_melt_increase = match material_type {
+        MaterialCompositeType::Silicate => pressure_gpa * 50.0,  // 50 K/GPa (enhanced)
+        MaterialCompositeType::Basaltic => pressure_gpa * 45.0,  // 45 K/GPa
+        MaterialCompositeType::Granitic => pressure_gpa * 40.0,  // 40 K/GPa
+        MaterialCompositeType::Metallic => pressure_gpa * 60.0,  // 60 K/GPa (iron core)
+        _ => pressure_gpa * 45.0,  // Default
+    };
+
+    // Boiling point increases much more dramatically with pressure
+    let pressure_boil_increase = pressure_melt_increase * 2.5; // Much stronger boiling point increase
+
+    // Adjusted transition temperatures
+    let effective_melt_temp = solid_profile.melt_temp + pressure_melt_increase;
+    let effective_boil_temp = solid_profile.boil_temp + pressure_boil_increase;
+
+    if temp_k < effective_melt_temp {
+        MaterialPhase::Solid
+    } else if temp_k < effective_boil_temp {
+        MaterialPhase::Liquid
+    } else {
+        MaterialPhase::Gas
     }
+}
+
+/// Helper functions to get melting/boiling points directly from profiles
+pub fn get_melting_point_k(material_type: &MaterialCompositeType) -> f64 {
+    let solid_profile = get_profile_fast(material_type, &MaterialPhase::Solid);
+    solid_profile.melt_temp
+}
+
+pub fn get_boiling_point_k(material_type: &MaterialCompositeType) -> f64 {
+    let solid_profile = get_profile_fast(material_type, &MaterialPhase::Solid);
+    solid_profile.boil_temp
 }
 
 #[cfg(test)]
@@ -355,10 +297,11 @@ mod tests {
 
     #[test]
     fn test_json_material_loading() {
-        // Test that materials are loaded from JSON correctly
-        let basalt = get_material_core(&MaterialCompositeType::Basaltic);
+        // Test that materials are loaded from JSON correctly using direct profile access
+        let basalt_melt = get_melting_point_k(&MaterialCompositeType::Basaltic);
+        let basalt_boil = get_boiling_point_k(&MaterialCompositeType::Basaltic);
         println!("Basalt melting range: {}K - {}K (avg: {}K)",
-                 basalt.melting_point_min_k, basalt.melting_point_max_k, basalt.melting_point_avg_k);
+                 basalt_melt, basalt_boil, (basalt_melt + basalt_boil) / 2.0);
 
         let basalt_solid = get_profile_fast(&MaterialCompositeType::Basaltic, &MaterialPhase::Solid);
         println!("Basalt solid density: {} kg/m³", basalt_solid.density_kg_m3);
@@ -374,15 +317,16 @@ mod tests {
         assert_eq!(basalt_solid.latent_heat_vapor, 2000000.0);
         assert_eq!(basalt_solid.density_kg_m3, 3000.0);
 
-        // Verify the composite uses the correct transition range
-        assert_eq!(basalt.melting_point_min_k, 1473.0);  // Solid->Liquid
-        assert_eq!(basalt.melting_point_max_k, 2900.0);  // Liquid->Gas
+        // Verify the helper functions work correctly
+        assert_eq!(basalt_melt, 1473.0);  // Solid->Liquid
+        assert_eq!(basalt_boil, 2900.0);  // Liquid->Gas
 
         // Test water/ice
-        let water = get_material_core(&MaterialCompositeType::Icy);
+        let water_melt = get_melting_point_k(&MaterialCompositeType::Icy);
+        let water_boil = get_boiling_point_k(&MaterialCompositeType::Icy);
         let water_solid = get_profile_fast(&MaterialCompositeType::Icy, &MaterialPhase::Solid);
         println!("Water melting range: {}K - {}K (avg: {}K)",
-                 water.melting_point_min_k, water.melting_point_max_k, water.melting_point_avg_k);
+                 water_melt, water_boil, (water_melt + water_boil) / 2.0);
         println!("Ice latent heat fusion: {} J/kg", water_solid.latent_heat_fusion);
         println!("Water latent heat vapor: {} J/kg", water_solid.latent_heat_vapor);
 
@@ -391,8 +335,8 @@ mod tests {
         assert_eq!(water_solid.latent_heat_fusion, 334000.0);
         assert_eq!(water_solid.latent_heat_vapor, 2260000.0);
 
-        // Verify the composite uses the correct transition range
-        assert_eq!(water.melting_point_min_k, 273.15);  // Ice->Water
-        assert_eq!(water.melting_point_max_k, 373.15);  // Water->Steam
+        // Verify the helper functions work correctly
+        assert_eq!(water_melt, 273.15);  // Ice->Water
+        assert_eq!(water_boil, 373.15);  // Water->Steam
     }
 }

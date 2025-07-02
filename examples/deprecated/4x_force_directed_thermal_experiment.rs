@@ -10,7 +10,7 @@ extern crate atmo_asth_rust;
 use atmo_asth_rust::energy_mass::EnergyMass;
 use atmo_asth_rust::example::{ExperimentState, ThermalLayerNode};
 use atmo_asth_rust::example::thermal_layer_node::ThermalLayerNodeTempParams;
-use atmo_asth_rust::material_composite::{get_material_core};
+use atmo_asth_rust::material_composite::{get_melting_point_k};
 use atmo_asth_rust::energy_mass_composite::{StandardEnergyMassComposite, 
                                             get_profile_fast, 
                                             MaterialCompositeType, 

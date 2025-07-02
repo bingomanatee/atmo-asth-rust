@@ -73,7 +73,7 @@ impl ExperimentState {
 
     /// Get melting point for the experiment material
     pub fn get_melting_point(&self) -> f64 {
-        use crate::material_composite::get_material_core;
-        get_material_core(&self.material_type).melting_point_avg_k
+        use crate::material_composite::get_melting_point_k;
+        get_melting_point_k(&self.material_type)
     }
 }

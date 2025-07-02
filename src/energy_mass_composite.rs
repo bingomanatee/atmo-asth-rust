@@ -1,7 +1,7 @@
 
 use crate::atmospheric_energy_mass_composite::AtmosphericEnergyMass;
 use crate::constants::{KM3_TO_M3, M2_PER_KM2, SECONDS_PER_YEAR, SIGMA_KM2_YEAR};
-use crate::material_composite::{MaterialComposite, get_material_core};
+use crate::material_composite::resolve_phase_from_temperature_and_pressure;
 pub use crate::material_composite::{
     MaterialCompositeType, MaterialPhase, MaterialStateProfile, get_profile_fast,
 };
@@ -40,6 +40,7 @@ pub struct EnergyMassParams {
     pub energy_joules: f64,
     pub volume_km3: f64,
     pub height_km: f64,
+    pub pressure_gpa: f64, // Pressure in Gigapascals
 }
 
 
@@ -96,7 +97,16 @@ pub trait EnergyMassComposite: std::any::Any {
     /// Get the material composite profile
     fn material_composite_profile(&self) -> &'static MaterialStateProfile;
 
-    fn material_composite(&self) -> MaterialComposite;
+    /// Get the current pressure in GPa
+    fn pressure_gpa(&self) -> f64;
+
+    /// Set the pressure in GPa and update phase accordingly
+    fn set_pressure_gpa(&mut self, pressure_gpa: f64);
+
+    /// Get the current material phase (pressure-aware)
+    fn phase(&self) -> MaterialPhase;
+
+    // material_composite() method removed - MaterialComposite struct no longer exists
 
     /// Scale the entire EnergyMass by a factor (useful for splitting/combining)
     fn scale(&mut self, factor: f64);
@@ -330,6 +340,7 @@ pub struct StandardEnergyMassComposite {
     pub thermal_transmission_r0: f64, // R0 thermal transmission coefficient (set at creation)
     pub state_transition_bank: f64, // Energy bank for phase transitions
     pub transition_mode: TransitionMode, // Transition mode for hysteresis management
+    pub pressure_gpa: f64, // Pressure in Gigapascals (affects phase transitions)
 }
 
 
@@ -360,6 +371,7 @@ impl StandardEnergyMassComposite {
             energy_joules: 0.0, // Dummy value - will be set by set_kelvin()
             volume_km3,
             height_km,
+            pressure_gpa: 0.0, // Default surface pressure
         };
 
         let mut composite = Self::new_with_params(params);
@@ -387,6 +399,7 @@ impl StandardEnergyMassComposite {
             thermal_transmission_r0: random_r0,
             state_transition_bank: 0.0,
             transition_mode: TransitionMode::Static,
+            pressure_gpa: params.pressure_gpa,
         }
     }
 
@@ -414,6 +427,7 @@ impl StandardEnergyMassComposite {
             thermal_transmission_r0: random_r0,
             state_transition_bank: 0.0,
             transition_mode: TransitionMode::Static,
+            pressure_gpa: 0.0, // Default surface pressure
         }
     }
 
@@ -421,9 +435,8 @@ impl StandardEnergyMassComposite {
         get_profile_fast(&self.material_type, &self.phase)
     }
 
-    pub fn current_material_composite(&self) -> &MaterialComposite {
-        get_material_core(&self.material_type)
-    }
+    // current_material_composite() method removed - MaterialComposite struct no longer exists
+    // Use material_composite_type() and get_profile_fast() instead
 
 
 
@@ -513,8 +526,10 @@ impl StandardEnergyMassComposite {
     /// Check if we're in a transition temperature range
     fn is_in_transition_range(&self) -> bool {
         let temp = self.kelvin();
-        let composite = self.current_material_composite();
-        temp >= composite.melting_point_min_k && temp <= composite.melting_point_max_k
+        let profile = self.current_material_state_profile();
+        let melting_point = profile.melt_temp;
+        let boiling_point = profile.boil_temp;
+        temp >= melting_point && temp <= boiling_point
     }
 
     /// Calculate the fraction of energy that should go to the transition bank
@@ -525,9 +540,9 @@ impl StandardEnergyMassComposite {
         }
 
         let temp = self.kelvin();
-        let composite = self.current_material_composite();
-        let min_temp = composite.melting_point_min_k;
-        let max_temp = composite.melting_point_max_k;
+        let profile = self.current_material_state_profile();
+        let min_temp = profile.melt_temp;
+        let max_temp = profile.boil_temp;
 
         // Unlerp: (temp - min) / (max - min)
         (temp - min_temp) / (max_temp - min_temp)
@@ -701,8 +716,20 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
 
     /// Get the thermal conductivity in W/(m·K)
     /// Uses temperature-dependent thermal conductivity based on material phase and temperature
+    /// Enhanced with pressure effects - higher pressure increases thermal conductivity
     fn thermal_conductivity(&self) -> f64 {
-        self.material_composite_profile().thermal_conductivity_w_m_k
+        let base_conductivity = self.material_composite_profile().thermal_conductivity_w_m_k;
+
+        // Pressure enhancement of thermal conductivity
+        let pressure_multiplier = match self.material_type {
+            MaterialCompositeType::Silicate => 1.0 + self.pressure_gpa * 0.02,  // 2% per GPa
+            MaterialCompositeType::Basaltic => 1.0 + self.pressure_gpa * 0.015, // 1.5% per GPa
+            MaterialCompositeType::Granitic => 1.0 + self.pressure_gpa * 0.01,  // 1% per GPa
+            MaterialCompositeType::Metallic => 1.0 + self.pressure_gpa * 0.05,  // 5% per GPa (metals more sensitive)
+            _ => 1.0 + self.pressure_gpa * 0.02,  // Default 2% per GPa
+        }.min(3.0); // Cap at 3x increase
+
+        base_conductivity * pressure_multiplier
     }
 
     /// Scale the entire EnergyMass by a factor (useful for splitting/combining)
@@ -882,6 +909,7 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
                 energy_joules: energy_to_remove,
                 volume_km3: volume_to_remove,
                 height_km: self.height_km, // @TODO: probably wrong - hopefully it is not used
+                pressure_gpa: self.pressure_gpa, // Preserve pressure
             });
 
         // Update this EnergyMass
@@ -889,9 +917,7 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
 
         Box::new(removed)
     }
-    fn material_composite(&self) -> MaterialComposite {
-        get_material_core(&self.material_type).clone()
-    }
+    // material_composite() method removed - MaterialComposite struct no longer exists
     /// Split this EnergyMass into two parts by volume fraction
     /// Returns a new EnergyMass with the specified fraction, this one keeps the remainder
     /// Both will have the same temperature as the original
@@ -927,6 +953,24 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
 
     fn material_composite_profile(&self) -> &'static MaterialStateProfile {
         get_profile_fast(&self.material_type, &self.phase)
+    }
+
+    fn pressure_gpa(&self) -> f64 {
+        self.pressure_gpa
+    }
+
+    fn set_pressure_gpa(&mut self, pressure_gpa: f64) {
+        self.pressure_gpa = pressure_gpa;
+        // Update phase based on current temperature and new pressure
+        let temp_k = self.kelvin();
+        let new_phase = resolve_phase_from_temperature_and_pressure(&self.material_type, temp_k, pressure_gpa);
+        self.phase = new_phase;
+    }
+
+    fn phase(&self) -> MaterialPhase {
+        // Always return pressure-aware phase based on current temperature and pressure
+        let temp_k = self.kelvin();
+        resolve_phase_from_temperature_and_pressure(&self.material_type, temp_k, self.pressure_gpa)
     }
 
     fn add_energy(&mut self, energy_joules: f64) {
@@ -1406,10 +1450,12 @@ mod tests {
                 energy_joules: 1e18,
                 volume_km3: 1.0,
                 height_km: 1.0,
+                pressure_gpa: 0.0,
             });
 
-        let composite = energy_mass.current_material_composite();
-        energy_mass.set_kelvin(composite.melting_point_min_k - 100.0);
+        let material_type = energy_mass.material_composite_type();
+        let melting_point = get_melting_point_k(&material_type);
+        energy_mass.set_kelvin(melting_point - 100.0);
 
         let initial_total_energy = energy_mass.energy() + energy_mass.state_transition_bank();
 
@@ -1433,6 +1479,7 @@ mod tests {
         }
     }
     use super::*;
+    use crate::material_composite::get_melting_point_k;
     use approx::assert_abs_diff_eq;
 
     #[test]
@@ -1492,6 +1539,7 @@ mod tests {
                 energy_joules: energy,
                 volume_km3: volume,
                 height_km: 10.0,
+                pressure_gpa: 0.0,
             }
         );
 
@@ -1508,6 +1556,7 @@ mod tests {
             energy_joules: 4.752e15, // Energy for 1500K at 100km³
             volume_km3: 100.0,
             height_km: 10.0,
+            pressure_gpa: 0.0,
         };
         let energy_mass = StandardEnergyMassComposite::new_with_params(params1);
         let initial_energy = energy_mass.energy();
@@ -1519,6 +1568,7 @@ mod tests {
             energy_joules: initial_energy * 2.0,
             volume_km3: 200.0,
             height_km: 10.0,
+            pressure_gpa: 0.0,
         };
         let energy_mass2 = StandardEnergyMassComposite::new_with_params(params2);
 
@@ -1576,6 +1626,7 @@ mod tests {
             energy_joules: 4.752e15, // Energy for 1500K
             volume_km3: 100.0,
             height_km: 10.0,
+            pressure_gpa: 0.0,
         };
         let mut energy_mass = StandardEnergyMassComposite::new_with_params(params);
         let initial_temp = energy_mass.kelvin();
@@ -1598,6 +1649,7 @@ mod tests {
             energy_joules: 4.752e15, // Energy for 1500K
             volume_km3: 100.0,
             height_km: 10.0,
+            pressure_gpa: 0.0,
         };
         let mut energy_mass = StandardEnergyMassComposite::new_with_params(params);
 
@@ -1629,18 +1681,23 @@ mod tests {
             energy_joules: 4.752e15,
             volume_km3: 100.0,
             height_km: 10.0,
+            pressure_gpa: 0.0,
         };
         let energy_mass = StandardEnergyMassComposite::new_with_params(params);
 
-        // Test that material_composite method works
-        let composite = energy_mass.material_composite();
-        assert_eq!(composite.kind, MaterialCompositeType::Silicate);
-        assert_eq!(composite.melting_point_avg_k, 2400.0); // Updated to JSON-based Silicate melting point: (1600+3200)/2
+        // Test that material_composite_type method works
+        let material_type = energy_mass.material_composite_type();
+        assert_eq!(material_type, MaterialCompositeType::Silicate);
 
-        // Test that it contains the expected profiles
-        assert!(composite.profiles.contains_key(&MaterialPhase::Solid));
-        assert!(composite.profiles.contains_key(&MaterialPhase::Liquid));
-        assert!(composite.profiles.contains_key(&MaterialPhase::Gas));
+        // Test that profile lookup works
+        let solid_profile = get_profile_fast(&material_type, &MaterialPhase::Solid);
+        assert_eq!(solid_profile.melt_temp, 1600.0); // JSON-based Silicate melting point
+
+        // Test that other phases can be accessed
+        let liquid_profile = get_profile_fast(&material_type, &MaterialPhase::Liquid);
+        let gas_profile = get_profile_fast(&material_type, &MaterialPhase::Gas);
+        assert!(liquid_profile.melt_temp > 0.0);
+        assert!(gas_profile.melt_temp > 0.0);
     }
 
     #[test]
@@ -1651,6 +1708,7 @@ mod tests {
             energy_joules: 4.752e15, // Energy for 1500K
             volume_km3: 100.0,
             height_km: 10.0,
+            pressure_gpa: 0.0, // Surface pressure
         };
         let mut energy_mass = StandardEnergyMassComposite::new_with_params(params);
         let initial_temp = energy_mass.kelvin();
@@ -1679,6 +1737,7 @@ mod tests {
                 energy_joules: *energy,
                 volume_km3: 100.0,
                 height_km: 10.0,
+                pressure_gpa: 0.0,
             };
             let energy_mass = StandardEnergyMassComposite::new_with_params(params);
 
@@ -1700,6 +1759,7 @@ mod tests {
             energy_joules: 4.752e15, // Energy for 1500K at 100km³
             volume_km3: 100.0,
             height_km: 10.0,
+            pressure_gpa: 0.0,
         };
         let mut em1 = StandardEnergyMassComposite::new_with_params(params1);
 
@@ -1709,6 +1769,7 @@ mod tests {
             energy_joules: 1.584e15, // Energy for 1000K at 50km³
             volume_km3: 50.0,
             height_km: 10.0,
+            pressure_gpa: 0.0,
         };
         let em2 = StandardEnergyMassComposite::new_with_params(params2);
 
@@ -1764,6 +1825,7 @@ mod tests {
             energy_joules: energy,
             volume_km3: volume,
             height_km: 10.0,
+            pressure_gpa: 0.0,
         };
         let mut original = StandardEnergyMassComposite::new_with_params(params);
         let initial_temp = original.kelvin();
@@ -1813,6 +1875,7 @@ mod tests {
             energy_joules: energy,
             volume_km3: volume,
             height_km: 10.0,
+            pressure_gpa: 0.0,
         };
         let mut original = StandardEnergyMassComposite::new_with_params(params);
         let initial_temp = original.kelvin();
@@ -1854,6 +1917,7 @@ mod tests {
             energy_joules: 3.802e15, // Energy for 1500K at 80km³
             volume_km3: 80.0,
             height_km: 10.0,
+            pressure_gpa: 0.0,
         };
         let mut em1 = StandardEnergyMassComposite::new_with_params(params1);
 
@@ -1863,6 +1927,7 @@ mod tests {
             energy_joules: 1.426e15, // Energy for 1800K at 20km³
             volume_km3: 20.0,
             height_km: 10.0,
+            pressure_gpa: 0.0,
         };
         let em2 = StandardEnergyMassComposite::new_with_params(params2);
 
@@ -1909,6 +1974,7 @@ mod tests {
             energy_joules: 4.752e15, // Energy for 1500K at 100km³
             volume_km3: 100.0,
             height_km: 10.0,
+            pressure_gpa: 0.0,
         };
         let energy_mass = StandardEnergyMassComposite::new_with_params(params);
 

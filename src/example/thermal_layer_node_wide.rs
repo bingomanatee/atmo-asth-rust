@@ -1,6 +1,6 @@
 use super::experiment_state::ExperimentState;
 use crate::energy_mass_composite::{EnergyMassComposite, EnergyMassParams, StandardEnergyMassComposite};
-use crate::material_composite::{get_profile_fast, MaterialCompositeType, MaterialPhase, MaterialComposite, MaterialStateProfile};
+use crate::material_composite::{get_profile_fast, MaterialCompositeType, MaterialPhase, MaterialStateProfile};
 use crate::temp_utils::joules_volume_to_kelvin;
 
 /// Science-backed Fourier heat transfer system for three-node thermal diffusion
@@ -267,6 +267,7 @@ impl ThermalLayerNodeWide {
                 energy_joules: params.energy_joules,
                 volume_km3: params.volume_km3,
                 height_km: params.height_km,
+                pressure_gpa: 0.0, // Default surface pressure
             }
         );
 
@@ -302,6 +303,7 @@ impl ThermalLayerNodeWide {
                 energy_joules: 1.0, // Minimal energy, will be overridden
                 volume_km3: params.volume_km3,
                 height_km: params.height_km,
+                pressure_gpa: 0.0, // Default surface pressure
             }
         );
 
@@ -367,19 +369,22 @@ impl ThermalLayerNodeWide {
                 energy_joules: current_energy,
                 volume_km3: current_volume,
                 height_km: self.height_km,
+                pressure_gpa: self.energy_mass.pressure_gpa(), // Preserve current pressure
             }
         );
         self.log_extent();
     }
 
     /// Set the material phase (solid, liquid, gas)
-    /// Note: This method no longer forces temperature changes.
-    /// Phase transitions are now handled automatically by the energy bank system.
+    /// Updates the phase directly in the energy mass system
     pub fn set_material_phase(&mut self, phase: MaterialPhase) {
-        // Phase transitions are now handled automatically by the energy mass system
-        // This method is kept for compatibility but doesn't force temperature changes
-        // The actual phase will be determined by the current temperature and energy bank state
+        self.energy_mass.phase = phase;
         self.log_extent();
+    }
+
+    /// Get the material composite type (public access)
+    pub fn material_composite_type(&self) -> MaterialCompositeType {
+        self.energy_mass.material_composite_type()
     }
 
     /// Set the volume (adjusts energy proportionally to maintain temperature)
@@ -398,9 +403,9 @@ impl ThermalLayerNodeWide {
         self.energy_mass.thermal_capacity()
     }
 
-    /// Get the material phase (for phase change logic)
+    /// Get the material phase (for phase change logic) - pressure-aware
     pub fn phase(&self) -> MaterialPhase {
-        self.energy_mass.phase
+        self.energy_mass.phase()
     }
 
     /// Set the material phase (for phase change logic)
@@ -408,20 +413,17 @@ impl ThermalLayerNodeWide {
         self.set_material_phase(phase);
     }
 
-    /// Update the material phase based on current temperature
+    /// Update the material phase based on current temperature and depth
     /// This encapsulates the phase transition logic and should be called after temperature changes
     pub fn update_phase_from_kelvin(&mut self) {
         let temp = self.kelvin();
-        let profile = self.material_composite_profile();
 
-        // Determine the appropriate phase based on temperature using JSON material data
-        let new_phase = if temp < profile.melt_temp {  // Use actual melting point (1600K for silicate)
-            MaterialPhase::Solid
-        } else if temp < profile.boil_temp {  // Use actual boiling point (3200K for silicate)
-            MaterialPhase::Liquid
-        } else {
-            MaterialPhase::Gas
-        };
+        // Use pressure-aware phase resolution based on depth
+        let new_phase = crate::material_composite::resolve_phase_from_temperature_and_depth(
+            &self.energy_mass.material_composite_type(),
+            temp,
+            self.depth_km
+        );
 
         // Update thermal_state to reflect the phase (for display/analysis purposes)
         // This follows the existing thermal state scale: 100=solid, 0=liquid, -100=gas
@@ -656,10 +658,8 @@ impl EnergyMassComposite for ThermalLayerNodeWide {
         self.energy_mass.material_composite_profile()
     }
 
-    /// Get the material composite
-    fn material_composite(&self) -> MaterialComposite {
-        self.energy_mass.material_composite()
-    }
+    // material_composite() method removed - MaterialComposite struct no longer exists
+    // Use material_composite_type() and get_profile_fast() instead
 
     /// Scale the entire EnergyMass by a factor (useful for splitting/combining)
     fn scale(&mut self, factor: f64) {
@@ -761,6 +761,22 @@ impl EnergyMassComposite for ThermalLayerNodeWide {
     /// Get the R0 thermal transmission coefficient for this material
     fn thermal_transmission_r0(&self) -> f64 {
         self.energy_mass.thermal_transmission_r0()
+    }
+
+    /// Get the current pressure in GPa
+    fn pressure_gpa(&self) -> f64 {
+        self.energy_mass.pressure_gpa()
+    }
+
+    /// Set the pressure in GPa and update phase accordingly
+    fn set_pressure_gpa(&mut self, pressure_gpa: f64) {
+        self.energy_mass.set_pressure_gpa(pressure_gpa);
+        self.log_extent();
+    }
+
+    /// Get the current material phase (pressure-aware)
+    fn phase(&self) -> MaterialPhase {
+        self.energy_mass.phase()
     }
 }
 

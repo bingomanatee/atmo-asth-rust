@@ -10,21 +10,7 @@
 /// asserts that this deviation is less than the specified `max_deviation`.
 ///
 /// # Examples
-/// ```
-/// use atmo_asth_rust::assert_deviation;
-///
-/// // Basic usage
-/// assert_deviation!(105.0, 100.0, 10.0);  // 5% deviation < 10%
-///
-/// // With custom message
-/// assert_deviation!(temp, expected_temp, 2.0, "Temperature should be within 2%");
-///
-/// // With formatted message
-/// assert_deviation!(
-///     node.volume_km3(), expected_volume, 0.1,
-///     "Node {} volume should be within 0.1%", node_index
-/// );
-/// ```
+/// See the test cases below for usage examples.
 #[macro_export]
 macro_rules! assert_deviation {
     ($actual:expr, $expected:expr, $max_deviation:expr) => {

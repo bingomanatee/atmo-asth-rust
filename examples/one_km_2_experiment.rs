@@ -14,7 +14,7 @@ use atmo_asth_rust::energy_mass_composite::{
 };
 use atmo_asth_rust::example::thermal_layer_node::{ThermalLayerNodeParams, ThermalLayerNodeTempParams};
 use atmo_asth_rust::example::{ExperimentState, ExperimentSpecs, ThermalLayerNode};
-use atmo_asth_rust::material_composite::get_material_core;
+use atmo_asth_rust::material_composite::{get_melting_point_k};
 // Re-export MaterialPhase for easier access
 use atmo_asth_rust::temp_utils::energy_from_kelvin;
 use atmo_asth_rust::math_utils::lerp;
@@ -533,8 +533,8 @@ impl OneKm2Experiment {
         println!("   Deep geological time simulation complete!");
 
         let first_node = self.nodes.first().unwrap();
-        let composite = first_node.material_composite();
-        println!("  melting temperature: {}", composite.melting_point_min_k);
+        let melting_temp = get_melting_point_k(&first_node.material_composite_type());
+        println!("  melting temperature: {}", melting_temp);
     }
 
     fn print_rows(&self) {

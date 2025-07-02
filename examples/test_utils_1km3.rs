@@ -6,7 +6,7 @@
 
 use atmo_asth_rust::math_utils::{lerp, deviation};
 use atmo_asth_rust::assert_deviation;
-use atmo_asth_rust::material_composite::{get_material_core, MaterialCompositeType};
+use atmo_asth_rust::material_composite::{get_melting_point_k, get_boiling_point_k, MaterialCompositeType};
 use atmo_asth_rust::constants::{LITHOSPHERE_FORMATION_TEMP_K, LITHOSPHERE_PEAK_FORMATION_TEMP_K, ASTHENOSPHERE_SURFACE_START_TEMP_K, ASTHENOSPHERE_EQUILIBRIUM_TEMP_K};
 
 /// Temperature baseline constants for geological materials (in Kelvin)
@@ -18,7 +18,7 @@ pub mod temperature_baselines {
 
     /// Water freezing point (0°C) - from Icy material composite
     pub fn water_freezing_k() -> f64 {
-        get_material_core(&MaterialCompositeType::Icy).melting_point_min_k
+        get_melting_point_k(&MaterialCompositeType::Icy)
     }
 
     /// Water boiling point (100°C) - standard constant
@@ -26,28 +26,32 @@ pub mod temperature_baselines {
 
     /// Basalt melting range - from Basaltic material composite
     pub fn basalt_melting_min_k() -> f64 {
-        get_material_core(&MaterialCompositeType::Basaltic).melting_point_min_k
+        get_melting_point_k(&MaterialCompositeType::Basaltic)
     }
 
     pub fn basalt_melting_max_k() -> f64 {
-        get_material_core(&MaterialCompositeType::Basaltic).melting_point_max_k
+        get_boiling_point_k(&MaterialCompositeType::Basaltic)
     }
 
     pub fn basalt_melting_avg_k() -> f64 {
-        get_material_core(&MaterialCompositeType::Basaltic).melting_point_avg_k
+        let melting = get_melting_point_k(&MaterialCompositeType::Basaltic);
+        let boiling = get_boiling_point_k(&MaterialCompositeType::Basaltic);
+        (melting + boiling) / 2.0
     }
 
     /// Peridotite (silicate) melting range - from Silicate material composite
     pub fn peridotite_melting_min_k() -> f64 {
-        get_material_core(&MaterialCompositeType::Silicate).melting_point_min_k
+        get_melting_point_k(&MaterialCompositeType::Silicate)
     }
 
     pub fn peridotite_melting_max_k() -> f64 {
-        get_material_core(&MaterialCompositeType::Silicate).melting_point_max_k
+        get_boiling_point_k(&MaterialCompositeType::Silicate)
     }
 
     pub fn peridotite_melting_avg_k() -> f64 {
-        get_material_core(&MaterialCompositeType::Silicate).melting_point_avg_k
+        let melting = get_melting_point_k(&MaterialCompositeType::Silicate);
+        let boiling = get_boiling_point_k(&MaterialCompositeType::Silicate);
+        (melting + boiling) / 2.0
     }
 
     /// Lithosphere formation temperatures - from constants
@@ -75,7 +79,9 @@ pub mod temperature_baselines {
 
     /// Iron melting point - from Metallic material composite
     pub fn iron_melting_k() -> f64 {
-        get_material_core(&MaterialCompositeType::Metallic).melting_point_avg_k
+        let melting = get_melting_point_k(&MaterialCompositeType::Metallic);
+        let boiling = get_boiling_point_k(&MaterialCompositeType::Metallic);
+        (melting + boiling) / 2.0
     }
 }
 
