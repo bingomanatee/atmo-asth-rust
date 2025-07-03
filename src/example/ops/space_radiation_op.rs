@@ -89,8 +89,7 @@ impl SpaceRadiationOp {
         let cells_processed = self.core_op.cells_processed();
         let avg_per_cell = self.core_op.average_radiated_per_cell();
         
-        println!("🌌 Space Radiation Step {}: {:.2e} J total, {} cells, {:.2e} J/cell avg ({:.1} years)", 
-                 self.step_count, total_radiated, cells_processed, avg_per_cell, time_years);
+        // Space radiation step completed
     }
     
     /// Get total energy radiated in the last operation
@@ -115,12 +114,7 @@ impl SimOp for SpaceRadiationOp {
     }
 
     fn init_sim(&mut self, sim: &mut Simulation) {
-        if self.params.enable_reporting {
-            println!("🌌 Space radiation initialized (Stefan-Boltzmann cooling)");
-            println!("   - Emissivity: {:.2}", self.params.emissivity);
-            println!("   - Space temperature: {:.1}K", self.params.space_temperature_k);
-            println!("   - Density constant: {}", self.params.density_constant);
-        }
+        // Space radiation initialized
     }
 
     fn update_sim(&mut self, sim: &mut Simulation) {

@@ -28,7 +28,7 @@ impl SimOp for PressureAdjustmentOp {
     }
 
     fn init_sim(&mut self, sim: &mut Simulation) {
-        println!("🔧 Applying pressure compaction during initialization...");
+        // Applying pressure compaction during initialization
 
         let mut total_cells_processed = 0;
         let mut total_pressure_applied = 0.0;
@@ -50,11 +50,7 @@ impl SimOp for PressureAdjustmentOp {
             // Debug output removed for cleaner simulation output
         }
 
-        println!("✅ Pressure compaction complete:");
-        println!("   - {} cells processed", total_cells_processed);
-        println!("   - Max pressure: {:.2e} Pa ({:.1} GPa)", max_pressure, max_pressure / 1e9);
-        println!("   - Avg pressure per cell: {:.2e} Pa",
-                 total_pressure_applied / total_cells_processed as f64);
+        // Pressure compaction complete
     }
     
     fn update_sim(&mut self, sim: &mut Simulation) {
@@ -62,9 +58,7 @@ impl SimOp for PressureAdjustmentOp {
             return;
         }
 
-        if sim.debug {
-            println!("🔧 Applying pressure compaction at step {}...", sim.step);
-        }
+        // Pressure compaction step
 
         for cell in sim.cells.values_mut() {
             cell.apply_pressure_compaction();

@@ -98,10 +98,6 @@ impl SimOp for SurfaceEnergyInitOp {
     }
 
     fn init_sim(&mut self, sim: &mut Simulation) {
-        println!("🌡️  Initializing surface energy distribution with geothermal gradient...");
-        println!("   - Surface temp: {:.1}K", self.params.surface_temp_k);
-        println!("   - Geothermal gradient: {:.1}K/km", self.params.geothermal_gradient_k_per_km);
-        println!("   - Foundry temp (enforced at depth): {:.1}K", self.params.core_temp_k);
 
         let mut total_energy_applied = 0.0;
         let mut layers_initialized = 0;
@@ -125,21 +121,14 @@ impl SimOp for SurfaceEnergyInitOp {
                 total_energy_applied += current.energy_j();
                 layers_initialized += 1;
 
-                if sim.debug && i < 3 {
-                    println!("  Layer {} at {:.1}km depth: {:.1}K",
-                             i, layer_center_depth, target_temp_k);
-                }
+                // Debug output removed
             }
         }
 
         // Ensure foundry temperature is enforced at deepest layers
         self.enforce_foundry_temperature(sim);
 
-        println!("✅ Surface energy initialization complete:");
-        println!("   - {} layers initialized", layers_initialized);
-        println!("   - {} layers at foundry temperature", foundry_layers_count);
-        println!("   - {:.2e} J total energy applied", total_energy_applied);
-        println!("   - Foundry temperature will be enforced every step");
+        // Surface energy initialization complete
     }
 
     fn update_sim(&mut self, sim: &mut Simulation) {

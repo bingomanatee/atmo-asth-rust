@@ -849,10 +849,7 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
         let available_energy = self.energy() * radiation_fraction;
         let energy_to_remove = energy_to_radiate.min(available_energy);
 
-        println!(
-            "-------- radiated_energy_per_km2: {}, energy_to_radiate: {}, available_energy: {}",
-            radiated_energy_per_km2, energy_to_radiate, available_energy,
-        );
+        // Debug output removed
 
         self.remove_joules(energy_to_remove);
 
@@ -955,13 +952,7 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
         // Convert to km - no clamping, let application handle layer boundaries
         let depth_km = depth_m / 1000.0;
 
-        // DEBUG: Print skin depth calculation for high-density materials
-        if density_kg_m3 > 1000.0 {
-            println!(
-                "🔬 SKIN DEPTH DEBUG: density={:.1} kg/m³, base={:.1}m, depth={:.3}km",
-                density_kg_m3, base_depth_m, depth_km
-            );
-        }
+        // Debug output removed
 
         depth_km
     }

@@ -77,24 +77,7 @@ impl HeatRedistributionOp {
             return;
         }
 
-        if let Some(first_cell) = sim.cells.values().next() {
-            println!("🌡️  Step {} Heat Transfer Results (Current → Next):", step);
-
-            // Compare current vs next temperatures within the same step to see actual heat transfer
-            for (i, (current, next)) in first_cell.layers_t.iter().enumerate() {
-                let current_temp = current.temperature_k();
-                let next_temp = next.temperature_k();
-                let temp_change = next_temp - current_temp;
-
-                if temp_change.abs() > 0.01 { // Only show significant changes
-                    println!("   Layer {:2}: {:>6.0}K → {:>6.0}K (Δ{:>+6.1}K)",
-                             i, current_temp, next_temp, temp_change);
-                } else {
-                    println!("   Layer {:2}: {:>6.0}K (no change)", i, current_temp);
-                }
-            }
-            println!();
-        }
+        // Heat transfer results output removed
     }
 
     /// Output heat transfer amounts every 20 steps
@@ -103,41 +86,7 @@ impl HeatRedistributionOp {
             return;
         }
 
-        println!("🔥 Step {} Heat Transfer Analysis:", step);
-        println!("   - Total energy transferred this step: {:.2e} J", total_energy_transferred);
-
-        if let Some(first_cell) = sim.cells.values().next() {
-            println!("   - Heat flows between layers (Cell {:?}):", first_cell.h3_index);
-
-            // Calculate heat flows between adjacent layers
-            for i in 0..(first_cell.layers_t.len() - 1) {
-                let upper_layer = &first_cell.layers_t[i].0;
-                let lower_layer = &first_cell.layers_t[i + 1].0;
-
-                let upper_temp = upper_layer.temperature_k();
-                let lower_temp = lower_layer.temperature_k();
-                let temp_diff = upper_temp - lower_temp;
-
-                let upper_conductivity = upper_layer.thermal_conductivity();
-                let lower_conductivity = lower_layer.thermal_conductivity();
-                let distance_m = self.layer_distances_m[i];
-
-                let heat_flow = if let Some(ref fourier) = self.fourier_transfer {
-                    fourier.calculate_thermal_layer_heat_flow(
-                        &first_cell.layers_t[i],
-                        &first_cell.layers_t[i + 1],
-                    )
-                } else {
-                    0.0
-                };
-
-                let direction = if heat_flow > 0.0 { "↓" } else if heat_flow < 0.0 { "↑" } else { "=" };
-
-                println!("     Layer {:2} {} Layer {:2}: {:>10.2e} J {} (ΔT: {:>6.1}K)",
-                         i, direction, i + 1, heat_flow.abs(), direction, temp_diff);
-            }
-        }
-        println!();
+        // Heat transfer analysis output removed
     }
 
     /// Apply heat redistribution to a single cell
@@ -199,7 +148,6 @@ impl SimOp for HeatRedistributionOp {
     }
     
     fn init_sim(&mut self, sim: &mut Simulation) {
-        println!("🔥 Heat redistribution initialized (Fourier thermal diffusion)");
 
         // Pre-compute time conversion factor
         self.time_seconds_per_step = sim.years_per_step as f64 * SECONDS_PER_YEAR;
@@ -220,11 +168,7 @@ impl SimOp for HeatRedistributionOp {
             }
         }
 
-        println!("✅ Heat redistribution constants pre-computed:");
-        println!("   - Time per step: {:.0} seconds", self.time_seconds_per_step);
-        println!("   - Surface area: {:.2e} m²", self.surface_area_m2);
-        println!("   - {} layer distances pre-computed", self.layer_distances_m.len());
-        println!("   - Fourier thermal transfer utility initialized");
+        // Heat redistribution constants pre-computed
     }
     
     fn update_sim(&mut self, sim: &mut Simulation) {
@@ -240,25 +184,16 @@ impl SimOp for HeatRedistributionOp {
         let mut total_energy_transferred = 0.0;
         let mut cells_processed = 0;
         
-        if self.debug_output {
-            println!("🔥 Applying heat redistribution at step {} ({} years)...", sim.step, years);
-        }
+        // Heat redistribution step starting
         
         for cell in sim.cells.values_mut() {
             let cell_energy_transferred = self.redistribute_heat_in_cell(cell);
             total_energy_transferred += cell_energy_transferred;
             cells_processed += 1;
             
-            if self.debug_output && cells_processed <= 3 {
-                println!("  Cell {:?}: {:.2e} J transferred", cell.h3_index, cell_energy_transferred);
-            }
+            // Cell processing debug output removed
         }
         
-        if self.debug_output || (sim.debug && sim.step % 100 == 0) {
-            println!("🔥 Heat redistribution complete:");
-            println!("   - {} cells processed", cells_processed);
-            println!("   - {:.2e} J total energy transferred", total_energy_transferred);
-            println!("   - {:.2e} J average per cell", total_energy_transferred / cells_processed as f64);
-        }
+        // Heat redistribution complete
     }
 }

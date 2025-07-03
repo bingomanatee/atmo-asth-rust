@@ -70,11 +70,7 @@ impl SpaceRadiationOp {
 
     /// Apply space radiation to all cells in the simulation
     pub fn apply(&mut self, cells: &mut HashMap<CellIndex, GlobalH3Cell>, time_years: f64) {
-        println!(
-            "🚀 SPACE RADIATION OP: Starting with {} cells, time={:.3} years",
-            cells.len(),
-            time_years
-        );
+        // Space radiation operation starting
         self.total_radiated_energy = 0.0;
         self.cells_processed = 0;
 
@@ -100,25 +96,13 @@ impl SpaceRadiationOp {
 
         if let Some(surface_index) = surface_layer_index {
             // Calculate simple opacity: sum of (density * DENSITY_CONSTANT / height) for layers 0 through surface
-            let mut total_opacity = 0.0;
-
-            println!("🌫️ OPACITY CALCULATION for surface at layer {}:", surface_index);
-
+            let mut total_opacity: f64 = 0.0;
+            
             for i in 0..surface_index {
                 let (layer, _) = &cell.layers_t[i];
                 let density = layer.energy_mass.density_kgm3();
                 let height = layer.height_km;
                 let layer_opacity = density * self.params.density_constant / height;
-
-                // Only include layers with opacity >= 0.02 in the calculation
-                if layer_opacity >= 0.02 {
-                    total_opacity += layer_opacity;
-                    println!("   Layer {}: density={:.1} kg/m³, height={:.1} km, opacity={:.6}",
-                             i, density, height, layer_opacity);
-                } else {
-                    println!("   Layer {}: density={:.1} kg/m³, height={:.1} km, opacity={:.6} (ignored - too low)",
-                             i, density, height, layer_opacity);
-                }
             }
 
             // Minimum opacity of 1.0
@@ -126,10 +110,6 @@ impl SpaceRadiationOp {
 
             // Calculate transmission factor (0 to 1)
             let transmission_factor = (-total_opacity).exp();
-
-            println!("   Total opacity: {:.6}", total_opacity);
-            println!("   Transmission factor: {:.6}", transmission_factor);
-
             if transmission_factor > 0.0 {
                 let effective_area_km2 = surface_area_km2 * transmission_factor;
                 let radiated = self.radiate_layer_to_space(
@@ -138,9 +118,6 @@ impl SpaceRadiationOp {
                     time_years,
                 );
                 total_radiated += radiated;
-
-                println!("   Radiated from surface layer {}: {:.2e} J (transmission={:.6}, area={:.2e} km²)",
-                         surface_index, radiated, transmission_factor, effective_area_km2);
             }
         }
 
@@ -158,11 +135,7 @@ impl SpaceRadiationOp {
         effective_area_km2: f64,
         time_years: f64,
     ) -> f64 {
-        // DEBUG: Print method call details
-        println!("🔧 CALLING radiate_to_space_with_skin_depth:");
-        println!("   Layer temp: {:.1}K", layer.temperature_k());
-        println!("   Effective area: {:.1} km²", effective_area_km2);
-        println!("   Time: {:.3} years", time_years);
+        // Debug output removed
 
         // Use the proper density-based skin depth radiation method
         // This uses the improved radiation depth calculation based on material density
@@ -172,12 +145,7 @@ impl SpaceRadiationOp {
             1.0, // Full radiation factor (atmospheric attenuation handled separately)
         );
 
-        // DEBUG: Print radiation result
-        println!(
-            "🌌 SPACE RADIATION RESULT: {:.2e} J from layer at {:.1}K",
-            radiated,
-            layer.temperature_k()
-        );
+        // Debug output removed
 
         radiated
     }
@@ -212,11 +180,7 @@ impl crate::sim::sim_op::SimOp for SpaceRadiationOp {
         // Apply space radiation to all cells
         self.apply(&mut sim.cells, sim.years_per_step as f64);
 
-        // Always report radiation for now (can be made configurable later)
-        println!(
-            "Space radiation: {:.2e} J total",
-            self.total_radiated_energy()
-        );
+        // Space radiation complete
     }
 }
 
