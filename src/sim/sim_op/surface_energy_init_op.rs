@@ -2,8 +2,9 @@
 /// Distributes initial surface energy based on geothermal gradient similar to wide experiment
 
 use crate::sim::sim_op::SimOp;
-use crate::sim::simulation::Simulation;
 use crate::energy_mass_composite::EnergyMassComposite;
+use crate::sim::simulation::Simulation;
+
 
 /// Parameters for surface energy initialization
 #[derive(Debug, Clone)]

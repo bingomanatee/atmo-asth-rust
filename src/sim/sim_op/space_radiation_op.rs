@@ -1,30 +1,35 @@
+use crate::sim::sim_op::SimOp;
 use crate::energy_mass_composite::EnergyMassComposite;
 use crate::global_thermal::global_h3_cell::GlobalH3Cell;
+use crate::sim::simulation::Simulation;
 use h3o::CellIndex;
 use std::collections::HashMap;
 
 /// Parameters for space radiation operation
 #[derive(Debug, Clone)]
-pub struct SpaceRadiationParams {
+pub struct SpaceRadiationOpParams {
     /// Surface emissivity (0.0 to 1.0, typically 0.95 for rocky surfaces)
     pub emissivity: f64,
     /// Space temperature in Kelvin (typically ~2.7K cosmic background)
     pub space_temperature_k: f64,
     /// Density constant for opacity calculation (density * DENSITY_CONSTANT / height)
     pub density_constant: f64,
+    /// Enable detailed reporting
+    pub enable_reporting: bool,
 }
 
-impl Default for SpaceRadiationParams {
+impl Default for SpaceRadiationOpParams {
     fn default() -> Self {
         Self {
             emissivity: 0.95,
             space_temperature_k: 2.7, // Cosmic microwave background
             density_constant: 0.001, // Adjust this to control atmospheric opacity
+            enable_reporting: false,
         }
     }
 }
 
-impl SpaceRadiationParams {
+impl SpaceRadiationOpParams {
     /// Create parameters with custom emissivity
     pub fn with_emissivity(emissivity: f64) -> Self {
         Self {
@@ -41,33 +46,38 @@ impl SpaceRadiationParams {
         }
     }
 
-    /// Create parameters with reporting enabled (same as default for now)
+    /// Create parameters with reporting enabled
     pub fn with_reporting() -> Self {
-        Default::default()
+        Self {
+            enable_reporting: true,
+            ..Default::default()
+        }
     }
 }
 
-/// Space radiation operation - radiates heat from surface layers to space
-/// Uses Stefan-Boltzmann law with thin skin radiation effect
+/// Space radiation operation for global thermal simulation
+/// Radiates heat from surface layers to space using Stefan-Boltzmann law
 pub struct SpaceRadiationOp {
-    params: SpaceRadiationParams,
+    params: SpaceRadiationOpParams,
     total_radiated_energy: f64,
     cells_processed: usize,
+    step_count: usize,
 }
 
 impl SpaceRadiationOp {
-    pub fn new(params: SpaceRadiationParams) -> Self {
+    pub fn new(params: SpaceRadiationOpParams) -> Self {
         Self {
             params,
             total_radiated_energy: 0.0,
             cells_processed: 0,
+            step_count: 0,
         }
     }
 
     pub fn new_default() -> Self {
-        Self::new(SpaceRadiationParams::default())
+        Self::new(SpaceRadiationOpParams::default())
     }
-
+    
     /// Apply space radiation to all cells in the simulation
     pub fn apply(&mut self, cells: &mut HashMap<CellIndex, GlobalH3Cell>, time_years: f64) {
         // Space radiation operation starting
@@ -77,7 +87,8 @@ impl SpaceRadiationOp {
         for cell in cells.values_mut() {
             let radiated = self.apply_to_cell(cell, time_years);
             self.total_radiated_energy += radiated;
-            self.cells_processed += 1; }
+            self.cells_processed += 1;
+        }
     }
 
     /// Apply space radiation to a single cell
@@ -97,12 +108,13 @@ impl SpaceRadiationOp {
         if let Some(surface_index) = surface_layer_index {
             // Calculate simple opacity: sum of (density * DENSITY_CONSTANT / height) for layers 0 through surface
             let mut total_opacity: f64 = 0.0;
-            
+
             for i in 0..surface_index {
                 let (layer, _) = &cell.layers_t[i];
                 let density = layer.energy_mass.density_kgm3();
                 let height = layer.height_km;
                 let layer_opacity = density * self.params.density_constant / height;
+                total_opacity += layer_opacity;
             }
 
             // Minimum opacity of 1.0
@@ -123,11 +135,7 @@ impl SpaceRadiationOp {
 
         total_radiated
     }
-
-
-
-
-
+    
     /// Apply Stefan-Boltzmann radiation to a single layer using density-based skin depth
     fn radiate_layer_to_space(
         &self,
@@ -150,6 +158,15 @@ impl SpaceRadiationOp {
         radiated
     }
 
+    /// Report radiation results
+    fn report_radiation_results(&self, time_years: f64) {
+        let total_radiated = self.total_radiated_energy;
+        let cells_processed = self.cells_processed;
+        let avg_per_cell = self.average_radiated_per_cell();
+
+        // Space radiation step completed
+    }
+    
     /// Get total energy radiated in the last operation
     pub fn total_radiated_energy(&self) -> f64 {
         self.total_radiated_energy
@@ -170,17 +187,26 @@ impl SpaceRadiationOp {
     }
 }
 
-// Implement SimOp trait for integration with simulation framework
-impl crate::sim::sim_op::SimOp for SpaceRadiationOp {
+impl SimOp for SpaceRadiationOp {
     fn name(&self) -> &str {
         "SpaceRadiation"
     }
 
-    fn update_sim(&mut self, sim: &mut crate::sim::simulation::Simulation) {
-        // Apply space radiation to all cells
-        self.apply(&mut sim.cells, sim.years_per_step as f64);
+    fn init_sim(&mut self, _sim: &mut Simulation) {
+        // Space radiation initialized
+    }
 
-        // Space radiation complete
+    fn update_sim(&mut self, sim: &mut Simulation) {
+        self.step_count += 1;
+        let time_years = sim.years_per_step as f64;
+
+        // Apply radiation to all cells
+        self.apply(&mut sim.cells, time_years);
+
+        // Report if enabled
+        if self.params.enable_reporting {
+            self.report_radiation_results(time_years);
+        }
     }
 }
 
@@ -188,7 +214,7 @@ impl crate::sim::sim_op::SimOp for SpaceRadiationOp {
 pub fn apply_space_radiation(
     cells: &mut HashMap<CellIndex, GlobalH3Cell>,
     time_years: f64,
-    params: Option<SpaceRadiationParams>,
+    params: Option<SpaceRadiationOpParams>,
 ) -> f64 {
     let mut op = SpaceRadiationOp::new(params.unwrap_or_default());
     op.apply(cells, time_years);

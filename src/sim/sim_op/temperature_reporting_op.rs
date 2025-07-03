@@ -2,8 +2,9 @@
 /// Reports average surface temperature every 10% of the simulation cycle
 
 use crate::sim::sim_op::SimOp;
+use crate::energy_mass_composite::{EnergyMassComposite, MaterialPhase};
 use crate::sim::simulation::Simulation;
-use crate::energy_mass_composite::{MaterialPhase, EnergyMassComposite};
+
 
 pub struct TemperatureReportingOp {
     pub report_frequency_percent: f64,
