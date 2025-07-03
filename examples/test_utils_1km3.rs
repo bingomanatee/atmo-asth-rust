@@ -5,7 +5,7 @@
 /// math_utils module to provide domain-specific testing functionality.
 
 use atmo_asth_rust::math_utils::{lerp, deviation};
-use atmo_asth_rust::assert_deviation;
+
 use atmo_asth_rust::material_composite::{get_melting_point_k, get_boiling_point_k, MaterialCompositeType};
 use atmo_asth_rust::constants::{LITHOSPHERE_FORMATION_TEMP_K, LITHOSPHERE_PEAK_FORMATION_TEMP_K, ASTHENOSPHERE_SURFACE_START_TEMP_K, ASTHENOSPHERE_EQUILIBRIUM_TEMP_K};
 

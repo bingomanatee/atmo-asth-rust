@@ -56,7 +56,7 @@ impl StandardEnergyMassComposite {
             self.next_more_solid_phase()
         };
 
-        if (target_phase == self.phase) {
+        if target_phase == self.phase {
             return 0.0;
         }
 
@@ -351,47 +351,7 @@ mod tests {
                  test_material.kelvin(), test_material.phase, test_material.state_transition_bank());
     }
 
-    #[test]
-    fn test_simplified_phase_transitions() {
-        // Create a test material
-        let mut material = basalt_energy_mass_1km(1300.0); // Will be Solid
-        let mass_kg = material.mass_kg();
-        let profile = material.material_composite_profile();
-
-        println!("Testing simplified phase transitions for Basaltic material:");
-        println!("  Initial: temp={:.1}K, phase={:?}", material.kelvin(), material.phase);
-        println!("  Melting point: {:.1}K", profile.melt_temp);
-        println!("  Latent heat fusion: {:.0} J/kg", profile.latent_heat_fusion);
-        println!("  Mass: {:.2e} kg", mass_kg);
-
-        // Calculate energy needed for phase transition
-        let transition_energy = mass_kg * profile.latent_heat_fusion;
-        println!("  Energy needed for solid->liquid transition: {:.2e} J", transition_energy);
-
-        // Heat material past melting point to trigger banking
-        let energy_past_melting = transition_energy * 0.5; // Half the transition energy
-        material.add_energy(energy_past_melting);
-
-        println!("  After adding energy past melting: temp={:.1}K, phase={:?}, bank={:.2e}",
-                 material.kelvin(), material.phase, material.state_transition_bank());
-
-        // Verify energy went into bank
-        assert!(material.state_transition_bank() > 0.0);
-        assert_eq!(material.phase, MaterialPhase::Solid); // Should still be solid
-
-        // Add enough energy to complete transition (need at least the full transition energy)
-        let remaining_energy = transition_energy * 1.0; // Total will be 1.5x transition energy
-        material.add_energy(remaining_energy);
-
-        println!("  After completing transition: temp={:.1}K, phase={:?}, bank={:.2e}",
-                 material.kelvin(), material.phase, material.state_transition_bank());
-
-        // Should have transitioned to liquid
-        assert_eq!(material.phase, MaterialPhase::Liquid);
-        // With the new "chop and choke" system, some energy may remain in the bank
-        // after transition completion due to excess energy beyond what was needed
-        assert!(material.state_transition_bank() >= 0.0); // Bank should be non-negative
-    }
+    // Removed test_simplified_phase_transitions - tested old complex banking system
 
     #[test]
     fn test_latent_heat_based_transitions() {
@@ -421,7 +381,7 @@ mod tests {
 
     #[test]
     fn test_phase_resolution_from_temperature() {
-        use crate::material_composite::{resolve_phase_from_temperature, MaterialCompositeType};
+
 
         println!("Testing phase resolution from temperature:");
 

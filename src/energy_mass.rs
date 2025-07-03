@@ -1,4 +1,4 @@
-use crate::constants::{M2_PER_KM2, MANTLE_DENSITY_KGM3, SECONDS_PER_YEAR, SIGMA_KM2_YEAR, SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K};
+use crate::constants::{M2_PER_KM2, SECONDS_PER_YEAR, SIGMA_KM2_YEAR};
 use crate::material::{MaterialType, get_profile};
 use serde::{Deserialize, Serialize};
 
@@ -278,7 +278,7 @@ pub fn create_atmospheric_column_simple_decay(num_layers: usize, layer_height_km
     // Calculate the sum of the geometric series: Σ(0.88^n) from n=0 to infinity
     // For geometric series with r = 0.88: sum = 1 / (1 - 0.88) = 1 / 0.12 = 8.333...
     let decay_factor: f64 = 0.88;
-    let infinite_series_sum = 1.0 / (1.0 - decay_factor);
+    let _infinite_series_sum = 1.0 / (1.0 - decay_factor);
 
     // Scale the base mass so total doesn't exceed maximum
     // We'll use a finite approximation by calculating the sum for num_layers
@@ -390,7 +390,7 @@ impl AtmosphericEnergyMass {
 
         // Generate random R0 value within material's range
         use rand::Rng;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let r0_range = profile.thermal_transmission_r0_max - profile.thermal_transmission_r0_min;
         let random_r0 = profile.thermal_transmission_r0_min + rng.random::<f64>() * r0_range;
 
@@ -643,7 +643,7 @@ impl StandardEnergyMass {
 
         // Generate random R0 value within material's range
         use rand::Rng;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let r0_range = profile.thermal_transmission_r0_max - profile.thermal_transmission_r0_min;
         let random_r0 = profile.thermal_transmission_r0_min + rng.random::<f64>() * r0_range;
 
@@ -674,7 +674,7 @@ impl StandardEnergyMass {
 
         // Generate random R0 value within material's range
         use rand::Rng;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let r0_range = profile.thermal_transmission_r0_max - profile.thermal_transmission_r0_min;
         let random_r0 = profile.thermal_transmission_r0_min + rng.random::<f64>() * r0_range;
 
@@ -1152,7 +1152,7 @@ mod tests {
             StandardEnergyMass::new_with_material(MaterialType::Silicate, 1600.0, 200.0);
         let initial_temp = original.temperature();
         let initial_energy = original.energy();
-        let initial_volume = original.volume();
+        let _initial_volume = original.volume();
 
         // Remove 1/4 of the volume
         let removed = original.remove_volume(50.0);
@@ -1187,7 +1187,7 @@ mod tests {
             StandardEnergyMass::new_with_material(MaterialType::Silicate, 1700.0, 100.0);
         let initial_temp = original.temperature();
         let initial_energy = original.energy();
-        let initial_volume = original.volume();
+        let _initial_volume = original.volume();
 
         // Split off 30%
         let split_off = original.split_by_fraction(0.3);
@@ -1223,7 +1223,7 @@ mod tests {
 
         let initial_temp1 = em1.temperature();
         let initial_volume1 = em1.volume();
-        let initial_energy1 = em1.energy();
+        let _initial_energy1 = em1.energy();
 
         // Merge em2 into em1
         em1.merge_em(&em2);

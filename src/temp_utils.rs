@@ -7,7 +7,7 @@ use crate::constants::{
 };
 use crate::h3_utils::H3Utils;
 use h3o::Resolution;
-use crate::material::{MaterialProfile, MaterialType};
+use crate::material::MaterialProfile;
 
 /// Stefan–Boltzmann constant (W·m⁻²·K⁻⁴)
 const STEFAN_BOLTZMANN_CONST: f64 = 5.670374419e-8;
@@ -258,7 +258,7 @@ mod tests {
             (1873.15, "Silicate formation temperature"),
         ];
 
-        for (temp, description) in lithosphere_temps {
+        for (temp, _description) in lithosphere_temps {
             let energy = energy_from_kelvin_mantle(temp, volume);
             let recovered_temp = joules_volume_to_kelvin_mantle(energy, volume);
 

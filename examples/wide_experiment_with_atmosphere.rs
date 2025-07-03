@@ -16,22 +16,21 @@ pub const KAPPA_DRY: f64  = 1e-5; // N2/O2 baseline
 
 // Import the real EnergyMass trait and material system
 extern crate atmo_asth_rust;
-use atmo_asth_rust::energy_mass::EnergyMass;
+
 use atmo_asth_rust::energy_mass_composite::{
-    EnergyMassComposite, MaterialCompositeType, MaterialPhase, StandardEnergyMassComposite,
+    EnergyMassComposite, MaterialCompositeType, MaterialPhase,
     get_profile_fast,
 };
-use atmo_asth_rust::example::{ExperimentState, ExperimentSpecs, ThermalLayerNodeWide, ThermalLayerNodeWideParams, ThermalLayerNodeWideTempParams, FourierThermalTransfer};
+use atmo_asth_rust::example::{ExperimentState, ExperimentSpecs, ThermalLayerNodeWide, ThermalLayerNodeWideTempParams};
 use atmo_asth_rust::material_composite::{get_melting_point_k, get_boiling_point_k};
 use atmo_asth_rust::atmospheric_energy_mass_composite::AtmosphericEnergyMass;
 // Re-export MaterialPhase for easier access
-use atmo_asth_rust::temp_utils::energy_from_kelvin;
+
 use atmo_asth_rust::math_utils::lerp;
-use atmo_asth_rust::assert_deviation;
-use more_asserts::assert_lt;
+
 
 mod test_utils_1km3;
-use test_utils_1km3::{temperature_baselines, validate_temperature_gradient, validate_boundary_conditions};
+
 
 /// Atmospheric compound types that can be generated from melting events
 #[derive(Debug, Clone)]

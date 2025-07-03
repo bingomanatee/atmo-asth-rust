@@ -6,7 +6,7 @@
 use crate::global_thermal::thermal_layer::ThermalLayer;
 use crate::energy_mass_composite::{MaterialCompositeType, MaterialPhase};
 use crate::planet::Planet;
-use h3o::{CellIndex as H3Index, Resolution};
+use h3o::CellIndex as H3Index;
 use std::rc::Rc;
 
 /// Layer configuration for global H3 cell initialization

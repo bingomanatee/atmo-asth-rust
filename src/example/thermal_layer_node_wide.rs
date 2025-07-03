@@ -12,10 +12,7 @@ pub struct FourierThermalTransfer {
 
 /// Physical constants for Fourier heat transfer calculations
 mod fourier_constants {
-    pub const SECONDS_PER_YEAR: f64 = 365.25 * 24.0 * 3600.0;
-    pub const KM_TO_M: f64 = 1000.0;
-    pub const KM2_TO_M2: f64 = 1_000_000.0;
-    pub const KM3_TO_M3: f64 = 1_000_000_000.0;
+
 
     /// Minimum temperature difference for heat transfer (K)
     /// Below this threshold, thermal noise dominates and transfer is negligible
@@ -157,51 +154,7 @@ impl FourierThermalTransfer {
         conservative_transfer.min(max_safe_transfer)
     }
 
-    /// Enhanced Fourier transfer with material-specific thermal diffusivity
-    /// Accounts for thermal diffusivity α = k/(ρ·cp) for more accurate heat transfer
-    fn calculate_enhanced_fourier_transfer(
-        &self,
-        from_node: &ThermalLayerNodeWide,
-        to_node: &ThermalLayerNodeWide,
-    ) -> f64 {
-        use fourier_constants::*;
 
-        let temp_diff = from_node.kelvin() - to_node.kelvin();
-        if temp_diff <= MIN_TEMP_DIFF_K {
-            return 0.0;
-        }
-
-        // Calculate thermal diffusivity for both materials
-        // α = k / (ρ * cp) where k=conductivity, ρ=density, cp=specific heat
-        let alpha_from = from_node.thermal_conductivity() /
-            (from_node.density_kgm3() * from_node.specific_heat_j_kg_k());
-        let alpha_to = to_node.thermal_conductivity() /
-            (to_node.density_kgm3() * to_node.specific_heat_j_kg_k());
-
-        // Use harmonic mean of thermal diffusivities
-        let alpha_interface = 2.0 * alpha_from * alpha_to / (alpha_from + alpha_to);
-
-        // Calculate characteristic diffusion length: L = sqrt(α * t)
-        let time_seconds = self.time_years * SECONDS_PER_YEAR;
-        let diffusion_length_m = (alpha_interface * time_seconds).sqrt();
-
-        // Calculate effective area and distance
-        let area_m2 = from_node.area_km2 * KM2_TO_M2;
-        let distance_m = (from_node.height_km + to_node.height_km) * 0.5 * KM_TO_M;
-
-        // Enhanced Fourier equation with diffusivity effects
-        let mass_from = from_node.mass_kg();
-        let cp_from = from_node.specific_heat_j_kg_k();
-
-        // Energy transfer based on thermal diffusion equation
-        let energy_transfer = mass_from * cp_from * temp_diff *
-            (diffusion_length_m / distance_m).min(1.0) * // Limit by diffusion penetration
-            (area_m2 / (from_node.area_km2 * KM2_TO_M2)); // Normalize by area
-
-        // Apply stability constraint
-        let max_available = from_node.energy() * MAX_ENERGY_TRANSFER_FRACTION;
-        energy_transfer.min(max_available)
-    }
 }
 
 /// Parameters for creating ThermalLayerNode
@@ -439,7 +392,7 @@ impl ThermalLayerNodeWide {
 
 
     /// Calculate outgassing based on temperature
-    pub fn calculate_outgassing(&mut self, config: &ExperimentState, years: f64) -> f64 {
+    pub fn calculate_outgassing(&mut self, _config: &ExperimentState, _years: f64) -> f64 {
         0.0
     }
 

@@ -3,7 +3,7 @@ use h3o::{CellIndex, LatLng, Resolution, EARTH_RADIUS_KM};
 use rand::Rng;
 use rand::seq::SliceRandom;
 
-pub struct CellAndBase(CellIndex, CellIndex);
+
 
 pub struct PointSampler {
     primary_cells: Vec<CellIndex>,

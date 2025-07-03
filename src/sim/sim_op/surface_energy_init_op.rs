@@ -100,12 +100,12 @@ impl SimOp for SurfaceEnergyInitOp {
 
     fn init_sim(&mut self, sim: &mut Simulation) {
 
-        let mut total_energy_applied = 0.0;
-        let mut layers_initialized = 0;
-        let mut foundry_layers_count = 0;
+        let mut _total_energy_applied = 0.0;
+        let mut _layers_initialized = 0;
+        let mut _foundry_layers_count = 0;
 
         for cell in sim.cells.values_mut() {
-            for (i, (current, next)) in cell.layers_t.iter_mut().enumerate() {
+            for (_i, (current, next)) in cell.layers_t.iter_mut().enumerate() {
                 // Calculate target temperature based on layer depth
                 let layer_center_depth = current.start_depth_km + (current.height_km / 2.0);
                 let target_temp_k = self.calculate_temperature_at_depth(layer_center_depth);
@@ -116,11 +116,11 @@ impl SimOp for SurfaceEnergyInitOp {
 
                 // Track if this layer is at foundry temperature
                 if (target_temp_k - self.params.core_temp_k).abs() < 1.0 {
-                    foundry_layers_count += 1;
+                    _foundry_layers_count += 1;
                 }
 
-                total_energy_applied += current.energy_j();
-                layers_initialized += 1;
+                _total_energy_applied += current.energy_j();
+                _layers_initialized += 1;
 
                 // Debug output removed
             }

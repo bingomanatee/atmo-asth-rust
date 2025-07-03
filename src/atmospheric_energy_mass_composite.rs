@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use crate::constants::{SECONDS_PER_YEAR, SIGMA_KM2_YEAR};
+use crate::constants::SIGMA_KM2_YEAR;
 use crate::energy_mass_composite::{get_profile_fast, EnergyMassComposite, MaterialCompositeType, MaterialPhase, MaterialStateProfile};
 // MaterialComposite and get_material_core removed - no longer needed
 
@@ -31,7 +31,7 @@ impl AtmosphericEnergyMass {
 
         // Generate random R0 value within material's range
         use rand::Rng;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let r0_range = profile.thermal_transmission_r0_max - profile.thermal_transmission_r0_min;
         let random_r0 = profile.thermal_transmission_r0_min + rng.random::<f64>() * r0_range;
 

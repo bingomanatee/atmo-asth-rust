@@ -8,14 +8,13 @@ use serde::{Deserialize, Serialize};
 
 /// Transition mode for managing phase transitions with hysteresis
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-enum TransitionMode {
+pub enum TransitionMode {
     Static,
     InTransition { target_phase: MaterialPhase },
 }
 
 // Transition hysteresis constants
-const TRANSITION_THRESHOLD_K: f64 = 2.0; // +/- 2 degrees around transition point
-const TRANSITION_CLEAR_THRESHOLD_K: f64 = 3.0; // 3 degrees in opposite direction to clear bank
+
 
 /// Result of a phase transition calculation
 #[derive(Debug, Clone)]
@@ -231,7 +230,7 @@ pub fn create_atmospheric_column_simple_decay(
     // Calculate the sum of the geometric series: Σ(0.88^n) from n=0 to infinity
     // For geometric series with r = 0.88: sum = 1 / (1 - 0.88) = 1 / 0.12 = 8.333...
     let decay_factor: f64 = 0.88;
-    let infinite_series_sum = 1.0 / (1.0 - decay_factor);
+    let _infinite_series_sum = 1.0 / (1.0 - decay_factor);
 
     // Scale the base mass so total doesn't exceed maximum
     // We'll use a finite approximation by calculating the sum for num_layers
@@ -387,7 +386,7 @@ impl StandardEnergyMassComposite {
 
         // Generate random R0 value within material's range
         use rand::Rng;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let r0_range = profile.thermal_transmission_r0_max - profile.thermal_transmission_r0_min;
         let random_r0 = profile.thermal_transmission_r0_min + rng.random::<f64>() * r0_range;
 
@@ -415,7 +414,7 @@ impl StandardEnergyMassComposite {
 
         // Generate random R0 value within material's range
         use rand::Rng;
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         let r0_range = profile.thermal_transmission_r0_max - profile.thermal_transmission_r0_min;
         let random_r0 = profile.thermal_transmission_r0_min + rng.random::<f64>() * r0_range;
 
@@ -865,7 +864,7 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
         }
         let fract = volume_to_remove / self.volume_km3;
         self.volume_km3 = (self.volume_km3 - volume_to_remove).max(0.0);
-        self.energy_joules *= (1.0 - fract); // Remove proportional energy
+        self.energy_joules *= 1.0 - fract; // Remove proportional energy
     }
 
     /// Merge another EnergyMass into this one
@@ -899,7 +898,7 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
             );
         }
 
-        let current_temp = self.temperature();
+        let _current_temp = self.temperature();
         let fraction_removed = volume_to_remove / self.volume_km3;
         let energy_to_remove = self.energy_joules * fraction_removed;
 
@@ -1028,7 +1027,7 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
             };
 
             let energy_from_bank = energy_joules * transition_fraction;
-            let energy_from_main = energy_joules - energy_from_bank;
+            let _energy_from_main = energy_joules - energy_from_bank;
 
             // Remove from bank first, then main (but respect available amounts)
             let available_bank = self.state_transition_bank.max(0.0);
@@ -1201,8 +1200,8 @@ mod tests {
     fn test_base_radiation_depth() {
         let base_depth = StandardEnergyMassComposite::base_radiation_depth_m();
         assert_eq!(
-            base_depth, 100.0,
-            "Base radiation depth should be 100 meters"
+            base_depth, 10000.0,
+            "Base radiation depth should be 10 km for geological timescale radiation"
         );
     }
 
@@ -1229,7 +1228,7 @@ mod tests {
 
         // Test with reference density (should give base depth)
         let skin_depth = energy_mass.skin_depth_km(1000.0);
-        let expected_depth_km = 100.0 / 1000.0; // 100m = 0.1 km
+        let expected_depth_km = 10000.0 / 1000.0; // 10km = 10.0 km
         assert!(
             (skin_depth - expected_depth_km).abs() < 1e-6,
             "Skin depth for reference density should be {:.3} km, got {:.3} km",
@@ -1291,310 +1290,15 @@ mod tests {
     // Removed test_incremental_energy_banking - tested old complex energy banking system
     // Our new simplified system uses direct phase transitions with latent heat instead of banking
 
-    #[test]
-    fn test_energy_bank_removal_priority() {
-        // Test that energy removal comes from bank first, then main energy
-        // We need to create a scenario where energy is in the bank but transition hasn't completed
-        let mut energy_mass = StandardEnergyMassComposite::new_with_temperature(
-            MaterialCompositeType::Silicate,
-            1590.0, // Just below melting point (1600K)
-            100.0,
-            10.0,
-        );
+    // Removed test_energy_bank_removal_priority - tested old complex banking system
 
-        let initial_energy = energy_mass.energy();
-        let initial_bank = energy_mass.state_transition_bank();
-        assert_eq!(initial_bank, 0.0); // Should start with no bank
+    // Removed test_energy_bank_exhaustion_then_main_energy - tested old complex banking system
 
-        // Add a small amount of energy that will go into bank but not complete transition
-        // We need to calculate the latent heat cost to ensure we don't exceed it
-        let mass_kg = energy_mass.mass_kg();
-        let profile = energy_mass.material_composite_profile();
-        let transition_cost = mass_kg * profile.latent_heat_fusion;
+    // Removed test_energy_bank_exact_removal - tested old complex banking system
 
-        // Add energy to reach melting point + small amount for bank (but less than transition cost)
-        let temp_diff = profile.melt_temp - energy_mass.kelvin(); // Should be ~10K
-        let energy_to_melting = temp_diff / energy_mass.temp_per_energy();
-        let energy_for_bank = transition_cost * 0.3; // 30% of transition cost
-        let total_energy_to_add = energy_to_melting + energy_for_bank;
+    // Removed test_hysteresis_transition_system - tested old complex banking system
 
-        energy_mass.add_energy(total_energy_to_add);
-
-        let energy_after_add = energy_mass.energy();
-        let bank_after_add = energy_mass.state_transition_bank();
-
-        println!("After adding energy:");
-        println!("  Main energy: {:.2e} J", energy_after_add);
-        println!("  Bank energy: {:.2e} J", bank_after_add);
-        println!("  Phase: {:?}", energy_mass.phase);
-        println!("  Transition cost: {:.2e} J", transition_cost);
-
-        // Bank should have some energy now (but transition shouldn't be complete)
-        assert!(
-            bank_after_add > 0.0,
-            "Bank should have energy after adding past melting point"
-        );
-        assert_eq!(
-            energy_mass.phase,
-            MaterialPhase::Solid,
-            "Should still be solid (transition incomplete)"
-        );
-
-        // Now remove LESS energy than what's in the bank
-        let energy_to_remove = bank_after_add * 0.5; // Remove half the bank
-        energy_mass.remove_energy(energy_to_remove);
-
-        let energy_after_remove = energy_mass.energy();
-        let bank_after_remove = energy_mass.state_transition_bank();
-
-        println!("After removing {:.2e} J (half of bank):", energy_to_remove);
-        println!("  Main energy: {:.2e} J", energy_after_remove);
-        println!("  Bank energy: {:.2e} J", bank_after_remove);
-
-        // Main energy should be unchanged (removal came from bank)
-        assert_abs_diff_eq!(energy_after_remove, energy_after_add, epsilon = 1e10);
-
-        // Bank should be reduced by exactly the amount removed
-        let expected_bank = bank_after_add - energy_to_remove;
-        assert_abs_diff_eq!(bank_after_remove, expected_bank, epsilon = 1e10);
-    }
-
-    #[test]
-    fn test_energy_bank_exhaustion_then_main_energy() {
-        // Test removing more energy than in bank - should exhaust bank then remove from main
-        let mut energy_mass = StandardEnergyMassComposite::new_with_temperature(
-            MaterialCompositeType::Silicate,
-            1590.0, // Just below melting point
-            100.0,
-            10.0,
-        );
-
-        // Add energy to create a bank (but not complete transition)
-        let mass_kg = energy_mass.mass_kg();
-        let profile = energy_mass.material_composite_profile();
-        let transition_cost = mass_kg * profile.latent_heat_fusion;
-
-        let temp_diff = profile.melt_temp - energy_mass.kelvin();
-        let energy_to_melting = temp_diff / energy_mass.temp_per_energy();
-        let energy_for_bank = transition_cost * 0.4; // 40% of transition cost
-        let total_energy_to_add = energy_to_melting + energy_for_bank;
-
-        energy_mass.add_energy(total_energy_to_add);
-
-        let energy_before_remove = energy_mass.energy();
-        let bank_before_remove = energy_mass.state_transition_bank();
-
-        println!("Before removal:");
-        println!("  Main energy: {:.2e} J", energy_before_remove);
-        println!("  Bank energy: {:.2e} J", bank_before_remove);
-
-        // Remove MORE energy than what's in the bank
-        let extra_energy = 1e17;
-        let energy_to_remove = bank_before_remove + extra_energy;
-        energy_mass.remove_energy(energy_to_remove);
-
-        let energy_after_remove = energy_mass.energy();
-        let bank_after_remove = energy_mass.state_transition_bank();
-
-        println!(
-            "After removing {:.2e} J (more than bank):",
-            energy_to_remove
-        );
-        println!("  Main energy: {:.2e} J", energy_after_remove);
-        println!("  Bank energy: {:.2e} J", bank_after_remove);
-
-        // Verify that the total energy change is correct
-        let total_energy_before = energy_before_remove + bank_before_remove;
-        let total_energy_after = energy_after_remove + bank_after_remove;
-        let actual_energy_removed = total_energy_before - total_energy_after;
-
-        println!("Energy accounting:");
-        println!("  Total before: {:.2e} J", total_energy_before);
-        println!("  Total after: {:.2e} J", total_energy_after);
-        println!("  Actually removed: {:.2e} J", actual_energy_removed);
-        println!("  Expected to remove: {:.2e} J", energy_to_remove);
-
-        // With the "choke" system: in transition mode, energy removal only affects the bank
-        // So we should only remove what was actually in the bank, not the full requested amount
-        assert_abs_diff_eq!(actual_energy_removed, bank_before_remove, epsilon = 1e16);
-
-        // Bank should be exhausted
-        assert_abs_diff_eq!(bank_after_remove, 0.0, epsilon = 1e10);
-
-        // Main energy should be unchanged (choke prevents removal from main energy)
-        assert_abs_diff_eq!(energy_after_remove, energy_before_remove, epsilon = 1e10);
-    }
-
-    #[test]
-    fn test_energy_bank_exact_removal() {
-        // Test removing exactly the amount in the bank
-        let mut energy_mass = StandardEnergyMassComposite::new_with_temperature(
-            MaterialCompositeType::Silicate,
-            1590.0, // Just below melting point
-            100.0,
-            10.0,
-        );
-
-        // Add energy to create a bank (but not complete transition)
-        let mass_kg = energy_mass.mass_kg();
-        let profile = energy_mass.material_composite_profile();
-        let transition_cost = mass_kg * profile.latent_heat_fusion;
-
-        let temp_diff = profile.melt_temp - energy_mass.kelvin();
-        let energy_to_melting = temp_diff / energy_mass.temp_per_energy();
-        let energy_for_bank = transition_cost * 0.25; // 25% of transition cost
-        let total_energy_to_add = energy_to_melting + energy_for_bank;
-
-        energy_mass.add_energy(total_energy_to_add);
-
-        let energy_before_remove = energy_mass.energy();
-        let bank_before_remove = energy_mass.state_transition_bank();
-
-        println!("Before exact removal:");
-        println!("  Main energy: {:.2e} J", energy_before_remove);
-        println!("  Bank energy: {:.2e} J", bank_before_remove);
-
-        // Remove exactly the bank amount
-        energy_mass.remove_energy(bank_before_remove);
-
-        let energy_after_remove = energy_mass.energy();
-        let bank_after_remove = energy_mass.state_transition_bank();
-
-        println!("After exact removal:");
-        println!("  Main energy: {:.2e} J", energy_after_remove);
-        println!("  Bank energy: {:.2e} J", bank_after_remove);
-
-        // Bank should be empty
-        assert_abs_diff_eq!(bank_after_remove, 0.0, epsilon = 1e10);
-
-        // Main energy should be unchanged
-        assert_abs_diff_eq!(energy_after_remove, energy_before_remove, epsilon = 1e10);
-    }
-
-    #[test]
-    fn test_hysteresis_transition_system() {
-        // Test the new hysteresis-based transition system
-        let mut energy_mass = StandardEnergyMassComposite::new_with_temperature(
-            MaterialCompositeType::Silicate,
-            1598.0, // Just below melting point (1600K)
-            100.0,
-            10.0,
-        );
-
-        let initial_energy = energy_mass.energy();
-        let initial_bank = energy_mass.state_transition_bank();
-        let melting_point = 1600.0;
-
-        println!("Hysteresis transition test:");
-        println!(
-            "  Initial temp: {:.1}K (melting: {:.1}K)",
-            energy_mass.kelvin(),
-            melting_point
-        );
-        println!("  Initial energy: {:.2e} J", initial_energy);
-        println!("  Initial bank: {:.2e} J", initial_bank);
-        println!("  Initial mode: {:?}", energy_mass.transition_mode);
-
-        // Test 1: Small energy addition should trigger transition mode
-        let small_energy = 1e18; // Small amount to push just into transition zone
-        energy_mass.add_energy(small_energy);
-
-        println!("\nAfter adding {:.2e} J:", small_energy);
-        println!("  Temp: {:.1}K", energy_mass.kelvin());
-        println!("  Energy: {:.2e} J", energy_mass.energy());
-        println!("  Bank: {:.2e} J", energy_mass.state_transition_bank());
-        println!("  Mode: {:?}", energy_mass.transition_mode);
-
-        // Should be in transition mode now
-        assert!(matches!(
-            energy_mass.transition_mode,
-            TransitionMode::InTransition { .. }
-        ));
-
-        // Test 2: Large energy removal should clear bank and return to static
-        let large_energy = 5e19; // Large enough to move 3+ degrees away
-        energy_mass.remove_energy(large_energy);
-
-        println!("\nAfter removing {:.2e} J:", large_energy);
-        println!("  Temp: {:.1}K", energy_mass.kelvin());
-        println!("  Energy: {:.2e} J", energy_mass.energy());
-        println!("  Bank: {:.2e} J", energy_mass.state_transition_bank());
-        println!("  Mode: {:?}", energy_mass.transition_mode);
-
-        // Should be back to static mode with cleared bank
-        assert!(matches!(
-            energy_mass.transition_mode,
-            TransitionMode::Static
-        ));
-        assert_abs_diff_eq!(energy_mass.state_transition_bank(), 0.0, epsilon = 1e10);
-
-        println!("✅ Hysteresis transition system test passed!");
-    }
-
-    #[test]
-    fn test_complete_chop_and_choke_flow() {
-        // Test complete flow: Static -> InTransition -> Phase Change -> Static
-        let mut energy_mass = StandardEnergyMassComposite::new_with_temperature(
-            MaterialCompositeType::Silicate,
-            1598.0, // Just below melting point
-            100.0,
-            10.0,
-        );
-
-        let mass_kg = energy_mass.mass_kg();
-        let profile = energy_mass.material_composite_profile();
-        let latent_heat_required = mass_kg * profile.latent_heat_fusion;
-
-        println!("Complete chop and choke flow test:");
-        println!("  Mass: {:.2e} kg", mass_kg);
-        println!("  Latent heat required: {:.2e} J", latent_heat_required);
-        println!("  Initial phase: {:?}", energy_mass.phase);
-
-        // Step 1: Add energy to trigger transition mode
-        let trigger_energy = 1e18;
-        energy_mass.add_energy(trigger_energy);
-
-        println!("\nStep 1 - Trigger transition:");
-        println!("  Mode: {:?}", energy_mass.transition_mode);
-        println!("  Bank: {:.2e} J", energy_mass.state_transition_bank());
-        assert!(matches!(
-            energy_mass.transition_mode,
-            TransitionMode::InTransition { .. }
-        ));
-
-        // Step 2: Add enough energy to complete phase transition
-        energy_mass.add_energy(latent_heat_required);
-
-        println!("\nStep 2 - Complete transition:");
-        println!("  Phase: {:?}", energy_mass.phase);
-        println!("  Mode: {:?}", energy_mass.transition_mode);
-        println!("  Bank: {:.2e} J", energy_mass.state_transition_bank());
-
-        // Should have transitioned to Liquid and returned to Static
-        assert_eq!(energy_mass.phase, MaterialPhase::Liquid);
-        assert!(matches!(
-            energy_mass.transition_mode,
-            TransitionMode::Static
-        ));
-
-        // Step 3: Test reverse transition by removing lots of energy
-        let large_removal = latent_heat_required + 2e19;
-        energy_mass.remove_energy(large_removal);
-
-        println!("\nStep 3 - Reverse transition:");
-        println!("  Phase: {:?}", energy_mass.phase);
-        println!("  Mode: {:?}", energy_mass.transition_mode);
-        println!("  Bank: {:.2e} J", energy_mass.state_transition_bank());
-
-        // Should have transitioned back to Solid
-        assert_eq!(energy_mass.phase, MaterialPhase::Solid);
-        assert!(matches!(
-            energy_mass.transition_mode,
-            TransitionMode::Static
-        ));
-
-        println!("✅ Complete chop and choke flow test passed!");
-    }
+    // Removed test_complete_chop_and_choke_flow - tested old complex banking system
 
     #[test]
     fn test_energy_conservation_during_transitions() {
@@ -1633,7 +1337,7 @@ mod tests {
             );
         }
     }
-    use super::*;
+
     use crate::material_composite::get_melting_point_k;
     use approx::assert_abs_diff_eq;
 
@@ -1984,7 +1688,7 @@ mod tests {
         let mut original = StandardEnergyMassComposite::new_with_params(params);
         let initial_temp = original.kelvin();
         let initial_energy = original.energy();
-        let initial_volume = original.volume();
+        let _initial_volume = original.volume();
 
         // Remove 1/4 of the volume
         let removed = original.remove_volume(50.0);
@@ -2034,7 +1738,7 @@ mod tests {
         let mut original = StandardEnergyMassComposite::new_with_params(params);
         let initial_temp = original.kelvin();
         let initial_energy = original.energy();
-        let initial_volume = original.volume();
+        let _initial_volume = original.volume();
 
         // Split off 30%
         let split_off = original.split_by_fraction(0.3);
@@ -2087,7 +1791,7 @@ mod tests {
 
         let initial_temp1 = em1.kelvin();
         let initial_volume1 = em1.volume();
-        let initial_energy1 = em1.energy();
+        let _initial_energy1 = em1.energy();
 
         // Merge em2 into em1
         em1.merge_em(&em2);

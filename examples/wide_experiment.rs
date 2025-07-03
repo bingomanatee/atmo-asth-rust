@@ -7,21 +7,19 @@ use std::io::Write;
 
 // Import the real EnergyMass trait and material system
 extern crate atmo_asth_rust;
-use atmo_asth_rust::energy_mass::EnergyMass;
+
 use atmo_asth_rust::energy_mass_composite::{
-    EnergyMassComposite, MaterialCompositeType, MaterialPhase, StandardEnergyMassComposite,
-    get_profile_fast,
+    EnergyMassComposite, MaterialCompositeType,
 };
-use atmo_asth_rust::example::{ExperimentState, ExperimentSpecs, ThermalLayerNodeWide, ThermalLayerNodeWideParams, ThermalLayerNodeWideTempParams, FourierThermalTransfer};
-use atmo_asth_rust::material_composite::{get_melting_point_k, get_boiling_point_k};
+use atmo_asth_rust::example::{ExperimentState, ExperimentSpecs, ThermalLayerNodeWide, ThermalLayerNodeWideTempParams};
+use atmo_asth_rust::material_composite::get_melting_point_k;
 // Re-export MaterialPhase for easier access
-use atmo_asth_rust::temp_utils::energy_from_kelvin;
+
 use atmo_asth_rust::math_utils::lerp;
-use atmo_asth_rust::assert_deviation;
-use more_asserts::assert_lt;
+
 
 mod test_utils_1km3;
-use test_utils_1km3::{temperature_baselines, validate_temperature_gradient, validate_boundary_conditions};
+
 
 // Export layer indices - key layer positions for analysis
 const EXPORT_LAYER_INDICES: [usize; 9] = [10, 15, 20, 25, 30, 35, 40, 45, 50];

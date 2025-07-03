@@ -148,7 +148,7 @@ impl ThermalLayerNode {
     /// Set the material phase (solid, liquid, gas)
     /// Note: This method no longer forces temperature changes.
     /// Phase transitions are now handled automatically by the energy bank system.
-    pub fn set_material_phase(&mut self, phase: MaterialPhase) {
+    pub fn set_material_phase(&mut self, _phase: MaterialPhase) {
         // Phase transitions are now handled automatically by the energy mass system
         // This method is kept for compatibility but doesn't force temperature changes
         // The actual phase will be determined by the current temperature and energy bank state
@@ -210,7 +210,7 @@ impl ThermalLayerNode {
 
 
     /// Calculate outgassing based on temperature
-    pub fn calculate_outgassing(&mut self, config: &ExperimentState, years: f64) -> f64 {
+    pub fn calculate_outgassing(&mut self, _config: &ExperimentState, _years: f64) -> f64 {
         0.0
     }
 }

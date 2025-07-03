@@ -14,7 +14,7 @@ impl Planet {
         // Calculate Earth-like mass and gravity from radius
         let earth_radius_km = 6371.0;
         let earth_mass_kg = 5.972e24;
-        let earth_gravity = 9.81;
+        let _earth_gravity = 9.81;
 
         // Scale mass by volume ratio (assuming similar density)
         let volume_ratio = (radius / earth_radius_km).powi(3);

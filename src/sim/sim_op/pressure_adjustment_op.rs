@@ -30,8 +30,8 @@ impl SimOp for PressureAdjustmentOp {
     fn init_sim(&mut self, sim: &mut Simulation) {
         // Applying pressure compaction during initialization
 
-        let mut total_cells_processed = 0;
-        let mut total_pressure_applied = 0.0;
+        let mut _total_cells_processed = 0;
+        let mut _total_pressure_applied = 0.0;
         let mut max_pressure: f64 = 0.0;
 
         for cell in sim.cells.values_mut() {
@@ -43,9 +43,9 @@ impl SimOp for PressureAdjustmentOp {
             let cell_max_pressure = pressures.iter().fold(0.0f64, |a, &b| a.max(b));
             let cell_total_pressure: f64 = pressures.iter().sum();
 
-            total_pressure_applied += cell_total_pressure;
+            _total_pressure_applied += cell_total_pressure;
             max_pressure = max_pressure.max(cell_max_pressure);
-            total_cells_processed += 1;
+            _total_cells_processed += 1;
 
             // Debug output removed for cleaner simulation output
         }

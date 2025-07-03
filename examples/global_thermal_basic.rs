@@ -1,6 +1,6 @@
 use atmo_asth_rust::energy_mass_composite::MaterialCompositeType;
 use atmo_asth_rust::sim::sim_op::{
-    PressureAdjustmentOp, SurfaceEnergyInitOp, SurfaceEnergyInitParams, TemperatureReportingOp,
+    PressureAdjustmentOp, SurfaceEnergyInitOp, TemperatureReportingOp,
 };
 use atmo_asth_rust::global_thermal::global_h3_cell::{GlobalH3CellConfig, LayerConfig};
 use atmo_asth_rust::planet::Planet;
@@ -36,7 +36,7 @@ pub fn run_global_thermal_basic_example() {
     let mut sim = Simulation::new(sim_props);
 
     // Configure cells with standard Earth-like layout
-    let planet_rc = Rc::new(planet);
+    let _planet_rc = Rc::new(planet);
     sim.make_cells(|cell_index, planet| {
         // Standard cell layout: 4×20km atmosphere + 10×4km lithosphere + 10×8km asthenosphere
         let layer_schedule = vec![

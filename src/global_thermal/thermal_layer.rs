@@ -66,10 +66,10 @@ impl ThermalLayer {
     /// Create a new solid layer with realistic material density (will be compacted by pressure)
     pub fn new_solid(start_depth_km: f64, height_km: f64, surface_area_km2: f64, material_type: MaterialCompositeType, layer_index: usize, is_surface_layer: bool) -> Self {
         // Calculate full volume for this layer
-        let volume_m3 = surface_area_km2 * height_km * 1e9; // km³ to m³
+        let _volume_m3 = surface_area_km2 * height_km * 1e9; // km³ to m³
 
         // Create with standard material density
-        let mut energy_mass = StandardEnergyMassComposite::new_with_params(EnergyMassParams {
+        let energy_mass = StandardEnergyMassComposite::new_with_params(EnergyMassParams {
             material_type,
             initial_phase: MaterialPhase::Solid,
             energy_joules: 0.0,
@@ -238,7 +238,7 @@ impl ThermalLayer {
 
         // Increase density (decrease volume) due to compression
         // Mass stays the same, but volume decreases
-        let original_mass = self.mass_kg();
+        let _original_mass = self.mass_kg();
         let original_volume_m3 = self.surface_area_km2 * self.height_km * 1e9;
         let compressed_volume_m3 = original_volume_m3 / compression_ratio;
 

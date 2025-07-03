@@ -1,4 +1,4 @@
-use crate::global_thermal::global_h3_cell::{GlobalH3Cell, GlobalH3CellConfig, LayerConfig};
+use crate::global_thermal::global_h3_cell::{GlobalH3Cell, GlobalH3CellConfig};
 use crate::h3_utils::H3Utils;
 use crate::planet::Planet;
 use crate::sim::sim_op::{SimOp, SimOpHandle};
@@ -38,7 +38,7 @@ pub struct SimProps {
 impl Simulation {
     pub fn new(props: SimProps) -> Simulation {
         let ops = props.ops.into_iter().map(|handle| handle.op).collect();
-        let mut sim = Simulation {
+        let sim = Simulation {
             planet: props.planet,
             ops,
             resolution: props.res,

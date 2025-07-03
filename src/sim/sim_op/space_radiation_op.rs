@@ -159,10 +159,10 @@ impl SpaceRadiationOp {
     }
 
     /// Report radiation results
-    fn report_radiation_results(&self, time_years: f64) {
-        let total_radiated = self.total_radiated_energy;
-        let cells_processed = self.cells_processed;
-        let avg_per_cell = self.average_radiated_per_cell();
+    fn report_radiation_results(&self, _time_years: f64) {
+        let _total_radiated = self.total_radiated_energy;
+        let _cells_processed = self.cells_processed;
+        let _avg_per_cell = self.average_radiated_per_cell();
 
         // Space radiation step completed
     }

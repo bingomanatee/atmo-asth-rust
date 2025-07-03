@@ -48,7 +48,7 @@ pub fn run_simple_global_test() {
     let mut sim = Simulation::new(sim_props);
     
     // Configure cells with standard Earth-like layout
-    let planet_rc = Rc::new(planet);
+    let _planet_rc = Rc::new(planet);
     sim.make_cells(|cell_index, planet| {
         // Standard cell layout: 4×20km atmosphere + 10×4km lithosphere + 10×8km asthenosphere
         let layer_schedule = vec![
