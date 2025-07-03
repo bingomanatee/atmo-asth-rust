@@ -14,35 +14,57 @@ pub struct ThermalLayer {
     
     /// Unified energy and mass system that handles all material phases
     pub energy_mass: StandardEnergyMassComposite,
-    
+
     /// Surface area of this layer in km²
     pub surface_area_km2: f64,
+
+    /// Index of this layer (0 = top, higher = deeper)
+    pub layer_index: usize,
+
+    /// Whether this is the surface layer (first non-atmospheric layer)
+    pub is_surface_layer: bool,
 }
 
 impl ThermalLayer {
-    /// Create a new atmospheric layer with zero initial density (will be filled by outgassing)
-    pub fn new_atmospheric(start_depth_km: f64, height_km: f64, surface_area_km2: f64) -> Self {
+
+    /// Create a new atmospheric layer with reasonable volume and gaseous temperature
+    pub fn new_atmospheric(start_depth_km: f64, height_km: f64, surface_area_km2: f64, layer_index: usize) -> Self {
+        // Use volume = 5 km³ as suggested to avoid zero density issues
+        let volume_km3 = 5.0;
+
+        // Calculate reasonable atmospheric temperature based on altitude
+        // Use standard atmospheric lapse rate: surface temp - 6.5K per km altitude
+        let surface_temp_k = 288.0; // Standard surface temperature (15°C)
+        let lapse_rate_k_per_km = 6.5;
+        let altitude_km = (-start_depth_km + height_km / 2.0).max(0.0); // Center altitude of layer
+        let atmospheric_temp_k = (surface_temp_k - altitude_km * lapse_rate_k_per_km).max(200.0); // Minimum 200K
+
         let mut energy_mass = StandardEnergyMassComposite::new_with_params(
             EnergyMassParams {
                 material_type: MaterialCompositeType::Air,
                 initial_phase: MaterialPhase::Gas,
-                energy_joules: 0.0,
-                volume_km3: surface_area_km2 * height_km,
+                energy_joules: 0.0, // Will be set by temperature
+                volume_km3,
                 height_km,
                 pressure_gpa: 0.0,
             }
         );
-        
+
+        // Set the atmospheric temperature
+        energy_mass.set_kelvin(atmospheric_temp_k);
+
         Self {
             start_depth_km,
             height_km,
             energy_mass,
             surface_area_km2,
+            layer_index,
+            is_surface_layer: false, // Atmospheric layers are never surface layers
         }
     }
 
     /// Create a new solid layer with realistic material density (will be compacted by pressure)
-    pub fn new_solid(start_depth_km: f64, height_km: f64, surface_area_km2: f64, material_type: MaterialCompositeType) -> Self {
+    pub fn new_solid(start_depth_km: f64, height_km: f64, surface_area_km2: f64, material_type: MaterialCompositeType, layer_index: usize, is_surface_layer: bool) -> Self {
         // Calculate full volume for this layer
         let volume_m3 = surface_area_km2 * height_km * 1e9; // km³ to m³
 
@@ -61,15 +83,17 @@ impl ThermalLayer {
             height_km,
             energy_mass,
             surface_area_km2,
+            layer_index,
+            is_surface_layer,
         }
     }
 
     /// Create a new thermal layer (legacy method)
     pub fn new(start_depth_km: f64, height_km: f64, surface_area_km2: f64, material_type: MaterialCompositeType) -> Self {
         if material_type == MaterialCompositeType::Air {
-            Self::new_atmospheric(start_depth_km, height_km, surface_area_km2)
+            Self::new_atmospheric(start_depth_km, height_km, surface_area_km2, 0)
         } else {
-            Self::new_solid(start_depth_km, height_km, surface_area_km2, material_type)
+            Self::new_solid(start_depth_km, height_km, surface_area_km2, material_type, 0, false)
         }
     }
     
@@ -80,7 +104,7 @@ impl ThermalLayer {
     
     /// Check if this layer is in the atmosphere (above surface)
     pub fn is_atmospheric(&self) -> bool {
-        self.start_depth_km < 0.0
+        self.energy_mass.material_composite_type() == MaterialCompositeType::Air
     }
     
     /// Check if this layer crosses the surface boundary
@@ -135,6 +159,11 @@ impl ThermalLayer {
     pub fn mass_kg(&self) -> f64 {
         self.energy_mass.mass_kg()
     }
+
+    /// Get the volume of this layer in km³
+    pub fn volume_km3(&self) -> f64 {
+        self.surface_area_km2 * self.height_km
+    }
     
     /// Get layer energy
     pub fn energy_j(&self) -> f64 {
@@ -164,8 +193,9 @@ impl ThermalLayer {
     
     /// Update phase based on current temperature and pressure
     pub fn update_phase(&mut self, pressure_pa: f64) {
-        // Update phase considering pressure effects
-        self.energy_mass.update_phase_with_pressure(pressure_pa);
+        // Convert Pa to GPa and update phase considering pressure effects
+        let pressure_gpa = pressure_pa / 1e9;
+        self.energy_mass.set_pressure_gpa(pressure_gpa);
     }
     
     /// Check if this layer has undergone a phase transition
@@ -213,11 +243,15 @@ impl ThermalLayer {
         let compressed_volume_m3 = original_volume_m3 / compression_ratio;
 
         // Update the energy mass with new compressed volume
-        self.energy_mass = StandardEnergyMassComposite::new_with_material_and_mass(
-            self.energy_mass.material_type(),
-            compressed_volume_m3,
-            original_mass,
-        );
+        let compressed_volume_km3 = compressed_volume_m3 / 1e9; // Convert back to km³
+        self.energy_mass = StandardEnergyMassComposite::new_with_params(EnergyMassParams {
+            material_type: self.energy_mass.material_composite_type(),
+            initial_phase: self.energy_mass.phase(),
+            energy_joules: self.energy_mass.energy_joules,
+            volume_km3: compressed_volume_km3,
+            height_km: self.height_km,
+            pressure_gpa: pressure_pa / 1e9, // Convert Pa to GPa
+        });
 
         // Preserve temperature during compression (adiabatic compression would increase temp slightly)
         let temp = self.temperature_k();
@@ -233,7 +267,7 @@ impl ThermalLayer {
     /// Check if this layer is significantly compacted
     pub fn is_compacted(&self) -> bool {
         // Compare current density to standard material density
-        let standard_density = self.energy_mass.material_type().standard_density_kg_m3();
+        let standard_density = self.energy_mass.material_composite_profile().density_kg_m3;
         let current_density = self.current_density_kg_m3();
         current_density > standard_density * 1.1 // 10% increase indicates compaction
     }

@@ -32,7 +32,7 @@ impl SimOp for PressureAdjustmentOp {
 
         let mut total_cells_processed = 0;
         let mut total_pressure_applied = 0.0;
-        let mut max_pressure = 0.0;
+        let mut max_pressure: f64 = 0.0;
 
         for cell in sim.cells.values_mut() {
             // Apply pressure compaction to this cell (handles tuple structure internally)
@@ -40,25 +40,14 @@ impl SimOp for PressureAdjustmentOp {
 
             // Collect statistics from current state
             let pressures = cell.calculate_layer_pressures();
-            let cell_max_pressure = pressures.iter().fold(0.0, |a, &b| a.max(b));
+            let cell_max_pressure = pressures.iter().fold(0.0f64, |a, &b| a.max(b));
             let cell_total_pressure: f64 = pressures.iter().sum();
 
             total_pressure_applied += cell_total_pressure;
             max_pressure = max_pressure.max(cell_max_pressure);
             total_cells_processed += 1;
 
-            if sim.debug && total_cells_processed <= 3 {
-                println!("  Cell {:?}: max pressure {:.2e} Pa, {} layers",
-                         cell.h3_index, cell_max_pressure, cell.layers_t.len());
-
-                // Show pressure profile for first few layers
-                for (i, pressure) in pressures.iter().enumerate().take(5) {
-                    if let Some((current, _)) = cell.layers_t.get(i) {
-                        println!("    Layer {}: {:.2e} Pa at {:.1}km depth",
-                                 i, pressure, current.start_depth_km);
-                    }
-                }
-            }
+            // Debug output removed for cleaner simulation output
         }
 
         println!("✅ Pressure compaction complete:");

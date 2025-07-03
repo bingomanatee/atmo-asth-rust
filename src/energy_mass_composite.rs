@@ -1,4 +1,3 @@
-
 use crate::atmospheric_energy_mass_composite::AtmosphericEnergyMass;
 use crate::constants::{KM3_TO_M3, M2_PER_KM2, SECONDS_PER_YEAR, SIGMA_KM2_YEAR};
 use crate::material_composite::resolve_phase_from_temperature_and_pressure;
@@ -29,10 +28,6 @@ pub struct TransitionResult {
     pub phase_bank_j: f64,
 }
 
-
-
-
-
 /// Parameters for creating StandardEnergyMassComposite
 pub struct EnergyMassParams {
     pub material_type: MaterialCompositeType,
@@ -42,8 +37,6 @@ pub struct EnergyMassParams {
     pub height_km: f64,
     pub pressure_gpa: f64, // Pressure in Gigapascals
 }
-
-
 
 /// Trait for objects that manage the relationship between energy, mass, and temperature
 /// Maintains consistency between these properties using thermodynamic relationships
@@ -159,7 +152,6 @@ pub trait EnergyMassComposite: std::any::Any {
     ///
     /// Formula: κ = k / (ρ·cp), d = sqrt(κ · dt), converted to km
     fn skin_depth_km(&self, time_years: f64) -> f64;
-
     /// Remove volume (enforces zero minimum, maintains temperature)
     fn remove_volume_internal(&mut self, volume_to_remove: f64);
 
@@ -182,10 +174,6 @@ pub trait EnergyMassComposite: std::any::Any {
     /// This controls energy transfer efficiency between layers (tunable for equilibrium)
     fn thermal_transmission_r0(&self) -> f64;
 }
-
-
-
-
 
 /// Create a complete atmospheric column with realistic mass distribution
 /// Returns a vector of atmospheric layers from surface to top
@@ -214,7 +202,11 @@ pub fn create_atmospheric_column_for_km2(
             stratosphere_temp_k
         };
 
-        let layer = Box::new(AtmosphericEnergyMass::create_layer_for_km2(layer_index, layer_height_km, layer_temp)) as Box<dyn EnergyMassComposite>;
+        let layer = Box::new(AtmosphericEnergyMass::create_layer_for_km2(
+            layer_index,
+            layer_height_km,
+            layer_temp,
+        )) as Box<dyn EnergyMassComposite>;
         layers.push(layer);
     }
 
@@ -340,11 +332,20 @@ pub struct StandardEnergyMassComposite {
     pub thermal_transmission_r0: f64, // R0 thermal transmission coefficient (set at creation)
     pub state_transition_bank: f64, // Energy bank for phase transitions
     pub transition_mode: TransitionMode, // Transition mode for hysteresis management
-    pub pressure_gpa: f64, // Pressure in Gigapascals (affects phase transitions)
+    pub pressure_gpa: f64,    // Pressure in Gigapascals (affects phase transitions)
 }
 
-
 impl StandardEnergyMassComposite {
+    /// Get base radiation depth for surface radiation calculations
+    pub fn base_radiation_depth_m() -> f64 {
+        10000.0 //  for geological timescale radiation to space
+    }
+
+    /// Get reference density for radiation depth scaling
+    pub fn reference_density_kg_m3() -> f64 {
+        2500.0 // kg/m³ - typical silicate rock density
+    }
+
     /// Create a new StandardEnergyMassComposite with specified parameters (alias for new_with_material_state_and_energy)
     pub fn new_with_params(params: EnergyMassParams) -> Self {
         Self::new_with_material_state_and_energy(params)
@@ -438,8 +439,6 @@ impl StandardEnergyMassComposite {
     // current_material_composite() method removed - MaterialComposite struct no longer exists
     // Use material_composite_type() and get_profile_fast() instead
 
-
-
     /// Get the current state transition bank energy
     pub fn state_transition_bank(&self) -> f64 {
         self.state_transition_bank
@@ -456,11 +455,11 @@ impl StandardEnergyMassComposite {
             MaterialPhase::Solid => {
                 // Solid -> Liquid: use latent heat of fusion
                 mass_kg * profile.latent_heat_fusion
-            },
+            }
             MaterialPhase::Liquid => {
                 // Liquid -> Gas: use latent heat of vaporization
                 mass_kg * profile.latent_heat_vapor
-            },
+            }
             MaterialPhase::Gas => {
                 // Already at highest phase, no transition possible
                 return;
@@ -495,11 +494,11 @@ impl StandardEnergyMassComposite {
             MaterialPhase::Gas => {
                 // Gas -> Liquid: release latent heat of vaporization
                 mass_kg * profile.latent_heat_vapor
-            },
+            }
             MaterialPhase::Liquid => {
                 // Liquid -> Solid: release latent heat of fusion
                 mass_kg * profile.latent_heat_fusion
-            },
+            }
             MaterialPhase::Solid => {
                 // Already at lowest phase, no transition possible
                 return;
@@ -660,17 +659,21 @@ impl StandardEnergyMassComposite {
 
         energy_transfer
     }
-
 }
 
 impl EnergyMassComposite for StandardEnergyMassComposite {
     /// Get the current temperature in Kelvin
+    /// Includes half the phase transition bank energy for realistic perceived temperature
     fn kelvin(&self) -> f64 {
         let mass_kg = self.mass_kg();
         if mass_kg <= 0.0 {
             return 0.0;
         }
-        self.energy_joules * self.temp_per_energy()
+
+        // Include half the bank energy in temperature calculation
+        // This represents the fact that partially melted material still contributes to thermal behavior
+        let effective_energy = self.energy_joules + (self.state_transition_bank * 0.5);
+        effective_energy * self.temp_per_energy()
     }
 
     /// Set the temperature in Kelvin, updating energy accordingly (volume stays constant)
@@ -722,12 +725,13 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
 
         // Pressure enhancement of thermal conductivity
         let pressure_multiplier = match self.material_type {
-            MaterialCompositeType::Silicate => 1.0 + self.pressure_gpa * 0.02,  // 2% per GPa
+            MaterialCompositeType::Silicate => 1.0 + self.pressure_gpa * 0.02, // 2% per GPa
             MaterialCompositeType::Basaltic => 1.0 + self.pressure_gpa * 0.015, // 1.5% per GPa
-            MaterialCompositeType::Granitic => 1.0 + self.pressure_gpa * 0.01,  // 1% per GPa
-            MaterialCompositeType::Metallic => 1.0 + self.pressure_gpa * 0.05,  // 5% per GPa (metals more sensitive)
-            _ => 1.0 + self.pressure_gpa * 0.02,  // Default 2% per GPa
-        }.min(3.0); // Cap at 3x increase
+            MaterialCompositeType::Granitic => 1.0 + self.pressure_gpa * 0.01, // 1% per GPa
+            MaterialCompositeType::Metallic => 1.0 + self.pressure_gpa * 0.05, // 5% per GPa (metals more sensitive)
+            _ => 1.0 + self.pressure_gpa * 0.02,                               // Default 2% per GPa
+        }
+        .min(3.0); // Cap at 3x increase
 
         base_conductivity * pressure_multiplier
     }
@@ -825,29 +829,30 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
     ) -> f64 {
         let surface_temp = self.kelvin();
 
-        // Calculate thermal skin depth for this material and time step
-        let skin_depth = self.skin_depth_km(time_years);
+        // Calculate surface radiation depth based on material density alone
+        let radiation_depth = self.skin_depth_km(time_years);
 
-        // Limit skin depth to the actual layer height
-        let effective_skin_depth = skin_depth.min(self.height_km());
+        // Clamp radiation depth to the actual layer height for current implementation
+        // In the future, we may consider deeper radiation that extends beyond single layers
+        let effective_radiation_depth = radiation_depth.min(self.height_km());
 
         // Calculate the fraction of the layer that participates in radiation
         let radiation_fraction = if self.height_km() > 0.0 {
-            effective_skin_depth / self.height_km()
+            effective_radiation_depth / self.height_km()
         } else {
             1.0 // If no height, radiate everything
         };
 
         // Calculate radiated energy per km² using Stefan-Boltzmann law
         let radiated_energy_per_km2 = SIGMA_KM2_YEAR * surface_temp.powi(4) * time_years;
-        let total_radiated_energy = radiated_energy_per_km2 * area_km2;
+        let energy_to_radiate = radiated_energy_per_km2 * area_km2;
+        let available_energy = self.energy() * radiation_fraction;
+        let energy_to_remove = energy_to_radiate.min(available_energy);
 
-        // Only the skin depth fraction of energy is available for radiation
-        let skin_energy = self.energy() * radiation_fraction;
-
-        // Limit radiation to the smaller of: calculated radiation or available skin energy
-        // The skin depth naturally provides the physical constraint
-        let energy_to_remove = total_radiated_energy.min(skin_energy);
+        println!(
+            "-------- radiated_energy_per_km2: {}, energy_to_radiate: {}, available_energy: {}",
+            radiated_energy_per_km2, energy_to_radiate, available_energy,
+        );
 
         self.remove_joules(energy_to_remove);
 
@@ -937,14 +942,28 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
     }
 
     /// Compute thermal-diffusive skin depth in kilometres for this material
-    fn skin_depth_km(&self, time_years: f64) -> f64 {
-        // thermal diffusivity (m²/s)
-        let kappa =
-            self.thermal_conductivity() / (self.density_kgm3() * self.specific_heat_j_kg_k());
-        // timestep in seconds
-        let dt_secs = time_years * SECONDS_PER_YEAR;
-        // skin depth in metres → convert to km
-        (kappa * dt_secs).sqrt() / 1000.0
+    fn skin_depth_km(&self, _time_years: f64) -> f64 {
+        let density_kg_m3 = self.density_kgm3();
+
+        // Base radiation depth for typical rock density
+        let base_depth_m = Self::base_radiation_depth_m();
+        let reference_density = Self::reference_density_kg_m3();
+
+        // Inverse relationship: higher density = shallower radiation depth
+        let depth_m = base_depth_m * (reference_density / density_kg_m3).sqrt();
+
+        // Convert to km - no clamping, let application handle layer boundaries
+        let depth_km = depth_m / 1000.0;
+
+        // DEBUG: Print skin depth calculation for high-density materials
+        if density_kg_m3 > 1000.0 {
+            println!(
+                "🔬 SKIN DEPTH DEBUG: density={:.1} kg/m³, base={:.1}m, depth={:.3}km",
+                density_kg_m3, base_depth_m, depth_km
+            );
+        }
+
+        depth_km
     }
 
     fn material_composite_type(&self) -> MaterialCompositeType {
@@ -963,7 +982,8 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
         self.pressure_gpa = pressure_gpa;
         // Update phase based on current temperature and new pressure
         let temp_k = self.kelvin();
-        let new_phase = resolve_phase_from_temperature_and_pressure(&self.material_type, temp_k, pressure_gpa);
+        let new_phase =
+            resolve_phase_from_temperature_and_pressure(&self.material_type, temp_k, pressure_gpa);
         self.phase = new_phase;
     }
 
@@ -974,32 +994,61 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
     }
 
     fn add_energy(&mut self, energy_joules: f64) {
-        match &self.transition_mode {
-            TransitionMode::Static => {
-                // In static mode: add to main energy, then check for transitions
-                self.energy_joules += energy_joules;
-                self.handle_transition_logic();
-            }
-            TransitionMode::InTransition { .. } => {
-                // In transition mode: all energy goes to bank ("choke")
-                self.state_transition_bank += energy_joules;
-                self.handle_transition_logic();
-            }
+        // Get current temperature and material properties
+        let current_temp = self.kelvin();
+        let profile = self.current_material_state_profile();
+        let melt_temp_min = profile.melt_temp_min.unwrap_or(profile.melt_temp);
+        let melt_temp_max = profile.melt_temp_max.unwrap_or(profile.melt_temp);
+
+        // Check if we're in the transition range
+        if current_temp >= melt_temp_min && current_temp <= melt_temp_max {
+            // Gradual transition: split energy between main and bank based on position in range
+            let transition_fraction = if melt_temp_max > melt_temp_min {
+                ((current_temp - melt_temp_min) / (melt_temp_max - melt_temp_min)).clamp(0.0, 1.0)
+            } else {
+                0.0 // No range, no transition
+            };
+
+            let energy_to_bank = energy_joules * transition_fraction;
+            let energy_to_main = energy_joules - energy_to_bank;
+
+            self.energy_joules += energy_to_main;
+            self.state_transition_bank += energy_to_bank;
+        } else {
+            // Outside transition range: all energy goes to main
+            self.energy_joules += energy_joules;
         }
     }
 
     fn remove_energy(&mut self, energy_joules: f64) {
-        match &self.transition_mode {
-            TransitionMode::Static => {
-                // In static mode: remove from main energy, then check for transitions
-                self.energy_joules -= energy_joules;
-                self.handle_transition_logic();
-            }
-            TransitionMode::InTransition { .. } => {
-                // In transition mode: all energy removal goes to bank ("choke")
-                self.state_transition_bank -= energy_joules;
-                self.handle_transition_logic();
-            }
+        // Get current temperature and material properties
+        let current_temp = self.kelvin();
+        let profile = self.current_material_state_profile();
+        let melt_temp_min = profile.melt_temp_min.unwrap_or(profile.melt_temp);
+        let melt_temp_max = profile.melt_temp_max.unwrap_or(profile.melt_temp);
+
+        // Check if we're in the transition range
+        if current_temp >= melt_temp_min && current_temp <= melt_temp_max {
+            // Gradual transition: split energy removal between bank and main based on position in range
+            let transition_fraction = if melt_temp_max > melt_temp_min {
+                ((current_temp - melt_temp_min) / (melt_temp_max - melt_temp_min)).clamp(0.0, 1.0)
+            } else {
+                0.0 // No range, no transition
+            };
+
+            let energy_from_bank = energy_joules * transition_fraction;
+            let energy_from_main = energy_joules - energy_from_bank;
+
+            // Remove from bank first, then main (but respect available amounts)
+            let available_bank = self.state_transition_bank.max(0.0);
+            let actual_from_bank = energy_from_bank.min(available_bank);
+            let remaining_to_remove = energy_joules - actual_from_bank;
+
+            self.state_transition_bank -= actual_from_bank;
+            self.energy_joules = (self.energy_joules - remaining_to_remove).max(0.0);
+        } else {
+            // Outside transition range: remove from main energy only
+            self.energy_joules = (self.energy_joules - energy_joules).max(0.0);
         }
     }
 
@@ -1016,7 +1065,10 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
         self.energy_joules -= energy_joules;
 
         // Add energy to recipient using direct manipulation if possible
-        if let Some(standard_recipient) = recipient.as_any_mut().downcast_mut::<StandardEnergyMassComposite>() {
+        if let Some(standard_recipient) = recipient
+            .as_any_mut()
+            .downcast_mut::<StandardEnergyMassComposite>()
+        {
             // Direct manipulation for StandardEnergyMassComposite
             standard_recipient.energy_joules += energy_joules;
         } else {
@@ -1030,7 +1082,6 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
     fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
-
 }
 
 impl StandardEnergyMassComposite {
@@ -1076,7 +1127,7 @@ impl StandardEnergyMassComposite {
                 // Check if bank has shifted to opposite direction - if so, clear and go static
                 let bank_opposes_transition = match target_phase {
                     MaterialPhase::Liquid => self.state_transition_bank < 0.0, // Negative bank opposes heating
-                    MaterialPhase::Solid => self.state_transition_bank > 0.0,  // Positive bank opposes cooling
+                    MaterialPhase::Solid => self.state_transition_bank > 0.0, // Positive bank opposes cooling
                     _ => false,
                 };
 
@@ -1147,9 +1198,6 @@ impl StandardEnergyMassComposite {
     }
 }
 
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1157,6 +1205,93 @@ mod tests {
     // Removed test_state_transition_energy_bank - tested old complex banking system
 
     // Removed test_reverse_state_transition - tested old complex banking system
+
+    #[test]
+    fn test_base_radiation_depth() {
+        let base_depth = StandardEnergyMassComposite::base_radiation_depth_m();
+        assert_eq!(
+            base_depth, 100.0,
+            "Base radiation depth should be 100 meters"
+        );
+    }
+
+    #[test]
+    fn test_reference_density() {
+        let ref_density = StandardEnergyMassComposite::reference_density_kg_m3();
+        assert_eq!(
+            ref_density, 2500.0,
+            "Reference density should be 2500 kg/m³"
+        );
+    }
+
+    #[test]
+    fn test_skin_depth_calculation() {
+        // Create a test energy mass composite
+        let energy_mass = StandardEnergyMassComposite::new_with_params(EnergyMassParams {
+            material_type: MaterialCompositeType::Silicate,
+            initial_phase: MaterialPhase::Solid,
+            energy_joules: 1e20,
+            volume_km3: 1000.0,
+            height_km: 4.0,
+            pressure_gpa: 0.1,
+        });
+
+        // Test with reference density (should give base depth)
+        let skin_depth = energy_mass.skin_depth_km(1000.0);
+        let expected_depth_km = 100.0 / 1000.0; // 100m = 0.1 km
+        assert!(
+            (skin_depth - expected_depth_km).abs() < 1e-6,
+            "Skin depth for reference density should be {:.3} km, got {:.3} km",
+            expected_depth_km,
+            skin_depth
+        );
+
+        println!(
+            "✅ Skin depth test: {:.3} km for density {:.1} kg/m³",
+            skin_depth,
+            energy_mass.density_kgm3()
+        );
+    }
+
+    #[test]
+    fn test_radiate_to_space_energy_calculation() {
+        // Create a hot surface layer with realistic energy for ~1500K
+        let mut energy_mass = StandardEnergyMassComposite::new_with_params(EnergyMassParams {
+            material_type: MaterialCompositeType::Silicate,
+            initial_phase: MaterialPhase::Solid,
+            energy_joules: 4.752e15, // Energy for ~1500K (realistic surface temp)
+            volume_km3: 341.2,       // 4km × 85.3km²
+            height_km: 4.0,
+            pressure_gpa: 0.1,
+        });
+
+        let initial_energy = energy_mass.energy();
+        let surface_area_km2 = 85300.0; // Test surface area
+        let time_years = 1000.0;
+
+        // Test radiation
+        let radiated_energy =
+            energy_mass.radiate_to_space_with_skin_depth(surface_area_km2, time_years, 1.0);
+
+        println!("🌡️ Radiation test:");
+        println!("   Initial energy: {:.2e} J", initial_energy);
+        println!("   Temperature: {:.1} K", energy_mass.kelvin());
+        println!(
+            "   Skin depth: {:.3} km",
+            energy_mass.skin_depth_km(time_years)
+        );
+        println!("   Radiated energy: {:.2e} J", radiated_energy);
+
+        // Should radiate some energy for hot surface
+        assert!(
+            radiated_energy > 0.0,
+            "Hot surface should radiate energy to space"
+        );
+        assert!(
+            radiated_energy < initial_energy,
+            "Cannot radiate more energy than available"
+        );
+    }
 
     // Removed test_freezing_scenario - tested old complex transition system with set_kelvin()
     // which doesn't trigger phase transitions. Our new system works correctly with
@@ -1204,8 +1339,15 @@ mod tests {
         println!("  Transition cost: {:.2e} J", transition_cost);
 
         // Bank should have some energy now (but transition shouldn't be complete)
-        assert!(bank_after_add > 0.0, "Bank should have energy after adding past melting point");
-        assert_eq!(energy_mass.phase, MaterialPhase::Solid, "Should still be solid (transition incomplete)");
+        assert!(
+            bank_after_add > 0.0,
+            "Bank should have energy after adding past melting point"
+        );
+        assert_eq!(
+            energy_mass.phase,
+            MaterialPhase::Solid,
+            "Should still be solid (transition incomplete)"
+        );
 
         // Now remove LESS energy than what's in the bank
         let energy_to_remove = bank_after_add * 0.5; // Remove half the bank
@@ -1263,7 +1405,10 @@ mod tests {
         let energy_after_remove = energy_mass.energy();
         let bank_after_remove = energy_mass.state_transition_bank();
 
-        println!("After removing {:.2e} J (more than bank):", energy_to_remove);
+        println!(
+            "After removing {:.2e} J (more than bank):",
+            energy_to_remove
+        );
         println!("  Main energy: {:.2e} J", energy_after_remove);
         println!("  Bank energy: {:.2e} J", bank_after_remove);
 
@@ -1350,7 +1495,11 @@ mod tests {
         let melting_point = 1600.0;
 
         println!("Hysteresis transition test:");
-        println!("  Initial temp: {:.1}K (melting: {:.1}K)", energy_mass.kelvin(), melting_point);
+        println!(
+            "  Initial temp: {:.1}K (melting: {:.1}K)",
+            energy_mass.kelvin(),
+            melting_point
+        );
         println!("  Initial energy: {:.2e} J", initial_energy);
         println!("  Initial bank: {:.2e} J", initial_bank);
         println!("  Initial mode: {:?}", energy_mass.transition_mode);
@@ -1366,7 +1515,10 @@ mod tests {
         println!("  Mode: {:?}", energy_mass.transition_mode);
 
         // Should be in transition mode now
-        assert!(matches!(energy_mass.transition_mode, TransitionMode::InTransition { .. }));
+        assert!(matches!(
+            energy_mass.transition_mode,
+            TransitionMode::InTransition { .. }
+        ));
 
         // Test 2: Large energy removal should clear bank and return to static
         let large_energy = 5e19; // Large enough to move 3+ degrees away
@@ -1379,7 +1531,10 @@ mod tests {
         println!("  Mode: {:?}", energy_mass.transition_mode);
 
         // Should be back to static mode with cleared bank
-        assert!(matches!(energy_mass.transition_mode, TransitionMode::Static));
+        assert!(matches!(
+            energy_mass.transition_mode,
+            TransitionMode::Static
+        ));
         assert_abs_diff_eq!(energy_mass.state_transition_bank(), 0.0, epsilon = 1e10);
 
         println!("✅ Hysteresis transition system test passed!");
@@ -1411,7 +1566,10 @@ mod tests {
         println!("\nStep 1 - Trigger transition:");
         println!("  Mode: {:?}", energy_mass.transition_mode);
         println!("  Bank: {:.2e} J", energy_mass.state_transition_bank());
-        assert!(matches!(energy_mass.transition_mode, TransitionMode::InTransition { .. }));
+        assert!(matches!(
+            energy_mass.transition_mode,
+            TransitionMode::InTransition { .. }
+        ));
 
         // Step 2: Add enough energy to complete phase transition
         energy_mass.add_energy(latent_heat_required);
@@ -1423,7 +1581,10 @@ mod tests {
 
         // Should have transitioned to Liquid and returned to Static
         assert_eq!(energy_mass.phase, MaterialPhase::Liquid);
-        assert!(matches!(energy_mass.transition_mode, TransitionMode::Static));
+        assert!(matches!(
+            energy_mass.transition_mode,
+            TransitionMode::Static
+        ));
 
         // Step 3: Test reverse transition by removing lots of energy
         let large_removal = latent_heat_required + 2e19;
@@ -1436,7 +1597,10 @@ mod tests {
 
         // Should have transitioned back to Solid
         assert_eq!(energy_mass.phase, MaterialPhase::Solid);
-        assert!(matches!(energy_mass.transition_mode, TransitionMode::Static));
+        assert!(matches!(
+            energy_mass.transition_mode,
+            TransitionMode::Static
+        ));
 
         println!("✅ Complete chop and choke flow test passed!");
     }
@@ -1532,16 +1696,15 @@ mod tests {
         let energy = energy_mass.energy();
 
         // Test roundtrip: create another material with the same energy
-        let energy_mass2 = StandardEnergyMassComposite::new_with_material_state_and_energy(
-            EnergyMassParams {
+        let energy_mass2 =
+            StandardEnergyMassComposite::new_with_material_state_and_energy(EnergyMassParams {
                 material_type: MaterialCompositeType::Silicate,
                 initial_phase: MaterialPhase::Liquid, // Use correct phase
                 energy_joules: energy,
                 volume_km3: volume,
                 height_km: 10.0,
                 pressure_gpa: 0.0,
-            }
-        );
+            });
 
         // Should have the same temperature (roundtrip test)
         assert_abs_diff_eq!(energy_mass2.temperature(), target_temp, epsilon = 1.0);
@@ -1963,43 +2126,6 @@ mod tests {
             "Split off: {:.2} K, {:.1} km³",
             split_off.kelvin(),
             split_off.volume()
-        );
-    }
-
-    #[test]
-    fn test_skin_depth_calculation() {
-        let params = EnergyMassParams {
-            material_type: MaterialCompositeType::Silicate,
-            initial_phase: MaterialPhase::Solid,
-            energy_joules: 4.752e15, // Energy for 1500K at 100km³
-            volume_km3: 100.0,
-            height_km: 10.0,
-            pressure_gpa: 0.0,
-        };
-        let energy_mass = StandardEnergyMassComposite::new_with_params(params);
-
-        // Test skin depth for different time periods
-        let skin_depth_1_year = energy_mass.skin_depth_km(1.0);
-        let skin_depth_1000_years = energy_mass.skin_depth_km(1000.0);
-        let skin_depth_10000_years = energy_mass.skin_depth_km(10000.0);
-
-        // Skin depth should increase with time (sqrt relationship)
-        assert!(skin_depth_1000_years > skin_depth_1_year);
-        assert!(skin_depth_10000_years > skin_depth_1000_years);
-
-        // Verify reasonable values (should be much less than layer thickness for short times)
-        assert!(
-            skin_depth_1_year < 1.0,
-            "1-year skin depth should be less than 1km"
-        );
-        assert!(
-            skin_depth_1000_years < 10.0,
-            "1000-year skin depth should be less than 10km"
-        );
-
-        println!(
-            "Skin depths: 1yr={:.3}km, 1000yr={:.2}km, 10000yr={:.1}km",
-            skin_depth_1_year, skin_depth_1000_years, skin_depth_10000_years
         );
     }
 

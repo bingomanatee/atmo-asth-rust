@@ -101,19 +101,30 @@ impl GlobalH3Cell {
         // Calculate surface area from H3 cell
         let surface_area_km2 = crate::h3_utils::H3Utils::cell_area(planet.resolution, planet.radius_km);
 
-        let mut current_depth = -layer_schedule.iter()
+        // Calculate the total atmospheric depth (only Air layers)
+        let atmospheric_depth = layer_schedule.iter()
+            .filter(|config| config.cell_type == MaterialCompositeType::Air)
             .map(|config| config.cell_count as f64 * config.height_km)
-            .sum::<f64>() / 2.0; // Start from negative depth (atmosphere)
+            .sum::<f64>();
+
+        let mut current_depth = -atmospheric_depth; // Start from top of atmosphere
+        let mut layer_index = 0;
+        let mut found_surface_layer = false;
 
         // Create layers according to schedule with (current, next) tuples
         for config in layer_schedule {
             for _ in 0..config.cell_count {
+                let is_surface_layer = !found_surface_layer && config.cell_type != MaterialCompositeType::Air;
+                if is_surface_layer {
+                    found_surface_layer = true;
+                }
                 let layer = if config.cell_type == MaterialCompositeType::Air {
                     // Atmospheric layers start with zero density/volume - will be filled by outgassing
                     ThermalLayer::new_atmospheric(
                         current_depth,
                         config.height_km,
                         surface_area_km2,
+                        layer_index,
                     )
                 } else {
                     // Lithosphere/asthenosphere layers start with material density - will be compacted by pressure
@@ -122,12 +133,15 @@ impl GlobalH3Cell {
                         config.height_km,
                         surface_area_km2,
                         config.cell_type,
+                        layer_index,
+                        is_surface_layer,
                     )
                 };
 
                 // Create (current, next) tuple - next starts as clone of current
                 layers.push((layer.clone(), layer));
                 current_depth += config.height_km;
+                layer_index += 1;
             }
         }
 
@@ -231,6 +245,8 @@ impl GlobalH3Cell {
             *next = current.clone();
         }
     }
+
+
 
     /// Create a custom layer schedule for different planetary configurations
     pub fn create_earth_like_schedule() -> Vec<LayerConfig> {

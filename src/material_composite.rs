@@ -26,7 +26,12 @@ struct MaterialPhaseProperties {
     thermal_conductivity_w_m_k: f64,
     thermal_transmission_r0_min: f64,
     thermal_transmission_r0_max: f64,
-    melt_temp: f64,
+    #[serde(default)]
+    melt_temp: Option<f64>,
+    #[serde(default)]
+    melt_temp_min: Option<f64>,
+    #[serde(default)]
+    melt_temp_max: Option<f64>,
     latent_heat_fusion: f64,
     boil_temp: f64,
     latent_heat_vapor: f64,
@@ -95,6 +100,8 @@ pub struct MaterialStateProfile {
 
     // Phase transition properties
     pub melt_temp: f64,
+    pub melt_temp_min: Option<f64>,  // Minimum temperature for gradual melting
+    pub melt_temp_max: Option<f64>,  // Maximum temperature for gradual melting
     pub latent_heat_fusion: f64,  // J/kg for solid->liquid transition
     pub boil_temp: f64,
     pub latent_heat_vapor: f64,   // J/kg for liquid->gas transition
@@ -113,6 +120,8 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
         thermal_transmission_r0_min: 0.0,
         thermal_transmission_r0_max: 0.0,
         melt_temp: 0.0,
+        melt_temp_min: None,
+        melt_temp_max: None,
         latent_heat_fusion: 0.0,
         boil_temp: 0.0,
         latent_heat_vapor: 0.0,
@@ -122,6 +131,16 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
     let populate_material = |table: &mut [MaterialStateProfile], material_type: MaterialCompositeType, data: &MaterialPhaseData| {
         let base_index = material_type.as_index() * MaterialPhase::COUNT;
 
+        // Calculate melt_temp from min/max if not provided
+        let solid_melt_temp = data.solid.melt_temp.unwrap_or_else(|| {
+            match (data.solid.melt_temp_min, data.solid.melt_temp_max) {
+                (Some(min), Some(max)) => (min + max) / 2.0,
+                (Some(min), None) => min,
+                (None, Some(max)) => max,
+                (None, None) => 1600.0, // Default fallback
+            }
+        });
+
         // Solid phase
         table[base_index + MaterialPhase::Solid.as_index()] = MaterialStateProfile {
             density_kg_m3: data.solid.density_kg_m3,
@@ -129,11 +148,23 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
             thermal_conductivity_w_m_k: data.solid.thermal_conductivity_w_m_k,
             thermal_transmission_r0_min: data.solid.thermal_transmission_r0_min,
             thermal_transmission_r0_max: data.solid.thermal_transmission_r0_max,
-            melt_temp: data.solid.melt_temp,
+            melt_temp: solid_melt_temp,
+            melt_temp_min: data.solid.melt_temp_min,
+            melt_temp_max: data.solid.melt_temp_max,
             latent_heat_fusion: data.solid.latent_heat_fusion,
             boil_temp: data.solid.boil_temp,
             latent_heat_vapor: data.solid.latent_heat_vapor,
         };
+
+        // Calculate melt_temp from min/max if not provided
+        let liquid_melt_temp = data.liquid.melt_temp.unwrap_or_else(|| {
+            match (data.liquid.melt_temp_min, data.liquid.melt_temp_max) {
+                (Some(min), Some(max)) => (min + max) / 2.0,
+                (Some(min), None) => min,
+                (None, Some(max)) => max,
+                (None, None) => 1600.0, // Default fallback
+            }
+        });
 
         // Liquid phase
         table[base_index + MaterialPhase::Liquid.as_index()] = MaterialStateProfile {
@@ -142,11 +173,23 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
             thermal_conductivity_w_m_k: data.liquid.thermal_conductivity_w_m_k,
             thermal_transmission_r0_min: data.liquid.thermal_transmission_r0_min,
             thermal_transmission_r0_max: data.liquid.thermal_transmission_r0_max,
-            melt_temp: data.liquid.melt_temp,
+            melt_temp: liquid_melt_temp,
+            melt_temp_min: data.liquid.melt_temp_min,
+            melt_temp_max: data.liquid.melt_temp_max,
             latent_heat_fusion: data.liquid.latent_heat_fusion,
             boil_temp: data.liquid.boil_temp,
             latent_heat_vapor: data.liquid.latent_heat_vapor,
         };
+
+        // Calculate melt_temp from min/max if not provided
+        let gas_melt_temp = data.gas.melt_temp.unwrap_or_else(|| {
+            match (data.gas.melt_temp_min, data.gas.melt_temp_max) {
+                (Some(min), Some(max)) => (min + max) / 2.0,
+                (Some(min), None) => min,
+                (None, Some(max)) => max,
+                (None, None) => 1600.0, // Default fallback
+            }
+        });
 
         // Gas phase
         table[base_index + MaterialPhase::Gas.as_index()] = MaterialStateProfile {
@@ -155,7 +198,9 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
             thermal_conductivity_w_m_k: data.gas.thermal_conductivity_w_m_k,
             thermal_transmission_r0_min: data.gas.thermal_transmission_r0_min,
             thermal_transmission_r0_max: data.gas.thermal_transmission_r0_max,
-            melt_temp: data.gas.melt_temp,
+            melt_temp: gas_melt_temp,
+            melt_temp_min: data.gas.melt_temp_min,
+            melt_temp_max: data.gas.melt_temp_max,
             latent_heat_fusion: data.gas.latent_heat_fusion,
             boil_temp: data.gas.boil_temp,
             latent_heat_vapor: data.gas.latent_heat_vapor,
@@ -180,6 +225,8 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
         thermal_transmission_r0_min: 0.1,
         thermal_transmission_r0_max: 0.3,
         melt_temp: 63.15,  // Nitrogen melting point
+        melt_temp_min: None,
+        melt_temp_max: None,
         latent_heat_fusion: 25500.0,  // Nitrogen latent heat of fusion
         boil_temp: 77.36,  // Nitrogen boiling point
         latent_heat_vapor: 199000.0,  // Nitrogen latent heat of vaporization
@@ -193,6 +240,8 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
         thermal_transmission_r0_min: 0.05,
         thermal_transmission_r0_max: 0.15,
         melt_temp: 63.15,  // Same transition temperatures
+        melt_temp_min: None,
+        melt_temp_max: None,
         latent_heat_fusion: 25500.0,
         boil_temp: 77.36,
         latent_heat_vapor: 199000.0,
@@ -206,6 +255,8 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
         thermal_transmission_r0_min: 0.01,
         thermal_transmission_r0_max: 0.05,
         melt_temp: 63.15,  // Same transition temperatures
+        melt_temp_min: None,
+        melt_temp_max: None,
         latent_heat_fusion: 25500.0,
         boil_temp: 77.36,
         latent_heat_vapor: 199000.0,

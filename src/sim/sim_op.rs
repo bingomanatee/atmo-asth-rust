@@ -1,18 +1,26 @@
-mod sim_op_atmosphere;
-mod sim_op_cooling;
-mod sim_op_core_radiance;
-mod sim_op_lithosphere_unified;
-pub mod sim_op_csv_writer;
-mod sim_op_progress_reporter;
-mod sim_op_thermal_diffusion;
+// Deprecated operations moved to deprecated/ subfolder
+// These operations expect the old AsthCellColumn structure
+// mod sim_op_atmosphere;
+// mod sim_op_cooling;
+// mod sim_op_core_radiance;
+// mod sim_op_lithosphere_unified;
+// pub mod sim_op_csv_writer;
+// mod sim_op_progress_reporter;
+// mod sim_op_thermal_diffusion;
 
-pub use sim_op_atmosphere::AtmosphereOp;
-pub use sim_op_cooling::CoolingOp;
-pub use sim_op_core_radiance::CoreRadianceOp;
-pub use sim_op_lithosphere_unified::LithosphereUnifiedOp;
-pub use sim_op_csv_writer::CsvWriterOp;
-pub use sim_op_progress_reporter::ProgressReporterOp;
-pub use sim_op_thermal_diffusion::ThermalDiffusionOp;
+// New global thermal operations
+pub mod space_radiation_op;
+
+// pub use sim_op_atmosphere::AtmosphereOp;
+// pub use sim_op_cooling::CoolingOp;
+// pub use sim_op_core_radiance::CoreRadianceOp;
+// pub use sim_op_lithosphere_unified::LithosphereUnifiedOp;
+// pub use sim_op_csv_writer::CsvWriterOp;
+// pub use sim_op_progress_reporter::ProgressReporterOp;
+// pub use sim_op_thermal_diffusion::ThermalDiffusionOp;
+
+// New global thermal operations
+pub use space_radiation_op::{SpaceRadiationOp, SpaceRadiationParams, apply_space_radiation};
 use crate::sim::simulation::Simulation;
 
 pub trait SimOp {

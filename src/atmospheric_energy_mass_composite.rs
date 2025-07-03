@@ -184,10 +184,12 @@ impl EnergyMassComposite for AtmosphericEnergyMass {
         _energy_throttle: f64,
     ) -> f64 {
         let surface_temp = self.kelvin();
-        let skin_depth = self.skin_depth_km(time_years);
-        let effective_skin_depth = skin_depth.min(self.height_km());
+        let radiation_depth = self.skin_depth_km(time_years);
+        // Clamp radiation depth to the actual layer height for current implementation
+        // In the future, we may consider deeper radiation that extends beyond single layers
+        let effective_radiation_depth = radiation_depth.min(self.height_km());
         let radiation_fraction = if self.height_km() > 0.0 {
-            effective_skin_depth / self.height_km()
+            effective_radiation_depth / self.height_km()
         } else {
             1.0
         };
@@ -266,11 +268,18 @@ impl EnergyMassComposite for AtmosphericEnergyMass {
         self.thermal_transmission_r0
     }
 
-    fn skin_depth_km(&self, time_years: f64) -> f64 {
-        let kappa =
-            self.thermal_conductivity() / (self.density_kgm3() * self.specific_heat_j_kg_k());
-        let dt_secs = time_years * SECONDS_PER_YEAR;
-        (kappa * dt_secs).sqrt() / 1000.0
+    fn skin_depth_km(&self, _time_years: f64) -> f64 {
+        let density_kg_m3 = self.density_kgm3();
+
+        // Base radiation depth for typical rock density (2500 kg/m³)
+        let base_depth_m = 100.0; // 100 meters for typical rock surface radiation
+        let reference_density = 2500.0; // kg/m³
+
+        // Inverse relationship: higher density = shallower radiation depth
+        let depth_m = base_depth_m * (reference_density / density_kg_m3).sqrt();
+
+        // Convert to km - no clamping, let application handle layer boundaries
+        depth_m / 1000.0
     }
 
     fn add_energy(&mut self, energy_joules: f64) {

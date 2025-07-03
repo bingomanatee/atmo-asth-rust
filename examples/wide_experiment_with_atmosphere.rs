@@ -4,6 +4,15 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Write;
+/// Grey-gas IR opacity per unit mass (m²/kg) for key species.
+/// These are order-of-magnitude starting values—adjust for your mix!
+pub const KAPPA_H2O: f64  = 5e-4;
+pub const KAPPA_CO2: f64  = 2e-4;
+pub const KAPPA_CH4: f64  = 5e-5;
+pub const KAPPA_N2O: f64  = 1e-4;
+pub const KAPPA_O3:  f64  = 1e-3;
+pub const KAPPA_DRY: f64  = 1e-5; // N2/O2 baseline
+
 
 // Import the real EnergyMass trait and material system
 extern crate atmo_asth_rust;

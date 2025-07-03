@@ -1,13 +1,11 @@
-use crate::asth_cell::{AsthCellColumn, AsthCellParams};
 use crate::global_thermal::global_h3_cell::{GlobalH3Cell, GlobalH3CellConfig, LayerConfig};
-use crate::energy_mass_composite::MaterialCompositeType;
 use crate::h3_utils::H3Utils;
 use crate::planet::Planet;
 use crate::sim::sim_op::{SimOp, SimOpHandle};
 use h3o::{CellIndex, Resolution};
 use std::collections::HashMap;
 use std::rc::Rc;
-use crate::global_thermal::global_h3_cell::GlobalH3CellConfig;
+
 
 pub struct Simulation {
     pub planet: Planet,

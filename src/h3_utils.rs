@@ -137,11 +137,6 @@ impl H3Utils {
             (planet_radius_km * sin_lat) as f32,
         )
     }
-
-    /// Get the 3D point for an AsthCellColumn using its cell index and planet radius from the simulation
-    pub fn cell_column_to_3d_point(cell: &crate::asth_cell::AsthCellColumn, planet_radius_km: f64) -> Vec3 {
-        Self::cell_to_3d_point(cell.cell_index, planet_radius_km)
-    }
 }
 
 /// Get the total number of H3 cells at a given resolution
