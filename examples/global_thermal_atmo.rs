@@ -2,6 +2,7 @@ use atmo_asth_rust::energy_mass_composite::MaterialCompositeType;
 use atmo_asth_rust::sim::sim_op::{
     AtmosphericGenerationOp, PressureAdjustmentOp, SurfaceEnergyInitOp, TemperatureReportingOp,
 };
+use atmo_asth_rust::sim::sim_op::atmospheric_generation_op::CrystallizationParams;
 use atmo_asth_rust::global_thermal::global_h3_cell::{GlobalH3CellConfig, LayerConfig};
 use atmo_asth_rust::planet::Planet;
 use atmo_asth_rust::sim::sim_op::SimOpHandle;
@@ -24,17 +25,19 @@ pub fn run_global_thermal_atmo_example() {
         sim_steps: 1000,
         years_per_step: 1000, // 1000 years per step = 1 million years total
         name: "GlobalThermalAtmo",
-        debug: true,
+        debug: false,
         ops: vec![
             SimOpHandle::new(Box::new(SurfaceEnergyInitOp::new())),
             SimOpHandle::new(Box::new(PressureAdjustmentOp::new())),
             SimOpHandle::new(Box::new(AtmosphericGenerationOp::with_crystallization_params(
-                0.01,  // 1% outgassing rate
-                0.7,   // 70% volume decay per layer
-                0.12,  // 12% density per layer (88% reduction)
-                0.8,   // 80% contribution from deeper layers (20% reduction per depth)
-                0.1,   // 10% crystallization loss per atmospheric layer
-                true   // debug output
+                CrystallizationParams {
+                    outgassing_rate: 0.01,  // 1% outgassing rate
+                    volume_decay: 0.7,      // 70% volume decay per layer
+                    density_decay: 0.12,    // 12% density per layer (88% reduction)
+                    depth_attenuation: 0.8, // 80% contribution from deeper layers (20% reduction per depth)
+                    crystallization_rate: 0.1, // 10% crystallization loss per atmospheric layer
+                    debug: false,           // debug output
+                }
             ))),
             SimOpHandle::new(Box::new(TemperatureReportingOp::new())),
         ],

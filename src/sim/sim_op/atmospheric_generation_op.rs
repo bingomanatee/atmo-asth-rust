@@ -7,6 +7,23 @@ use crate::sim::sim_op::SimOp;
 use crate::sim::simulation::Simulation;
 use crate::energy_mass_composite::{EnergyMassComposite, MaterialPhase, MaterialCompositeType};
 
+/// Parameters for atmospheric generation with crystallization
+#[derive(Debug, Clone)]
+pub struct CrystallizationParams {
+    /// Multiplier for outgassing rate from melting (fraction, 0.0-1.0)
+    pub outgassing_rate: f64,
+    /// Exponential decay factor for atmospheric volumes (fraction, 0.0-1.0)
+    pub volume_decay: f64,
+    /// Exponential decay factor for atmospheric density (fraction, 0.0-1.0)
+    pub density_decay: f64,
+    /// How much deeper sources contribute less (fraction, 0.0-1.0)
+    pub depth_attenuation: f64,
+    /// Percentage of rising gas that crystallizes per layer (fraction, 0.0-1.0)
+    pub crystallization_rate: f64,
+    /// Enable debug output
+    pub debug: bool,
+}
+
 pub struct AtmosphericGenerationOp {
     pub apply_during_simulation: bool,
     pub outgassing_rate_multiplier: f64,  // Multiplier for outgassing rate from melting
@@ -72,16 +89,15 @@ impl AtmosphericGenerationOp {
         }
     }
 
-    pub fn with_crystallization_params(outgassing_rate: f64, volume_decay: f64, density_decay: f64,
-                                      depth_attenuation: f64, crystallization_rate: f64, debug: bool) -> Self {
+    pub fn with_crystallization_params(params: CrystallizationParams) -> Self {
         Self {
             apply_during_simulation: true,
-            outgassing_rate_multiplier: outgassing_rate,
-            volume_decay_factor: volume_decay,
-            density_decay_factor: density_decay,
-            depth_attenuation_factor: depth_attenuation,
-            crystallization_rate,
-            debug_output: debug,
+            outgassing_rate_multiplier: params.outgassing_rate,
+            volume_decay_factor: params.volume_decay,
+            density_decay_factor: params.density_decay,
+            depth_attenuation_factor: params.depth_attenuation,
+            crystallization_rate: params.crystallization_rate,
+            debug_output: params.debug,
             total_outgassed_mass: 0.0,
             total_redistributed_volume: 0.0,
             total_crystallized_mass: 0.0,

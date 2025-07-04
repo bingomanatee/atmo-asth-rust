@@ -1,6 +1,7 @@
 use once_cell::sync::Lazy;
 use serde::Deserialize;
 use serde_json;
+use crate::json_parser::JsonParser;
 
 /// JSON structure for loading material data
 #[derive(Deserialize)]
@@ -110,8 +111,14 @@ pub struct MaterialStateProfile {
 /// Load material profiles directly from JSON into the lookup table
 fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::COUNT * MaterialPhase::COUNT] {
     let json_str = include_str!("materials.json");
-    let materials_json: MaterialsJson = serde_json::from_str(json_str)
+    
+    // One-step: Load JSON directly
+    let json_value = JsonParser::load_json_str("materials.json", json_str)
         .expect("Failed to parse materials.json");
+    
+    // Convert the cached JSON value back to a string for serde
+    let materials_json: MaterialsJson = serde_json::from_str(&json_value.to_string())
+        .expect("Failed to parse materials.json structure");
 
     let mut table = [MaterialStateProfile {
         density_kg_m3: 0.0,
