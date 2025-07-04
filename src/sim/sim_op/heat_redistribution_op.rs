@@ -114,11 +114,11 @@ impl HeatRedistributionOp {
             let _distance_m = self.layer_distances_m[i];
 
             // Calculate heat flow from upper to lower layer
-            // Calculate and apply heat flow using updated Fourier thermal transfer utility
+            // Calculate and apply heat flow using updated Fourier thermal transfer utility with density adjustments
             // Use split_at_mut to avoid borrowing conflicts
             let energy_transferred = if let Some(ref fourier) = self.fourier_transfer {
                 let (upper_layers, lower_layers) = cell.layers_t.split_at_mut(i + 1);
-                fourier.apply_heat_transfer_between_layers(
+                fourier.apply_heat_transfer_between_layers_with_density_adjustment(
                     &mut upper_layers[i],
                     &mut lower_layers[0], // This is cell.layers_t[i + 1]
                 )

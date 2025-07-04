@@ -938,22 +938,27 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
     }
 
     /// Compute thermal-diffusive skin depth in kilometres for this material
-    fn skin_depth_km(&self, _time_years: f64) -> f64 {
-        let density_kg_m3 = self.density_kgm3();
+    /// Uses proper thermal diffusivity formula with pressure-enhanced thermal conductivity
+    fn skin_depth_km(&self, time_years: f64) -> f64 {
+        use crate::constants::SECONDS_PER_YEAR;
 
-        // Base radiation depth for typical rock density
-        let base_depth_m = Self::base_radiation_depth_m();
-        let reference_density = Self::reference_density_kg_m3();
+        // Calculate thermal diffusivity (m²/s) using pressure-enhanced thermal conductivity
+        let thermal_conductivity = self.thermal_conductivity(); // Already includes pressure effects
+        let density = self.density_kgm3();
+        let specific_heat = self.specific_heat_j_kg_k();
 
-        // Inverse relationship: higher density = shallower radiation depth
-        let depth_m = base_depth_m * (reference_density / density_kg_m3).sqrt();
+        if density <= 0.0 || specific_heat <= 0.0 {
+            return 0.0;
+        }
 
-        // Convert to km - no clamping, let application handle layer boundaries
-        let depth_km = depth_m / 1000.0;
+        let thermal_diffusivity = thermal_conductivity / (density * specific_heat);
 
-        // Debug output removed
+        // Calculate skin depth using thermal diffusion equation: d = sqrt(κ * t)
+        let time_seconds = time_years * SECONDS_PER_YEAR;
+        let skin_depth_m = (thermal_diffusivity * time_seconds).sqrt();
 
-        depth_km
+        // Convert to km
+        skin_depth_m / 1000.0
     }
 
     fn material_composite_type(&self) -> MaterialCompositeType {
