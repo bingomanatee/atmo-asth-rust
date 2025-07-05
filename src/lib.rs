@@ -13,3 +13,6 @@ pub mod energy_mass_composite;
 pub mod atmospheric_energy_mass_composite;
 pub mod phase_transition;
 pub mod json_parser;
+pub mod h3_graphics;
+pub mod h3o_png;
+pub mod h3_neighbor_cache;

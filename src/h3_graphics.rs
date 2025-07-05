@@ -10,6 +10,7 @@ use imageproc::point::Point;
 use rand::Rng;
 use rand::seq::SliceRandom;
 use crate::h3_neighbor_cache::H3NeighborCache;
+use noise::{NoiseFn, Perlin};
 
 /// Configuration for H3 graphics generation
 #[derive(Debug, Clone)]
@@ -595,6 +596,19 @@ impl H3GraphicsGenerator {
         let mut generator = H3GraphicsGenerator::new(config);
         generator.load_cells();
         generator.create_l2_heat_map_visualization(cache_path, filename)
+    }
+
+    /// Generate L2 heat map with Perlin noise overlay
+    pub fn generate_l2_perlin_heat_map_png(
+        l2_resolution: Resolution,
+        points_per_degree: u32,
+        cache_path: &str,
+        filename: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let config = H3GraphicsConfig::new(l2_resolution, points_per_degree);
+        let mut generator = H3GraphicsGenerator::new(config);
+        generator.load_cells();
+        generator.create_l2_perlin_heat_map_visualization(cache_path, filename)
     }
 
 
@@ -2299,6 +2313,149 @@ impl H3GraphicsGenerator {
         println!("  Cool (0.3-0.5):  {} cells ({:.1}%)", cool_count, 100.0 * cool_count as f64 / thermal_values.len() as f64);
         println!("  Warm (0.5-0.7):  {} cells ({:.1}%)", warm_count, 100.0 * warm_count as f64 / thermal_values.len() as f64);
         println!("  Hot (0.7-1.0):   {} cells ({:.1}%)", hot_count, 100.0 * hot_count as f64 / thermal_values.len() as f64);
+
+        println!("\nColor Legend:");
+        println!("  Blue:   Cold regions (0.0-0.25)");
+        println!("  Cyan:   Cool regions (0.25-0.5)");
+        println!("  Green:  Moderate regions (0.5-0.75)");
+        println!("  Yellow: Warm regions (0.75-1.0)");
+        println!("  Red:    Hot regions (approaching 1.0)");
+    }
+
+    /// Create L2 heat map with Perlin noise overlay
+    pub fn create_l2_perlin_heat_map_visualization(&self, cache_path: &str, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+        println!("=== Creating L2 Heat Map with Perlin Noise Overlay ===");
+        println!("Generating thermal heat map with 3D Perlin noise (3 L2 hex wavelength)");
+
+        // Initialize RocksDB neighbor cache
+        let neighbor_threshold = 400.0; // km
+        let _cache = H3NeighborCache::new(cache_path, neighbor_threshold)?;
+
+        // Prepare cell data for cache
+        let cell_data: Vec<(CellIndex, f64, f64)> = self.cells.iter()
+            .map(|cell| {
+                (cell.cell_index, cell.center.latitude, cell.center.longitude)
+            })
+            .collect();
+
+        println!("Loaded {} L2 cells for Perlin heat map", cell_data.len());
+
+        // Generate thermal values with Perlin noise overlay
+        let thermal_values = self.generate_perlin_thermal_values(&cell_data)?;
+
+        // Create image buffer
+        let mut image: RgbImage = ImageBuffer::new(self.config.width, self.config.height);
+
+        // Fill with black background
+        for pixel in image.pixels_mut() {
+            *pixel = Rgb([0, 0, 0]);
+        }
+
+        println!("Drawing L2 Perlin heat map...");
+
+        // Draw each cell with thermal color
+        for (i, cell) in self.cells.iter().enumerate() {
+            let thermal_value = thermal_values[i];
+            let color = self.thermal_value_to_color(thermal_value);
+            self.draw_cell_with_color(&mut image, cell, color);
+        }
+
+        // Save the image
+        image.save(filename)?;
+        println!("Generated L2 Perlin heat map PNG: {} ({}x{} pixels)",
+                 filename, self.config.width, self.config.height);
+
+        // Display thermal statistics
+        self.display_perlin_thermal_statistics(&thermal_values);
+
+        Ok(())
+    }
+
+    /// Generate thermal values with Perlin noise overlay
+    fn generate_perlin_thermal_values(&self, cell_data: &[(CellIndex, f64, f64)]) -> Result<Vec<f64>, Box<dyn std::error::Error>> {
+        let mut rng = rand::rng();
+        let mut thermal_values = Vec::new();
+
+        // Initialize Perlin noise generator
+        let perlin = Perlin::new(rng.random());
+
+        // Calculate L2 cell radius for wavelength scaling
+        let l2_radius_km = 166.0; // From previous calculations
+        let wavelength_km = l2_radius_km * 3.0 * 2.0; // 3 L2 hex wavelength (diameter)
+        let earth_radius_km = 6371.0;
+
+        // Scale factor for Perlin noise (smaller = larger features)
+        let perlin_scale = earth_radius_km / wavelength_km; // ~6371/996 ≈ 6.4
+
+        println!("Perlin noise configuration:");
+        println!("  L2 radius: {:.0} km", l2_radius_km);
+        println!("  Wavelength: {:.0} km (3 L2 hex)", wavelength_km);
+        println!("  Perlin scale: {:.2}", perlin_scale);
+
+        // Generate thermal values with Perlin noise overlay
+        for (_, lat, lng) in cell_data {
+            // Base temperature varies with latitude (warmer at equator)
+            let lat_factor = (lat.to_radians().cos()).abs(); // 0 at poles, 1 at equator
+            let base_temp = 0.3 + (lat_factor * 0.4); // 0.3 to 0.7 base range
+
+            // Convert lat/lng to 3D coordinates for Perlin noise
+            let lat_rad = lat.to_radians();
+            let lng_rad = lng.to_radians();
+            let x = lat_rad.cos() * lng_rad.cos();
+            let y = lat_rad.cos() * lng_rad.sin();
+            let z = lat_rad.sin();
+
+            // Sample 3D Perlin noise at scaled coordinates
+            let perlin_value = perlin.get([x * perlin_scale, y * perlin_scale, z * perlin_scale]);
+
+            // Normalize Perlin noise from [-1,1] to [0,1] and scale
+            let perlin_normalized = (perlin_value + 1.0) / 2.0;
+            let perlin_contribution = (perlin_normalized - 0.5) * 0.6; // ±0.3 variation
+
+            // Add some longitude variation (simulate continental effects)
+            let lng_factor = (lng_rad * 2.0).sin() * 0.05; // ±0.05 variation
+
+            // Combine all factors
+            let thermal_value = (base_temp + perlin_contribution + lng_factor).clamp(0.0, 1.0);
+            thermal_values.push(thermal_value);
+        }
+
+        Ok(thermal_values)
+    }
+
+    /// Display Perlin thermal statistics
+    fn display_perlin_thermal_statistics(&self, thermal_values: &[f64]) {
+        let min_temp = thermal_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+        let max_temp = thermal_values.iter().fold(f64::NEG_INFINITY, |a, &b| a.max(b));
+        let mean_temp = thermal_values.iter().sum::<f64>() / thermal_values.len() as f64;
+
+        // Calculate standard deviation
+        let variance = thermal_values.iter()
+            .map(|&x| (x - mean_temp).powi(2))
+            .sum::<f64>() / thermal_values.len() as f64;
+        let std_dev = variance.sqrt();
+
+        // Count temperature ranges
+        let cold_count = thermal_values.iter().filter(|&&t| t < 0.3).count();
+        let cool_count = thermal_values.iter().filter(|&&t| t >= 0.3 && t < 0.5).count();
+        let warm_count = thermal_values.iter().filter(|&&t| t >= 0.5 && t < 0.7).count();
+        let hot_count = thermal_values.iter().filter(|&&t| t >= 0.7).count();
+
+        println!("\n=== L2 Perlin Heat Map Statistics ===");
+        println!("Thermal range: {:.3} to {:.3}", min_temp, max_temp);
+        println!("Mean thermal: {:.3}", mean_temp);
+        println!("Standard deviation: {:.3}", std_dev);
+        println!("Temperature distribution:");
+        println!("  Cold (0.0-0.3):  {} cells ({:.1}%)", cold_count, 100.0 * cold_count as f64 / thermal_values.len() as f64);
+        println!("  Cool (0.3-0.5):  {} cells ({:.1}%)", cool_count, 100.0 * cool_count as f64 / thermal_values.len() as f64);
+        println!("  Warm (0.5-0.7):  {} cells ({:.1}%)", warm_count, 100.0 * warm_count as f64 / thermal_values.len() as f64);
+        println!("  Hot (0.7-1.0):   {} cells ({:.1}%)", hot_count, 100.0 * hot_count as f64 / thermal_values.len() as f64);
+
+        println!("\nPerlin Noise Effects:");
+        println!("  Wavelength: ~996 km (3 L2 hex diameter)");
+        println!("  Variation: ±0.3 thermal units");
+        println!("  Pattern: Large-scale thermal provinces");
+        println!("  3D mapping: Seamless across sphere");
 
         println!("\nColor Legend:");
         println!("  Blue:   Cold regions (0.0-0.25)");
