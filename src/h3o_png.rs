@@ -163,6 +163,11 @@ impl H3GraphicsGenerator {
         }
     }
 
+    /// Get reference to loaded cells for external color mapping
+    pub fn get_cells(&self) -> &Vec<H3CellGraphics> {
+        &self.cells
+    }
+
     /// Load all H3 cells at the configured resolution
     pub fn load_cells(&mut self) {
         self.cells.clear();
@@ -435,8 +440,18 @@ impl H3GraphicsGenerator {
         Ok(())
     }
 
-    /// Generate PNG with coherent cells only + nearest neighbor fill
-    pub fn generate_coherent_cells_with_fill_png(&self, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+    /// Generate PNG with coherent cells only + optional nearest neighbor fill
+    pub fn generate_coherent_cells_with_fill_png(&self, filename: &str, enable_fill: bool) -> Result<(), Box<dyn std::error::Error>> {
+        self.generate_coherent_cells_with_colors_png(filename, enable_fill, None)
+    }
+
+    /// Generate PNG with coherent cells using provided colors per cell
+    pub fn generate_coherent_cells_with_colors_png(
+        &self, 
+        filename: &str, 
+        enable_fill: bool,
+        cell_colors_map: Option<std::collections::HashMap<h3o::CellIndex, Rgb<u8>>>
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Create image buffer
         let mut image: RgbImage = ImageBuffer::new(self.config.width, self.config.height);
 
@@ -455,6 +470,7 @@ impl H3GraphicsGenerator {
         // Step 1: Draw only cells where X extent is < 20% of screen width
         let width_threshold = (self.config.width as i32) * 20 / 100; // 20% of screen width
         let mut coherent_count = 0;
+        let mut rejected_cells = Vec::new();
 
         for (i, cell) in self.cells.iter().enumerate() {
             // Convert cell corners to pixel coordinates
@@ -471,12 +487,18 @@ impl H3GraphicsGenerator {
             let max_x = pixel_coords.iter().map(|(x, _)| *x).max().unwrap();
             let x_extent = max_x - min_x;
 
-            // Generate random color for this cell
-            let cell_color = Rgb([
-                rng.random_range(50..255),
-                rng.random_range(50..255),
-                rng.random_range(50..255),
-            ]);
+            // Get color for this cell - use provided color or generate random
+            let cell_color = if let Some(ref color_map) = cell_colors_map {
+                // Use provided color if available, otherwise default to gray
+                color_map.get(&cell.cell_index).copied().unwrap_or(Rgb([128, 128, 128]))
+            } else {
+                // Generate random color as fallback
+                Rgb([
+                    rng.random_range(50..255),
+                    rng.random_range(50..255),
+                    rng.random_range(50..255),
+                ])
+            };
 
             // Store cell center and color for later nearest neighbor filling
             let center_pixel = self.geo_to_pixel(cell.center.longitude, cell.center.latitude);
@@ -496,42 +518,52 @@ impl H3GraphicsGenerator {
                     self.fill_polygon_simple(&mut image, &coords, cell_color);
                     coherent_count += 1;
                 }
+            } else {
+                // Store rejected cell for coordinate variation testing
+                rejected_cells.push((i, cell, cell_color));
             }
         }
 
         println!("Drew {} coherent cells out of {}", coherent_count, self.cells.len());
 
-        // Step 2: Fill uncovered pixels with nearest cell center color
-        println!("Step 2: Filling uncovered pixels with nearest cell center colors...");
-        
-        let mut filled_pixels = 0;
-        for y in 0..self.config.height {
-            for x in 0..self.config.width {
-                let current_pixel = image.get_pixel(x, y);
-                
-                // If pixel is black (uncovered), find nearest cell center
-                if current_pixel.0 == [0, 0, 0] {
-                    let mut min_distance = f64::INFINITY;
-                    let mut nearest_color = Rgb([0, 0, 0]);
+        println!("Skipping coordinate variations - original approach was correct");
+        println!("Total cells drawn: {} out of {}", coherent_count, self.cells.len());
 
-                    for (i, &(cx, cy)) in cell_centers.iter().enumerate() {
-                        let dx = x as f64 - cx as f64;
-                        let dy = y as f64 - cy as f64;
-                        let distance = (dx * dx + dy * dy).sqrt();
+        // Step 2: Optionally fill uncovered pixels with nearest cell center color
+        if enable_fill {
+            println!("Step 2: Filling uncovered pixels with nearest cell center colors...");
+            
+            let mut filled_pixels = 0;
+            for y in 0..self.config.height {
+                for x in 0..self.config.width {
+                    let current_pixel = image.get_pixel(x, y);
+                    
+                    // If pixel is black (uncovered), find nearest cell center
+                    if current_pixel.0 == [0, 0, 0] {
+                        let mut min_distance = f64::INFINITY;
+                        let mut nearest_color = Rgb([0, 0, 0]);
 
-                        if distance < min_distance {
-                            min_distance = distance;
-                            nearest_color = cell_colors[i];
+                        for (i, &(cx, cy)) in cell_centers.iter().enumerate() {
+                            let dx = x as f64 - cx as f64;
+                            let dy = y as f64 - cy as f64;
+                            let distance = (dx * dx + dy * dy).sqrt();
+
+                            if distance < min_distance {
+                                min_distance = distance;
+                                nearest_color = cell_colors[i];
+                            }
                         }
-                    }
 
-                    image.put_pixel(x, y, nearest_color);
-                    filled_pixels += 1;
+                        image.put_pixel(x, y, nearest_color);
+                        filled_pixels += 1;
+                    }
                 }
             }
-        }
 
-        println!("Filled {} uncovered pixels with nearest neighbor colors", filled_pixels);
+            println!("Filled {} uncovered pixels with nearest neighbor colors", filled_pixels);
+        } else {
+            println!("Skipping nearest neighbor fill for faster rendering");
+        }
 
         // Draw lat/lon grid overlay
         self.draw_lat_lon_grid(&mut image);
