@@ -1,0 +1,123 @@
+{
+  "atmospheric_generation_config": {
+    "name": "Billion-Year Scale Atmospheric Generation",
+    "description": "Realistic early Earth atmospheric formation over 4.6 billion year timescale",
+    "target_timescale_years": 4600000000,
+    "earth_atmosphere_mass_kg": 5.15e18,
+    "calibrated_generation_rate_kg_per_year": 1.13e12,
+    
+    "outgassing_rates": {
+      "description": "Primary control for atmospheric generation speed",
+      "base_outgassing_rate_multiplier": 0.01,
+      "catastrophic_event_outgassing_rate": 0.0001,
+      "major_event_outgassing_rate": 0.000001,
+      "background_outgassing_rate": 0.0000001,
+      "notes": "Reduced by ~50,000x from initial values for geological realism"
+    },
+    
+    "crystallization_rates": {
+      "description": "Secondary control - determines how much gas escapes vs gets trapped",
+      "base_crystallization_rate": 0.5,
+      "catastrophic_event_crystallization": 0.05,
+      "major_event_crystallization": 0.3,
+      "background_crystallization": 0.8,
+      "escape_percentages": {
+        "catastrophic_events": "95% escapes",
+        "major_events": "70% escapes", 
+        "background_activity": "20% escapes"
+      }
+    },
+    
+    "event_classification": {
+      "description": "Temperature thresholds that determine event types and rates",
+      "catastrophic_threshold_k": 2500.0,
+      "major_event_threshold_k": 1800.0,
+      "catastrophic_event_probability": 0.001,
+      "notes": "Higher thresholds = fewer high-rate events, more background activity"
+    },
+    
+    "foundry_temperature_config": {
+      "description": "Controls frequency and intensity of melting events",
+      "base_core_temp_k": 1200.0,
+      "surface_temp_k": 1200.0,
+      "geothermal_gradient_k_per_km": 25.0,
+      "oscillation_enabled": true,
+      "oscillation_period_years": 500.0,
+      "min_multiplier": 0.5,
+      "max_multiplier": 1.5,
+      "effective_range_k": {
+        "minimum": 600.0,
+        "maximum": 1800.0
+      },
+      "notes": "Reduced from 375K-2625K range to eliminate extreme melting"
+    },
+    
+    "atmospheric_layer_config": {
+      "description": "Atmospheric layer structure for outgassing distribution",
+      "volume_decay_factor": 0.7,
+      "density_decay_factor": 0.12,
+      "depth_attenuation_factor": 0.8,
+      "notes": "Each atmospheric layer up has 70% volume and 12% density of layer below"
+    },
+    
+    "debug_and_reporting": {
+      "debug_output_enabled": false,
+      "crystallization_debug_threshold_kg": 1e18,
+      "major_event_debug_threshold_kg": 1e19,
+      "melting_event_debug_threshold": 1000,
+      "notes": "Reduced debug output for clean billion-year scale simulation"
+    },
+    
+    "calibration_results": {
+      "test_simulation_years": 1000,
+      "melting_events_per_1000_years": 807,
+      "raw_outgassing_per_event_kg": 1.59e12,
+      "crystallization_factor": 0.118,
+      "escaped_gas_per_event_kg": 1.40e12,
+      "total_atmospheric_generation_per_1000_years_kg": 1.13e15,
+      "years_to_earth_atmosphere": 4560000000,
+      "atmospheric_change_percentage": 0.000,
+      "notes": "Results from step_by_step_melting_tracker with these parameters"
+    },
+    
+    "tuning_guidelines": {
+      "to_make_faster": {
+        "increase_outgassing_rates": "multiply by 2-10x",
+        "decrease_crystallization_rates": "more gas escapes",
+        "lower_temperature_thresholds": "more major events",
+        "increase_catastrophic_probability": "more frequent major events"
+      },
+      "to_make_slower": {
+        "decrease_outgassing_rates": "divide by 2-10x", 
+        "increase_crystallization_rates": "more gas trapped",
+        "raise_temperature_thresholds": "fewer major events",
+        "decrease_catastrophic_probability": "rarer major events"
+      },
+      "primary_controls": [
+        "outgassing_rates (most important)",
+        "crystallization_rates (secondary)",
+        "temperature_thresholds (event frequency)",
+        "foundry_temperature_range (melting frequency)"
+      ]
+    },
+    
+    "geological_context": {
+      "simulates": "Early Earth secondary atmosphere formation",
+      "timescale": "Archean to Proterozoic Eons (4.6-2.5 billion years ago)",
+      "processes": [
+        "Volcanic outgassing from lithosphere melting",
+        "Crystallization and gas trapping in overlying layers", 
+        "Global atmospheric redistribution",
+        "Rare catastrophic volcanic events (LIPs, supervolcanoes)",
+        "Steady background geological outgassing"
+      ],
+      "realism": "Matches actual Earth atmospheric formation timescales"
+    },
+    
+    "mathematical_relationship": {
+      "formula": "Atmospheric_Generation_Rate = (Melting_Events/Year) × (Avg_Outgassing_Rate) × (1 - Crystallization_Factor)",
+      "current_calculation": "807 events/1000yr × 1.40e12 kg/event = 1.13e15 kg/1000yr",
+      "earth_atmosphere_time": "5.15e18 kg ÷ 1.13e12 kg/yr = 4.6 billion years"
+    }
+  }
+}

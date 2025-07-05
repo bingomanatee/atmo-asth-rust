@@ -4,16 +4,20 @@
 use crate::energy_mass_composite::{StandardEnergyMassComposite, MaterialPhase, MaterialCompositeType, EnergyMassParams, EnergyMassComposite};
 
 /// A unified thermal layer with flexible depth positioning and natural phase transitions
+/// Can represent either solid materials or atmospheric compound mixtures
 #[derive(Debug, Clone)]
 pub struct ThermalLayer {
     /// Depth from surface in km (negative = atmosphere, positive = subsurface)
     pub start_depth_km: f64,
-    
+
     /// Layer thickness in km
     pub height_km: f64,
-    
-    /// Unified energy and mass system that handles all material phases
+
+    /// Standard energy and mass system for solid materials
     pub energy_mass: StandardEnergyMassComposite,
+
+    /// Optional atmospheric compound tracking (for atmospheric layers only)
+    pub atmospheric_compounds: Option<std::collections::HashMap<String, f64>>, // compound_name -> mass_kg
 
     /// Surface area of this layer in km²
     pub surface_area_km2: f64,
@@ -23,14 +27,17 @@ pub struct ThermalLayer {
 
     /// Whether this is the surface layer (first non-atmospheric layer)
     pub is_surface_layer: bool,
+
+    /// Whether this layer uses atmospheric compound tracking
+    pub is_atmospheric: bool,
 }
 
 impl ThermalLayer {
 
-    /// Create a new atmospheric layer with reasonable volume and gaseous temperature
+    /// Create a new atmospheric layer with near-zero density that can accumulate mass through outgassing
     pub fn new_atmospheric(start_depth_km: f64, height_km: f64, surface_area_km2: f64, layer_index: usize) -> Self {
-        // Use volume = 5 km³ as suggested to avoid zero density issues
-        let volume_km3 = 5.0;
+        // Calculate full layer volume (atmospheric layers maintain constant volume)
+        let volume_km3 = surface_area_km2 * height_km;
 
         // Calculate reasonable atmospheric temperature based on altitude
         // Use standard atmospheric lapse rate: surface temp - 6.5K per km altitude
@@ -39,27 +46,26 @@ impl ThermalLayer {
         let altitude_km = (-start_depth_km + height_km / 2.0).max(0.0); // Center altitude of layer
         let atmospheric_temp_k = (surface_temp_k - altitude_km * lapse_rate_k_per_km).max(200.0); // Minimum 200K
 
-        let mut energy_mass = StandardEnergyMassComposite::new_with_params(
-            EnergyMassParams {
-                material_type: MaterialCompositeType::Air,
-                initial_phase: MaterialPhase::Gas,
-                energy_joules: 0.0, // Will be set by temperature
-                volume_km3,
-                height_km,
-                pressure_gpa: 0.0,
-            }
+        // Create atmospheric layer with near-zero initial density
+        let energy_mass = StandardEnergyMassComposite::new_atmospheric_with_near_zero_density(
+            MaterialCompositeType::Air,
+            volume_km3,
+            height_km,
+            atmospheric_temp_k
         );
 
-        // Set the atmospheric temperature
-        energy_mass.set_kelvin(atmospheric_temp_k);
+        // Create atmospheric compound tracking system
+        let atmospheric_compounds = Some(std::collections::HashMap::new());
 
         Self {
             start_depth_km,
             height_km,
             energy_mass,
+            atmospheric_compounds,
             surface_area_km2,
             layer_index,
             is_surface_layer: false, // Atmospheric layers are never surface layers
+            is_atmospheric: true,
         }
     }
 
@@ -82,9 +88,11 @@ impl ThermalLayer {
             start_depth_km,
             height_km,
             energy_mass,
+            atmospheric_compounds: None, // Solid layers don't have atmospheric compounds
             surface_area_km2,
             layer_index,
             is_surface_layer,
+            is_atmospheric: false,
         }
     }
 
@@ -273,13 +281,86 @@ impl ThermalLayer {
     }
 }
 
-impl std::fmt::Display for ThermalLayer {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ThermalLayer[{:.1}-{:.1}km, {:.0}K, {:?}, {:.2e}kg]", 
-               self.start_depth_km, 
-               self.end_depth_km(), 
-               self.temperature_k(),
-               self.phase(),
-               self.mass_kg())
+impl ThermalLayer {
+    /// Add atmospheric compounds to this layer (only works for atmospheric layers)
+    pub fn add_atmospheric_compound(&mut self, compound_type: String, mass_kg: f64) {
+        if let Some(ref mut compounds) = self.atmospheric_compounds {
+            *compounds.entry(compound_type).or_insert(0.0) += mass_kg;
+        }
+    }
+
+    /// Get the effective mass for this layer (atmospheric compounds if available, otherwise energy_mass)
+    pub fn effective_mass_kg(&self) -> f64 {
+        if let Some(ref compounds) = self.atmospheric_compounds {
+            compounds.values().sum()
+        } else {
+            self.energy_mass.mass_kg()
+        }
+    }
+
+    /// Get the effective temperature for this layer
+    pub fn effective_temperature_k(&self) -> f64 {
+        // For now, always use energy_mass temperature
+        // TODO: Calculate temperature from atmospheric compound properties
+        self.energy_mass.temperature()
+    }
+
+    /// Set temperature for this layer (updates both systems if atmospheric)
+    pub fn set_effective_temperature_k(&mut self, temp_k: f64) {
+        // For now, just update energy_mass temperature
+        // TODO: Update atmospheric compound temperatures
+        self.energy_mass.set_kelvin(temp_k);
+    }
+
+    /// Check if this layer has atmospheric compounds
+    pub fn has_atmospheric_compounds(&self) -> bool {
+        self.atmospheric_compounds.is_some()
+    }
+
+    /// Get atmospheric compound mass (returns 0.0 if not atmospheric or compound not found)
+    pub fn get_atmospheric_compound_mass(&self, compound_type: &str) -> f64 {
+        if let Some(ref compounds) = self.atmospheric_compounds {
+            compounds.get(compound_type).copied().unwrap_or(0.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Get atmospheric compound fraction (returns 0.0 if not atmospheric or compound not found)
+    pub fn get_atmospheric_compound_fraction(&self, compound_type: &str) -> f64 {
+        if let Some(ref compounds) = self.atmospheric_compounds {
+            let total_mass: f64 = compounds.values().sum();
+            if total_mass > 0.0 {
+                compounds.get(compound_type).copied().unwrap_or(0.0) / total_mass
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        }
+    }
+
+    /// Get all atmospheric compounds and their masses
+    pub fn get_all_atmospheric_compounds(&self) -> std::collections::HashMap<String, f64> {
+        if let Some(ref compounds) = self.atmospheric_compounds {
+            compounds.clone()
+        } else {
+            std::collections::HashMap::new()
+        }
     }
 }
+
+impl std::fmt::Display for ThermalLayer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ThermalLayer[{:.1}-{:.1}km, {:.0}K, {:?}, {:.2e}kg]",
+               self.start_depth_km,
+               self.end_depth_km(),
+               self.effective_temperature_k(),
+               self.phase(),
+               self.effective_mass_kg())
+    }
+}
+
+
+
+

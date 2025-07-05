@@ -18,6 +18,7 @@ struct MaterialPhaseData {
     solid: MaterialPhaseProperties,
     liquid: MaterialPhaseProperties,
     gas: MaterialPhaseProperties,
+    emission_compounds: Option<std::collections::HashMap<String, f64>>,
 }
 
 #[derive(Deserialize)]
@@ -360,6 +361,63 @@ pub fn get_melting_point_k(material_type: &MaterialCompositeType) -> f64 {
 pub fn get_boiling_point_k(material_type: &MaterialCompositeType) -> f64 {
     let solid_profile = get_profile_fast(material_type, &MaterialPhase::Solid);
     solid_profile.boil_temp
+}
+
+/// Get emission compound ratios for a material type when it melts/outgasses
+pub fn get_emission_compound_ratios(material_type: &MaterialCompositeType) -> std::collections::HashMap<String, f64> {
+    // For now, return default emission ratios based on material type
+    // TODO: Load from materials.json when emission_compounds are properly integrated
+    let mut ratios = std::collections::HashMap::new();
+
+    match material_type {
+        MaterialCompositeType::Basaltic => {
+            ratios.insert("CO2".to_string(), 0.45);
+            ratios.insert("H2O".to_string(), 0.25);
+            ratios.insert("SO2".to_string(), 0.15);
+            ratios.insert("N2".to_string(), 0.08);
+            ratios.insert("H2S".to_string(), 0.04);
+            ratios.insert("CO".to_string(), 0.02);
+            ratios.insert("H2".to_string(), 0.01);
+        },
+        MaterialCompositeType::Granitic => {
+            ratios.insert("H2O".to_string(), 0.50);
+            ratios.insert("CO2".to_string(), 0.30);
+            ratios.insert("SO2".to_string(), 0.08);
+            ratios.insert("N2".to_string(), 0.06);
+            ratios.insert("H2S".to_string(), 0.03);
+            ratios.insert("CO".to_string(), 0.02);
+            ratios.insert("H2".to_string(), 0.01);
+        },
+        MaterialCompositeType::Silicate => {
+            ratios.insert("CO2".to_string(), 0.40);
+            ratios.insert("H2O".to_string(), 0.30);
+            ratios.insert("SO2".to_string(), 0.12);
+            ratios.insert("N2".to_string(), 0.10);
+            ratios.insert("H2S".to_string(), 0.05);
+            ratios.insert("CO".to_string(), 0.02);
+            ratios.insert("H2".to_string(), 0.01);
+        },
+        MaterialCompositeType::Metallic => {
+            ratios.insert("H2".to_string(), 0.60);
+            ratios.insert("CO".to_string(), 0.20);
+            ratios.insert("H2O".to_string(), 0.10);
+            ratios.insert("CO2".to_string(), 0.05);
+            ratios.insert("N2".to_string(), 0.03);
+            ratios.insert("SO2".to_string(), 0.01);
+            ratios.insert("H2S".to_string(), 0.01);
+        },
+        MaterialCompositeType::Icy => {
+            ratios.insert("H2O".to_string(), 1.00);
+        },
+        _ => {
+            // Default for Air and unknown materials
+            ratios.insert("CO2".to_string(), 0.40);
+            ratios.insert("H2O".to_string(), 0.30);
+            ratios.insert("N2".to_string(), 0.30);
+        }
+    }
+
+    ratios
 }
 
 #[cfg(test)]

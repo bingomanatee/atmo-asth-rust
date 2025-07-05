@@ -379,6 +379,80 @@ impl StandardEnergyMassComposite {
         composite
     }
 
+    /// Create a new atmospheric layer with near-zero mass that can accumulate mass through outgassing
+    /// Atmospheric layers start with constant volume but near-zero mass, then gain density as mass is added
+    pub fn new_atmospheric_with_near_zero_density(
+        material_type: MaterialCompositeType,
+        volume_km3: f64,
+        height_km: f64,
+        temp_k: f64,
+    ) -> Self {
+        // Start with minimal mass (near-zero but not exactly zero to avoid division issues)
+        let minimal_mass_kg = 1e-3; // 1 gram - essentially empty but not zero
+
+        // Calculate energy for this minimal mass at the given temperature using material properties
+        let profile = get_profile_fast(&material_type, &MaterialPhase::Gas);
+        let energy_joules = minimal_mass_kg * profile.specific_heat_capacity_j_per_kg_k * temp_k;
+
+        // Create with the calculated energy (which corresponds to our minimal mass)
+        let params = EnergyMassParams {
+            material_type,
+            initial_phase: MaterialPhase::Gas, // Atmospheric layers are always gas
+            energy_joules,
+            volume_km3,
+            height_km,
+            pressure_gpa: 0.0, // Atmospheric pressure
+        };
+
+        Self::new_with_params(params)
+    }
+
+    /// Add mass to an atmospheric layer while maintaining constant volume (increases density)
+    /// This is used for atmospheric generation where outgassed material is added to atmospheric layers
+    pub fn add_atmospheric_mass(&mut self, additional_mass_kg: f64, temp_k: f64) {
+        if additional_mass_kg <= 0.0 {
+            return;
+        }
+
+        // Calculate current mass
+        let current_mass_kg = self.mass_kg();
+        let _new_total_mass_kg = current_mass_kg + additional_mass_kg;
+
+        // Calculate energy for the additional mass at the given temperature
+        let profile = get_profile_fast(&self.material_type, &self.phase);
+        let additional_energy_joules = additional_mass_kg * profile.specific_heat_capacity_j_per_kg_k * temp_k;
+
+        // Add the energy (this effectively adds the mass while maintaining temperature)
+        self.energy_joules += additional_energy_joules;
+
+        // Volume stays constant for atmospheric layers - density increases automatically
+        // The mass_kg() method will now return the higher mass due to increased energy
+    }
+
+    /// Calculate the actual current density based on energy content (for atmospheric layers)
+    /// This is different from density_kgm3() which returns the material profile density
+    pub fn actual_density_kgm3(&self) -> f64 {
+        // Calculate mass from energy content
+        let profile = get_profile_fast(&self.material_type, &self.phase);
+        let temp_k = self.temperature();
+
+        // Avoid division by zero
+        if temp_k <= 0.0 || profile.specific_heat_capacity_j_per_kg_k <= 0.0 {
+            return 1e-6; // Near-zero density
+        }
+
+        // Calculate actual mass from energy: mass = energy / (specific_heat * temperature)
+        let actual_mass_kg = self.energy_joules / (profile.specific_heat_capacity_j_per_kg_k * temp_k);
+
+        // Calculate density: density = mass / volume
+        let volume_m3 = self.volume_km3 * 1e9; // Convert km³ to m³
+        if volume_m3 <= 0.0 {
+            return 1e-6; // Near-zero density
+        }
+
+        actual_mass_kg / volume_m3
+    }
+
     /// Create a new StandardEnergyMassComposite with specified parameters
     pub fn new_with_material_state_and_energy(params: EnergyMassParams) -> Self {
         // Get profile for the initial phase state

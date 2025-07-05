@@ -12,6 +12,10 @@ pub struct SurfaceEnergyInitParams {
     pub surface_temp_k: f64,
     pub geothermal_gradient_k_per_km: f64,
     pub core_temp_k: f64,
+    pub foundry_oscillation_enabled: bool,
+    pub foundry_oscillation_period_years: f64,
+    pub foundry_min_multiplier: f64,
+    pub foundry_max_multiplier: f64,
 }
 
 impl Default for SurfaceEnergyInitParams {
@@ -20,6 +24,10 @@ impl Default for SurfaceEnergyInitParams {
             surface_temp_k: 280.0,           // 280K surface temperature
             geothermal_gradient_k_per_km: 25.0, // 25K per km depth
             core_temp_k: 1800.0,             // 1800K core temperature
+            foundry_oscillation_enabled: true,  // Enable foundry temperature oscillation
+            foundry_oscillation_period_years: 500.0, // 500-year period
+            foundry_min_multiplier: 0.25,    // 25% minimum
+            foundry_max_multiplier: 1.75,    // 175% maximum
         }
     }
 }
@@ -34,6 +42,30 @@ impl SurfaceEnergyInitParams {
             surface_temp_k,
             geothermal_gradient_k_per_km,
             core_temp_k,
+            foundry_oscillation_enabled: true,
+            foundry_oscillation_period_years: 500.0,
+            foundry_min_multiplier: 0.25,
+            foundry_max_multiplier: 1.75,
+        }
+    }
+
+    pub fn with_foundry_oscillation(
+        surface_temp_k: f64,
+        geothermal_gradient_k_per_km: f64,
+        core_temp_k: f64,
+        oscillation_enabled: bool,
+        period_years: f64,
+        min_multiplier: f64,
+        max_multiplier: f64,
+    ) -> Self {
+        Self {
+            surface_temp_k,
+            geothermal_gradient_k_per_km,
+            core_temp_k,
+            foundry_oscillation_enabled: oscillation_enabled,
+            foundry_oscillation_period_years: period_years,
+            foundry_min_multiplier: min_multiplier,
+            foundry_max_multiplier: max_multiplier,
         }
     }
 }
@@ -70,24 +102,59 @@ impl SurfaceEnergyInitOp {
         }
     }
 
-    /// Enforce foundry temperature at the deepest layers and add continuous heat input
-    fn enforce_foundry_temperature(&self, sim: &mut Simulation) {
-        let foundry_heat_input_per_step = 1e20; // Joules per step - significant heat source
+    /// Generate pseudo-random offset based on cell ID
+    pub fn generate_cell_phase_offset(&self, cell_id: u64) -> f64 {
+        // Use a simple hash function to generate pseudo-random phase offset
+        let mut hash = cell_id;
+        hash = hash.wrapping_mul(0x9e3779b97f4a7c15); // Large prime multiplier
+        hash = hash ^ (hash >> 30);
+        hash = hash.wrapping_mul(0xbf58476d1ce4e5b9); // Another large prime
+        hash = hash ^ (hash >> 27);
 
-        for cell in sim.cells.values_mut() {
+        // Convert to 0-1 range and scale to 0-2π for phase offset
+        let normalized = (hash as f64) / (u64::MAX as f64);
+        normalized * 2.0 * std::f64::consts::PI
+    }
+
+    /// Calculate oscillating foundry temperature multiplier
+    pub fn calculate_foundry_multiplier(&self, current_time_years: f64, cell_id: u64) -> f64 {
+        if !self.params.foundry_oscillation_enabled {
+            return 1.0; // No oscillation, use base temperature
+        }
+
+        let phase_offset = self.generate_cell_phase_offset(cell_id);
+        let angular_frequency = 2.0 * std::f64::consts::PI / self.params.foundry_oscillation_period_years;
+        let phase = angular_frequency * current_time_years + phase_offset;
+
+        // Sin function oscillates between -1 and 1, map to min_multiplier and max_multiplier
+        let sin_value = phase.sin();
+        let mid_point = (self.params.foundry_min_multiplier + self.params.foundry_max_multiplier) / 2.0;
+        let amplitude = (self.params.foundry_max_multiplier - self.params.foundry_min_multiplier) / 2.0;
+
+        mid_point + amplitude * sin_value
+    }
+
+    /// Enforce foundry temperature at the deepest layers with oscillating heat input
+    fn enforce_foundry_temperature(&self, sim: &mut Simulation) {
+        let base_foundry_heat_input_per_step = 1e20; // Base Joules per step
+        let current_time_years = sim.step as f64 * sim.years_per_step as f64;
+
+        for (cell_id, cell) in sim.cells.iter_mut() {
+            // Calculate oscillating multiplier for this cell
+            let cell_id_u64 = u64::from(*cell_id); // Convert H3Index to u64
+            let multiplier = self.calculate_foundry_multiplier(current_time_years, cell_id_u64);
+            let oscillating_heat_input = base_foundry_heat_input_per_step * multiplier;
+            let oscillating_foundry_temp = self.params.core_temp_k * multiplier;
+
             // Find the deepest layer in this cell
             if let Some((deepest_current, deepest_next)) = cell.layers_t.last_mut() {
-                // Add continuous heat input to simulate foundry heat source
-                deepest_current.add_energy(foundry_heat_input_per_step);
-                deepest_next.add_energy(foundry_heat_input_per_step);
+                // Add oscillating heat input to simulate variable foundry heat source
+                deepest_current.add_energy(oscillating_heat_input);
+                deepest_next.add_energy(oscillating_heat_input);
 
-                // Ensure temperature doesn't drop below foundry temperature
-                if deepest_current.temperature_k() < self.params.core_temp_k {
-                    deepest_current.energy_mass.set_temperature(self.params.core_temp_k);
-                }
-                if deepest_next.temperature_k() < self.params.core_temp_k {
-                    deepest_next.energy_mass.set_temperature(self.params.core_temp_k);
-                }
+                // Ensure temperature matches oscillating foundry temperature
+                deepest_current.energy_mass.set_temperature(oscillating_foundry_temp);
+                deepest_next.energy_mass.set_temperature(oscillating_foundry_temp);
             }
         }
     }

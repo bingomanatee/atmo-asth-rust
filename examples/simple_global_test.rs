@@ -1,5 +1,5 @@
-/// Simple test to verify global thermal basic structure works
-/// This is a minimal test without complex operations
+/// Enhanced global test with atmospheric generation and oscillating foundry
+/// Tests the most up-to-date configuration with atmospheric dynamics
 
 use atmo_asth_rust::sim::simulation::{Simulation, SimProps};
 use atmo_asth_rust::planet::Planet;
@@ -13,7 +13,9 @@ use atmo_asth_rust::sim::sim_op::{
     TemperatureReportingOp,
     SpaceRadiationOp,
     SpaceRadiationOpParams,
+    AtmosphericGenerationOp,
 };
+use atmo_asth_rust::sim::sim_op::atmospheric_generation_op::CrystallizationParams;
 use atmo_asth_rust::sim::sim_op::SimOpHandle;
 use h3o::Resolution;
 use std::rc::Rc;

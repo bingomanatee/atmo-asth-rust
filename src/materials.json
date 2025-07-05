@@ -38,6 +38,15 @@
       "latent_heat_fusion": 400000.0,
       "boil_temp": 2900.0,
       "latent_heat_vapor": 2000000.0
+    },
+    "emission_compounds": {
+      "CO2": 0.45,
+      "H2O": 0.25,
+      "SO2": 0.15,
+      "N2": 0.08,
+      "H2S": 0.04,
+      "CO": 0.02,
+      "H2": 0.01
     }
   },
   "granite": {
@@ -78,6 +87,15 @@
       "latent_heat_fusion": 420000.0,
       "boil_temp": 3000.0,
       "latent_heat_vapor": 2100000.0
+    },
+    "emission_compounds": {
+      "H2O": 0.50,
+      "CO2": 0.30,
+      "SO2": 0.08,
+      "N2": 0.06,
+      "H2S": 0.03,
+      "CO": 0.02,
+      "H2": 0.01
     }
   },
   "silicate": {
@@ -118,6 +136,15 @@
       "latent_heat_fusion": 500000.0,
       "boil_temp": 3200.0,
       "latent_heat_vapor": 2200000.0
+    },
+    "emission_compounds": {
+      "CO2": 0.40,
+      "H2O": 0.30,
+      "SO2": 0.12,
+      "N2": 0.10,
+      "H2S": 0.05,
+      "CO": 0.02,
+      "H2": 0.01
     }
   },
   "steel": {
@@ -158,6 +185,15 @@
       "latent_heat_fusion": 270000.0,
       "boil_temp": 3100.0,
       "latent_heat_vapor": 5400000.0
+    },
+    "emission_compounds": {
+      "H2": 0.60,
+      "CO": 0.20,
+      "H2O": 0.10,
+      "CO2": 0.05,
+      "N2": 0.03,
+      "SO2": 0.01,
+      "H2S": 0.01
     }
   },
   "water": {
@@ -199,6 +235,9 @@
       "latent_heat_fusion": 334000.0,
       "boil_temp": 373.15,
       "latent_heat_vapor": 2260000.0
+    },
+    "emission_compounds": {
+      "H2O": 1.00
     }
   }
 }

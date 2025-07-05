@@ -10,7 +10,7 @@ use std::rc::Rc;
 pub struct Simulation {
     pub planet: Planet,
     pub resolution: Resolution,
-    ops: Vec<Box<dyn SimOp>>,
+    pub ops: Vec<Box<dyn SimOp>>,
     pub cells: HashMap<CellIndex, GlobalH3Cell>,
     pub layer_count: usize,
     pub step: i32,

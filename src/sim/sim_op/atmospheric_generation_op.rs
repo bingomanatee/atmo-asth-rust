@@ -6,6 +6,90 @@
 use crate::sim::sim_op::SimOp;
 use crate::sim::simulation::Simulation;
 use crate::energy_mass_composite::{EnergyMassComposite, MaterialPhase, MaterialCompositeType};
+use crate::material_composite::get_emission_compound_ratios;
+use std::collections::HashMap;
+use h3o::CellIndex;
+
+use serde::{Deserialize, Serialize};
+use std::sync::OnceLock;
+
+/// Properties of atmospheric compounds loaded from JSON
+#[derive(Debug, Clone, Deserialize)]
+struct CompoundProperties {
+    pub name: String,
+    pub chemical_formula: String,
+    pub molar_mass_g_mol: f64,
+    pub density_stp_kg_m3: f64,
+    pub specific_heat_capacity_j_kg_k: f64,
+    pub thermal_conductivity_w_m_k: f64,
+    pub viscosity_pa_s: f64,
+    pub greenhouse_potential: f64,
+    pub absorption_bands_um: Vec<f64>,
+    pub atmospheric_lifetime_years: f64,
+}
+
+/// Load compound data from JSON file
+fn load_compounds_data() -> &'static HashMap<String, CompoundProperties> {
+    static COMPOUNDS_DATA: OnceLock<HashMap<String, CompoundProperties>> = OnceLock::new();
+    COMPOUNDS_DATA.get_or_init(|| {
+        let json_str = include_str!("../../compounds.json");
+        serde_json::from_str(json_str).expect("Failed to parse compounds.json")
+    })
+}
+
+/// Phase change event for melting detection
+#[derive(Debug, Clone)]
+pub struct PhaseChangeEvent {
+    pub cell_id: CellIndex,
+    pub layer_index: usize,
+    pub depth_km: f64,
+    pub temperature_k: f64,
+    pub material_type: MaterialCompositeType,
+    pub timestamp_years: f64,
+    pub event_type: PhaseChangeType,
+    pub mass_affected_kg: f64,
+}
+
+#[derive(Debug, Clone)]
+pub enum PhaseChangeType {
+    Melting,
+    Solidifying,
+    Vaporizing,
+    Condensing,
+}
+
+/// Atmospheric compound generated from melting events
+#[derive(Debug, Clone)]
+pub struct AtmosphericCompound {
+    pub compound_type: String,  // CO2, H2O, SO2, etc.
+    pub mass_kg: f64,
+}
+
+/// Global atmospheric properties blended from all compound sources
+#[derive(Debug, Clone)]
+pub struct GlobalAtmosphericProperties {
+    pub total_mass_kg: f64,
+    pub average_molar_mass_g_mol: f64,
+    pub average_density_stp_kg_m3: f64,
+    pub average_specific_heat_j_kg_k: f64,
+    pub average_thermal_conductivity_w_m_k: f64,
+    pub total_greenhouse_potential: f64,
+    pub compound_fractions: HashMap<String, f64>, // compound_name -> mass_fraction
+}
+
+impl Default for GlobalAtmosphericProperties {
+    fn default() -> Self {
+        Self {
+            total_mass_kg: 0.0,
+            average_molar_mass_g_mol: 28.97, // Default to air
+            average_density_stp_kg_m3: 1.225, // Default to air at STP
+            average_specific_heat_j_kg_k: 1004.0, // Default to air
+            average_thermal_conductivity_w_m_k: 0.024, // Default to air
+            total_greenhouse_potential: 0.0,
+            compound_fractions: HashMap::new(),
+        }
+    }
+}
 
 /// Parameters for atmospheric generation with crystallization
 #[derive(Debug, Clone)]
@@ -27,11 +111,27 @@ pub struct CrystallizationParams {
 pub struct AtmosphericGenerationOp {
     pub apply_during_simulation: bool,
     pub outgassing_rate_multiplier: f64,  // Multiplier for outgassing rate from melting
+    pub catastrophic_event_outgassing_rate: f64, // Very high rate for catastrophic events (>2500K, rare)
+    pub major_event_outgassing_rate: f64, // Higher rate for major volcanic events (>1800K)
+    pub background_outgassing_rate: f64,  // Lower rate for background volcanic activity
+    pub catastrophic_event_probability: f64, // Probability multiplier for catastrophic events (billion-year scale)
     pub volume_decay_factor: f64,         // Exponential decay factor for atmospheric volumes
     pub density_decay_factor: f64,        // Exponential decay factor for atmospheric density (0.12 = 88% reduction per layer)
     pub depth_attenuation_factor: f64,    // How much deeper sources contribute less (0.8 = 20% reduction per layer depth)
-    pub crystallization_rate: f64,        // Percentage of rising gas that crystallizes per layer (0.1 = 10% per layer)
+    pub crystallization_rate: f64,        // Base crystallization rate (0.5 = 50% per layer)
+    pub catastrophic_event_crystallization: f64, // Very low crystallization for catastrophic events (massive escape)
+    pub major_event_crystallization: f64, // Lower crystallization for major events (more gas escapes)
+    pub background_crystallization: f64,  // Higher crystallization for background activity (more gas trapped)
     pub debug_output: bool,
+
+    // Event-driven melting tracking
+    previous_layer_phases: HashMap<(CellIndex, usize), MaterialPhase>, // Track previous phase state for each layer
+    melting_events_this_step: Vec<PhaseChangeEvent>,
+
+    // Global atmospheric tracking - blended from all material sources
+    global_atmosphere_compounds: HashMap<String, f64>, // Total compound masses in global atmosphere (all sources blended)
+    compounds_added_this_step: HashMap<String, f64>,   // Compounds added this step from all materials
+    global_atmospheric_properties: GlobalAtmosphericProperties, // Blended properties of the global atmosphere
 
     // Tracking state
     total_outgassed_mass: f64,
@@ -40,16 +140,593 @@ pub struct AtmosphericGenerationOp {
     step_count: usize,
 }
 
+/// Configuration structure for loading atmospheric generation parameters from JSON
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AtmosphericGenerationConfig {
+    pub outgassing_rates: OutgassingRatesConfig,
+    pub crystallization_rates: CrystallizationRatesConfig,
+    pub event_classification: EventClassificationConfig,
+    pub foundry_temperature_config: FoundryTemperatureConfig,
+    pub atmospheric_layer_config: AtmosphericLayerConfig,
+    pub debug_and_reporting: DebugReportingConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct OutgassingRatesConfig {
+    pub base_outgassing_rate_multiplier: f64,
+    pub catastrophic_event_outgassing_rate: f64,
+    pub major_event_outgassing_rate: f64,
+    pub background_outgassing_rate: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct CrystallizationRatesConfig {
+    pub base_crystallization_rate: f64,
+    pub catastrophic_event_crystallization: f64,
+    pub major_event_crystallization: f64,
+    pub background_crystallization: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct EventClassificationConfig {
+    pub catastrophic_threshold_k: f64,
+    pub major_event_threshold_k: f64,
+    pub catastrophic_event_probability: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct FoundryTemperatureConfig {
+    pub base_core_temp_k: f64,
+    pub surface_temp_k: f64,
+    pub geothermal_gradient_k_per_km: f64,
+    pub oscillation_enabled: bool,
+    pub oscillation_period_years: f64,
+    pub min_multiplier: f64,
+    pub max_multiplier: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AtmosphericLayerConfig {
+    pub volume_decay_factor: f64,
+    pub density_decay_factor: f64,
+    pub depth_attenuation_factor: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DebugReportingConfig {
+    pub debug_output_enabled: bool,
+    pub crystallization_debug_threshold_kg: f64,
+    pub major_event_debug_threshold_kg: f64,
+    pub melting_event_debug_threshold: usize,
+}
+
 impl AtmosphericGenerationOp {
+    /// Detect phase changes by comparing current and previous layer phases
+    fn detect_melting_events(&mut self, sim: &Simulation) {
+        self.melting_events_this_step.clear();
+
+        let current_time_years = sim.step as f64 * sim.years_per_step as f64;
+
+        for (cell_id, cell) in &sim.cells {
+            for (layer_index, (current_layer, _next_layer)) in cell.layers_t.iter().enumerate() {
+                let layer_key = (*cell_id, layer_index);
+                let current_phase = current_layer.phase();
+
+                // Get previous phase (default to Solid for new layers)
+                let previous_phase = self.previous_layer_phases.get(&layer_key).copied().unwrap_or(MaterialPhase::Solid);
+
+                // Detect melting transition (Solid -> Liquid or Solid -> Gas)
+                if previous_phase == MaterialPhase::Solid &&
+                   (current_phase == MaterialPhase::Liquid || current_phase == MaterialPhase::Gas) {
+
+                    let event_type = if current_phase == MaterialPhase::Liquid {
+                        PhaseChangeType::Melting
+                    } else {
+                        PhaseChangeType::Vaporizing
+                    };
+
+                    let event = PhaseChangeEvent {
+                        cell_id: *cell_id,
+                        layer_index,
+                        depth_km: current_layer.start_depth_km + current_layer.height_km / 2.0,
+                        temperature_k: current_layer.temperature_k(),
+                        material_type: current_layer.energy_mass.material_composite_type(),
+                        timestamp_years: current_time_years,
+                        event_type,
+                        mass_affected_kg: current_layer.mass_kg(),
+                    };
+
+                    if self.debug_output {
+                        println!("🔥 MELTING EVENT: Cell {:016x}, Layer {}, {:.1}km depth, {:.2e} kg melted at {:.0}K",
+                                 u64::from(*cell_id), layer_index, event.depth_km, event.mass_affected_kg, event.temperature_k);
+                    }
+
+                    self.melting_events_this_step.push(event);
+                }
+
+                // Update previous phase for next step
+                self.previous_layer_phases.insert(layer_key, current_phase);
+            }
+        }
+
+        // Reduce debug output frequency
+        if self.debug_output && self.melting_events_this_step.len() > 1000 {
+            println!("🌋 Detected {} melting events this step", self.melting_events_this_step.len());
+        }
+    }
+
+    /// Generate atmosphere from melting events (global approach)
+    fn generate_atmosphere_from_melting_events(&mut self, sim: &mut Simulation) -> f64 {
+        if self.melting_events_this_step.is_empty() {
+            return 0.0;
+        }
+
+        // Clear compounds added this step
+        self.compounds_added_this_step.clear();
+        let mut total_outgassed = 0.0;
+
+        // Clone events to avoid borrowing issues
+        let events = self.melting_events_this_step.clone();
+
+        // Process all melting events and add compounds to global atmosphere
+        for event in &events {
+            // Determine event type based on temperature and probability
+            let is_catastrophic_candidate = event.temperature_k > 2500.0; // Catastrophic events above 2500K
+            let is_major_event = event.temperature_k > 1800.0; // Major events above 1800K
+
+            // Apply probability filter for catastrophic events (billion-year scale)
+            let is_catastrophic_event = is_catastrophic_candidate &&
+                (rand::random::<f64>() < self.catastrophic_event_probability);
+
+            // Use different rates based on event type
+            let (outgassing_rate, base_crystallization_rate, event_type) = if is_catastrophic_event {
+                (self.catastrophic_event_outgassing_rate, self.catastrophic_event_crystallization, "CATASTROPHIC")
+            } else if is_major_event {
+                (self.major_event_outgassing_rate, self.major_event_crystallization, "MAJOR")
+            } else {
+                (self.background_outgassing_rate, self.background_crystallization, "background")
+            };
+
+            // Calculate outgassing from this melting event
+            let raw_outgassed_mass = event.mass_affected_kg * outgassing_rate;
+
+            // Calculate crystallization based on overlying layer density and depth
+            let crystallization_factor = self.calculate_crystallization_factor_with_base(
+                sim, &event.cell_id, event.depth_km, base_crystallization_rate
+            );
+            let crystallized_mass = raw_outgassed_mass * crystallization_factor;
+            let escaped_mass = raw_outgassed_mass - crystallized_mass;
+
+            // Debug crystallization calculation for significant events only
+            if self.debug_output && raw_outgassed_mass > 1e18 {
+                println!("🔬 Crystallization debug: raw={:.2e}kg, factor={:.3}, crystallized={:.2e}kg, escaped={:.2e}kg",
+                         raw_outgassed_mass, crystallization_factor, crystallized_mass, escaped_mass);
+            }
+
+            // Apply depth attenuation to escaped mass only
+            let depth_attenuation = self.depth_attenuation_factor.powf(event.depth_km / 10.0);
+            let final_atmospheric_mass = escaped_mass * depth_attenuation;
+
+            if final_atmospheric_mass > 0.0 {
+                // Generate specific atmospheric compounds based on material type
+                let compounds = self.generate_atmospheric_compounds(&event.material_type, final_atmospheric_mass);
+
+                // Add compounds to global atmosphere
+                for compound in &compounds {
+                    // Add to global atmosphere
+                    *self.global_atmosphere_compounds.entry(compound.compound_type.clone()).or_insert(0.0) += compound.mass_kg;
+
+                    // Track compounds added this step
+                    *self.compounds_added_this_step.entry(compound.compound_type.clone()).or_insert(0.0) += compound.mass_kg;
+                }
+
+                // Minimal debug output for major events only
+                if self.debug_output && final_atmospheric_mass > 1e19 && event_type == "CATASTROPHIC" {
+                    println!("🌋 {} volcanic event: {:.2e} kg from {:.1}km depth at {:.0}K",
+                             event_type, final_atmospheric_mass, event.depth_km, event.temperature_k);
+                }
+
+                total_outgassed += final_atmospheric_mass;
+            }
+        }
+
+        // Update global atmospheric properties by blending all compounds
+        if total_outgassed > 0.0 {
+            self.update_global_atmospheric_properties();
+        }
+
+        if self.debug_output && total_outgassed > 1e19 {
+            println!("🌍 Total atmospheric generation: {:.2e} kg from {} events",
+                     total_outgassed, events.len());
+        }
+
+        total_outgassed
+    }
+
+    /// Generate specific atmospheric compounds based on material emission ratios
+    fn generate_atmospheric_compounds(&self, material_type: &MaterialCompositeType, total_mass_kg: f64) -> Vec<AtmosphericCompound> {
+        let emission_ratios = get_emission_compound_ratios(material_type);
+        let mut compounds = Vec::new();
+
+        for (compound_name, ratio) in emission_ratios {
+            let compound_mass = total_mass_kg * ratio;
+            if compound_mass > 0.0 {
+                compounds.push(AtmosphericCompound {
+                    compound_type: compound_name,
+                    mass_kg: compound_mass,
+                });
+            }
+        }
+
+        compounds
+    }
+
+    /// Calculate crystallization factor based on overlying layer properties
+    /// Accounts for pressure, density, material type, and interference factors
+    fn calculate_crystallization_factor(&self, sim: &Simulation, cell_id: &CellIndex, melting_depth_km: f64) -> f64 {
+        self.calculate_crystallization_factor_with_base(sim, cell_id, melting_depth_km, self.crystallization_rate)
+    }
+
+    /// Calculate crystallization factor with custom base rate for different event types
+    fn calculate_crystallization_factor_with_base(&self, sim: &Simulation, cell_id: &CellIndex, melting_depth_km: f64, base_rate: f64) -> f64 {
+        if let Some(cell) = sim.cells.get(cell_id) {
+            let mut total_crystallization_factor = 0.0;
+            let mut contributing_layers = 0;
+
+            // Analyze each layer above the melting deptok - jkeep teweh individually
+            for (current, _next) in &cell.layers_t {
+                let layer_top = current.start_depth_km;
+                let layer_bottom = current.start_depth_km + current.height_km;
+
+                // Only count layers above the melting depth AND skip atmospheric layers
+                if layer_bottom <= melting_depth_km && !self.is_atmospheric_layer(current) {
+                    // Calculate layer-specific properties
+                    let layer_density_kg_m3 = current.current_density_kg_m3();
+                    let layer_pressure_gpa = current.energy_mass.pressure_gpa();
+                    let layer_material = current.energy_mass.material_composite_type();
+                    let layer_phase = current.energy_mass.phase();
+
+                    // Material-specific interference factors
+                    let material_interference_factor = self.get_material_interference_factor(&layer_material, &layer_phase);
+
+                    // Pressure factor (higher pressure = more crystallization)
+                    let pressure_factor = (1.0 + layer_pressure_gpa * 0.5).min(3.0); // Cap at 3x
+
+                    // Density factor (denser material = more crystallization)
+                    let reference_density = 2500.0; // kg/m³ - typical rock density
+                    let density_factor = (layer_density_kg_m3 / reference_density).min(4.0); // Cap at 4x
+
+                    // Distance factor (closer to melting source = more effective)
+                    let distance_from_melting = (melting_depth_km - layer_bottom).max(0.1);
+                    let distance_factor = (10.0 / distance_from_melting).min(2.0); // Closer layers more effective
+
+                    // Layer thickness factor (thicker layers = more crystallization)
+                    let thickness_factor = (current.height_km / 4.0).min(2.0); // Normalize to 4km reference
+
+                    // Combine all factors for this layer
+                    let layer_crystallization = material_interference_factor
+                        * pressure_factor
+                        * density_factor
+                        * distance_factor
+                        * thickness_factor;
+
+                    total_crystallization_factor += layer_crystallization;
+                    contributing_layers += 1;
+
+                    // Disable layer-by-layer debug output for cleaner logs
+                }
+            }
+
+            if contributing_layers > 0 {
+                // Average crystallization factor from all contributing layers
+                let average_crystallization = total_crystallization_factor / contributing_layers as f64;
+
+                // Apply base crystallization rate more conservatively
+                let base_crystallization = base_rate / 100.0; // Convert percentage to fraction
+                // Use additive rather than multiplicative to prevent extreme values
+                let final_crystallization = (base_crystallization + average_crystallization * 0.1).min(0.95);
+
+                // Cap crystallization at 99.9% (always allow some gas to escape)
+                final_crystallization.min(0.999)
+            } else {
+                // No overlying layers - minimal crystallization
+                (base_rate / 100.0).min(0.1)
+            }
+        } else {
+            // Cell not found - use base crystallization rate
+            (base_rate / 100.0).min(0.5)
+        }
+    }
+
+    /// Get material-specific interference factor for gas crystallization
+    /// Different materials have different abilities to trap rising gases
+    fn get_material_interference_factor(&self, material_type: &MaterialCompositeType, phase: &MaterialPhase) -> f64 {
+        match (material_type, phase) {
+            // Solid materials - good at trapping gases
+            (MaterialCompositeType::Silicate, MaterialPhase::Solid) => 1.0,   // Standard reference
+            (MaterialCompositeType::Basaltic, MaterialPhase::Solid) => 0.8,   // Slightly more porous
+            (MaterialCompositeType::Granitic, MaterialPhase::Solid) => 1.2,   // Dense, good trapping
+            (MaterialCompositeType::Metallic, MaterialPhase::Solid) => 0.6,   // Dense but less reactive
+            (MaterialCompositeType::Icy, MaterialPhase::Solid) => 0.4,        // Poor trapping
+
+            // Liquid materials - moderate trapping
+            (MaterialCompositeType::Silicate, MaterialPhase::Liquid) => 0.3,  // Molten rock, some trapping
+            (MaterialCompositeType::Basaltic, MaterialPhase::Liquid) => 0.2,  // More fluid
+            (MaterialCompositeType::Granitic, MaterialPhase::Liquid) => 0.4,  // Viscous, better trapping
+            (MaterialCompositeType::Metallic, MaterialPhase::Liquid) => 0.1,  // Fluid metal, poor trapping
+            (MaterialCompositeType::Icy, MaterialPhase::Liquid) => 0.05,      // Water, very poor trapping
+
+            // Gas materials - no trapping
+            (_, MaterialPhase::Gas) => 0.01, // Gases don't trap other gases effectively
+
+            // Air - minimal trapping
+            (MaterialCompositeType::Air, _) => 0.01, // Atmospheric layers don't trap
+
+            // Default for unknown combinations
+            _ => 0.5,
+        }
+    }
+
+    /// Check if a layer is atmospheric (should be skipped for crystallization)
+    fn is_atmospheric_layer(&self, layer: &crate::global_thermal::thermal_layer::ThermalLayer) -> bool {
+        // Atmospheric layers are typically:
+        // 1. Above surface (negative depth)
+        // 2. Air material type
+        // 3. Gas phase
+        // 4. Very low density
+
+        let is_above_surface = layer.start_depth_km < 0.0;
+        let is_air_material = matches!(layer.energy_mass.material_composite_type(), MaterialCompositeType::Air);
+        let is_gas_phase = matches!(layer.energy_mass.phase(), MaterialPhase::Gas);
+        let is_low_density = layer.current_density_kg_m3() < 10.0; // Very low density threshold
+
+        // A layer is atmospheric if it meets most of these criteria
+        let atmospheric_indicators = [is_above_surface, is_air_material, is_gas_phase, is_low_density];
+        let indicator_count = atmospheric_indicators.iter().filter(|&&x| x).count();
+
+        // Consider it atmospheric if it meets at least 3 out of 4 criteria
+        indicator_count >= 3
+    }
+
+    /// Update global atmospheric properties by blending all compounds from all material sources
+    fn update_global_atmospheric_properties(&mut self) {
+        if self.global_atmosphere_compounds.is_empty() {
+            self.global_atmospheric_properties = GlobalAtmosphericProperties::default();
+            return;
+        }
+
+        // Calculate total mass and compound fractions
+        let total_mass: f64 = self.global_atmosphere_compounds.values().sum();
+        if total_mass <= 0.0 {
+            self.global_atmospheric_properties = GlobalAtmosphericProperties::default();
+            return;
+        }
+
+        // Load compound properties from JSON
+        let compounds_data = load_compounds_data();
+
+        // Calculate mass-weighted averages of all properties
+        let mut weighted_molar_mass = 0.0;
+        let mut weighted_density = 0.0;
+        let mut weighted_specific_heat = 0.0;
+        let mut weighted_thermal_conductivity = 0.0;
+        let mut total_greenhouse_potential = 0.0;
+        let mut compound_fractions = HashMap::new();
+
+        for (compound_name, &compound_mass) in &self.global_atmosphere_compounds {
+            let mass_fraction = compound_mass / total_mass;
+            compound_fractions.insert(compound_name.clone(), mass_fraction);
+
+            if let Some(properties) = compounds_data.get(compound_name) {
+                // Mass-weighted averages
+                weighted_molar_mass += mass_fraction * properties.molar_mass_g_mol;
+                weighted_density += mass_fraction * properties.density_stp_kg_m3;
+                weighted_specific_heat += mass_fraction * properties.specific_heat_capacity_j_kg_k;
+                weighted_thermal_conductivity += mass_fraction * properties.thermal_conductivity_w_m_k;
+
+                // Greenhouse potential (additive based on mass fraction)
+                total_greenhouse_potential += mass_fraction * properties.greenhouse_potential;
+            } else {
+                // Default to air properties for unknown compounds
+                weighted_molar_mass += mass_fraction * 28.97;
+                weighted_density += mass_fraction * 1.225;
+                weighted_specific_heat += mass_fraction * 1004.0;
+                weighted_thermal_conductivity += mass_fraction * 0.024;
+            }
+        }
+
+        // Update global atmospheric properties
+        self.global_atmospheric_properties = GlobalAtmosphericProperties {
+            total_mass_kg: total_mass,
+            average_molar_mass_g_mol: weighted_molar_mass,
+            average_density_stp_kg_m3: weighted_density,
+            average_specific_heat_j_kg_k: weighted_specific_heat,
+            average_thermal_conductivity_w_m_k: weighted_thermal_conductivity,
+            total_greenhouse_potential,
+            compound_fractions: compound_fractions.clone(),
+        };
+
+        if self.debug_output && total_mass > 1e20 {
+            println!("🌍 Global atmosphere: {:.2e} kg, greenhouse: {:.2}",
+                     total_mass, total_greenhouse_potential);
+
+            // Show top 3 compounds only
+            let mut sorted_compounds: Vec<_> = compound_fractions.iter().collect();
+            sorted_compounds.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap());
+            for (compound, fraction) in sorted_compounds.iter().take(3) {
+                if **fraction > 0.05 { // Only show compounds > 5%
+                    println!("   {}: {:.1}%", compound, *fraction * 100.0);
+                }
+            }
+        }
+    }
+
+    /// Redistribute global atmosphere to all cells with exponential distribution
+    fn redistribute_global_atmosphere_to_cells(&mut self, sim: &mut Simulation) -> f64 {
+        if self.global_atmosphere_compounds.is_empty() {
+            return 0.0;
+        }
+
+        // Calculate total global atmospheric mass
+        let total_global_mass: f64 = self.global_atmosphere_compounds.values().sum();
+        if total_global_mass <= 0.0 {
+            return 0.0;
+        }
+
+        // Calculate column mass per unit area (total mass / total surface area)
+        let total_surface_area_m2 = sim.cells.len() as f64 * 1.0; // Approximate - should use actual H3 cell areas
+        let column_mass_kg_m2 = total_global_mass / total_surface_area_m2;
+
+        if self.debug_output && total_global_mass > 1e20 {
+            println!("🌍 Redistributing {:.2e} kg to {} cells", total_global_mass, sim.cells.len());
+        }
+
+        // Redistribute to each cell with exponential distribution by altitude
+        let mut total_redistributed = 0.0;
+
+        for cell in sim.cells.values_mut() {
+            // Find atmospheric layers
+            let mut atmospheric_layers = Vec::new();
+            for (i, (current, _)) in cell.layers_t.iter().enumerate() {
+                if matches!(current.energy_mass.material_composite_type(), MaterialCompositeType::Air) {
+                    atmospheric_layers.push(i);
+                }
+            }
+
+            if atmospheric_layers.is_empty() {
+                continue;
+            }
+
+            // Calculate exponential distribution parameters
+            let _surface_pressure_pa = 101325.0; // Standard atmospheric pressure
+            let scale_height_km = 8.0; // Earth-like scale height
+
+            // Distribute mass to atmospheric layers with exponential falloff
+            for &layer_index in &atmospheric_layers {
+                if let Some((current, _next)) = cell.layers_t.get_mut(layer_index) {
+                    // Calculate altitude (negative depth means above surface)
+                    let altitude_km = (-current.start_depth_km - current.height_km / 2.0).max(0.0);
+
+                    // Exponential distribution: mass(h) = mass_0 * exp(-h/H)
+                    let altitude_factor = (-altitude_km / scale_height_km).exp();
+                    let layer_mass_fraction = altitude_factor / atmospheric_layers.len() as f64; // Normalize
+
+                    // Calculate mass for this layer (equal share of column mass for this cell)
+                    let cell_surface_area_m2 = current.surface_area_km2 * 1e6; // Convert km² to m²
+                    let cell_column_mass = column_mass_kg_m2 * cell_surface_area_m2;
+                    let layer_mass_to_add = cell_column_mass * layer_mass_fraction;
+
+                    if layer_mass_to_add > 0.0 {
+                        // Add mass using atmospheric mass addition (maintains constant volume)
+                        let temp_k = current.temperature_k();
+                        current.energy_mass.add_atmospheric_mass(layer_mass_to_add, temp_k);
+
+                        // Add blended atmospheric compounds to this layer
+                        for (compound_name, &global_fraction) in &self.global_atmospheric_properties.compound_fractions {
+                            let compound_mass = layer_mass_to_add * global_fraction;
+                            if compound_mass > 0.0 {
+                                current.add_atmospheric_compound(compound_name.clone(), compound_mass);
+                            }
+                        }
+
+                        total_redistributed += layer_mass_to_add;
+
+                        // Minimal debug output for redistribution
+                        if self.debug_output && layer_index == atmospheric_layers[0] && layer_mass_to_add > 1e15 {
+                            println!("   Added {:.2e} kg to layer {} at {:.1}km",
+                                     layer_mass_to_add, layer_index, altitude_km);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Removed verbose redistribution debug output
+
+        total_redistributed
+    }
+
+    /// Distribute outgassed mass to atmospheric layers with crystallization
+    fn distribute_outgassed_mass_to_atmosphere(&mut self, cell: &mut crate::global_thermal::global_h3_cell::GlobalH3Cell, outgassed_mass: f64) {
+        if outgassed_mass <= 0.0 {
+            return;
+        }
+
+        // Find atmospheric layers (Air material type)
+        let mut atmo_layer_indices: Vec<usize> = Vec::new();
+        for (i, (current, _)) in cell.layers_t.iter().enumerate() {
+            if matches!(current.energy_mass.material_composite_type(), MaterialCompositeType::Air) {
+                atmo_layer_indices.push(i);
+            }
+        }
+
+        if atmo_layer_indices.is_empty() {
+            if self.debug_output {
+                println!("⚠️  No atmospheric layers found to distribute outgassed mass");
+            }
+            return;
+        }
+
+        // Distribute mass with exponential decay and crystallization
+        let mut remaining_mass = outgassed_mass;
+        let mut total_crystallized = 0.0;
+
+        for (_layer_order, &layer_index) in atmo_layer_indices.iter().enumerate() {
+            if remaining_mass <= 0.0 {
+                break;
+            }
+
+            // Calculate how much mass reaches this layer (with crystallization loss)
+            let crystallization_loss = remaining_mass * self.crystallization_rate;
+            let mass_to_add = remaining_mass - crystallization_loss;
+
+            if mass_to_add > 0.0 {
+                // Add mass to this atmospheric layer using the new atmospheric mass addition method
+                if let Some((current, _next)) = cell.layers_t.get_mut(layer_index) {
+                    let temp_k = current.temperature_k();
+                    current.energy_mass.add_atmospheric_mass(mass_to_add, temp_k);
+
+                    // Mass is now tracked in global atmosphere
+
+                    if self.debug_output {
+                        println!("   Layer {}: Added {:.2e} kg atmospheric mass (crystallized: {:.2e} kg), new mass: {:.2e} kg",
+                                 layer_index, mass_to_add, crystallization_loss, current.mass_kg());
+                    }
+                }
+            }
+
+            total_crystallized += crystallization_loss;
+            remaining_mass = crystallization_loss; // What crystallizes becomes available for next layer
+        }
+
+        self.total_crystallized_mass += total_crystallized;
+
+        if self.debug_output && total_crystallized > 0.0 {
+            println!("   Total crystallization loss: {:.2e} kg ({:.1}% of outgassed material)",
+                     total_crystallized, (total_crystallized / outgassed_mass) * 100.0);
+        }
+    }
     pub fn new() -> Self {
         Self {
             apply_during_simulation: true,
-            outgassing_rate_multiplier: 0.01, // 1% of melted material becomes atmospheric
+            outgassing_rate_multiplier: 0.01, // Base outgassing rate (will be overridden by event-specific rates)
+            catastrophic_event_outgassing_rate: 0.0001, // 0.01% for catastrophic events (>2500K, billion-year scale)
+            major_event_outgassing_rate: 0.000001, // 0.0001% for major volcanic events (>1800K)
+            background_outgassing_rate: 0.0000001, // 0.00001% for background volcanic activity
+            catastrophic_event_probability: 0.001, // 0.1% chance - truly rare catastrophic events
             volume_decay_factor: 0.7,         // Each layer up has 70% of the volume below
             density_decay_factor: 0.12,       // Each layer up has 12% of the density below (88% reduction)
             depth_attenuation_factor: 0.8,    // Deeper sources contribute 80% as much (20% reduction per layer)
-            crystallization_rate: 0.1,        // 10% of rising gas crystallizes per layer
+            crystallization_rate: 0.5,        // Base crystallization rate
+            catastrophic_event_crystallization: 0.05, // 5% crystallization for catastrophic events (95% escapes)
+            major_event_crystallization: 0.3,  // 30% crystallization for major events (70% escapes)
+            background_crystallization: 0.8,   // 80% crystallization for background (20% escapes)
             debug_output: false,
+            previous_layer_phases: HashMap::new(),
+            melting_events_this_step: Vec::new(),
+            global_atmosphere_compounds: HashMap::new(),
+            compounds_added_this_step: HashMap::new(),
+            global_atmospheric_properties: GlobalAtmosphericProperties::default(),
             total_outgassed_mass: 0.0,
             total_redistributed_volume: 0.0,
             total_crystallized_mass: 0.0,
@@ -61,11 +738,23 @@ impl AtmosphericGenerationOp {
         Self {
             apply_during_simulation: true,
             outgassing_rate_multiplier: outgassing_rate,
+            catastrophic_event_outgassing_rate: outgassing_rate * 0.01, // 1% of base rate for catastrophic events
+            major_event_outgassing_rate: outgassing_rate * 0.0001, // 0.01% of base rate for major events
+            background_outgassing_rate: outgassing_rate * 0.00001, // 0.001% of base rate for background
+            catastrophic_event_probability: 0.001,              // 0.1% chance for catastrophic events
             volume_decay_factor: volume_decay,
             density_decay_factor: 0.12,       // Each layer up has 12% of the density below (88% reduction)
             depth_attenuation_factor: 0.8,    // Deeper sources contribute 80% as much (20% reduction per layer)
-            crystallization_rate: 0.1,        // 10% of rising gas crystallizes per layer
+            crystallization_rate: 0.5,        // Base crystallization rate
+            catastrophic_event_crystallization: 0.05, // 5% crystallization for catastrophic events
+            major_event_crystallization: 0.3,  // 30% crystallization for major events
+            background_crystallization: 0.8,   // 80% crystallization for background
             debug_output: debug,
+            previous_layer_phases: HashMap::new(),
+            melting_events_this_step: Vec::new(),
+            global_atmosphere_compounds: HashMap::new(),
+            compounds_added_this_step: HashMap::new(),
+            global_atmospheric_properties: GlobalAtmosphericProperties::default(),
             total_outgassed_mass: 0.0,
             total_redistributed_volume: 0.0,
             total_crystallized_mass: 0.0,
@@ -77,11 +766,23 @@ impl AtmosphericGenerationOp {
         Self {
             apply_during_simulation: true,
             outgassing_rate_multiplier: outgassing_rate,
+            catastrophic_event_outgassing_rate: outgassing_rate * 0.01, // 1% of base rate for catastrophic events
+            major_event_outgassing_rate: outgassing_rate * 0.0001, // 0.01% of base rate for major events
+            background_outgassing_rate: outgassing_rate * 0.00001, // 0.001% of base rate for background
+            catastrophic_event_probability: 0.001,              // 0.1% chance for catastrophic events
             volume_decay_factor: volume_decay,
             density_decay_factor: density_decay,
             depth_attenuation_factor: 0.8,    // Deeper sources contribute 80% as much (20% reduction per layer)
-            crystallization_rate: 0.1,        // 10% of rising gas crystallizes per layer
+            crystallization_rate: 0.5,        // Base crystallization rate
+            catastrophic_event_crystallization: 0.05, // 5% crystallization for catastrophic events
+            major_event_crystallization: 0.3,  // 30% crystallization for major events
+            background_crystallization: 0.8,   // 80% crystallization for background
             debug_output: debug,
+            previous_layer_phases: HashMap::new(),
+            melting_events_this_step: Vec::new(),
+            global_atmosphere_compounds: HashMap::new(),
+            compounds_added_this_step: HashMap::new(),
+            global_atmospheric_properties: GlobalAtmosphericProperties::default(),
             total_outgassed_mass: 0.0,
             total_redistributed_volume: 0.0,
             total_crystallized_mass: 0.0,
@@ -93,11 +794,23 @@ impl AtmosphericGenerationOp {
         Self {
             apply_during_simulation: true,
             outgassing_rate_multiplier: params.outgassing_rate,
+            catastrophic_event_outgassing_rate: params.outgassing_rate * 0.01, // 1% of base rate for catastrophic events
+            major_event_outgassing_rate: params.outgassing_rate * 0.0001, // 0.01% of base rate for major events
+            background_outgassing_rate: params.outgassing_rate * 0.00001, // 0.001% of base rate for background
+            catastrophic_event_probability: 0.001,                     // 0.1% chance for catastrophic events
             volume_decay_factor: params.volume_decay,
             density_decay_factor: params.density_decay,
             depth_attenuation_factor: params.depth_attenuation,
             crystallization_rate: params.crystallization_rate,
+            catastrophic_event_crystallization: 0.05, // 5% crystallization for catastrophic events
+            major_event_crystallization: 0.3,  // 30% crystallization for major events
+            background_crystallization: 0.8,   // 80% crystallization for background
             debug_output: params.debug,
+            previous_layer_phases: HashMap::new(),
+            melting_events_this_step: Vec::new(),
+            global_atmosphere_compounds: HashMap::new(),
+            compounds_added_this_step: HashMap::new(),
+            global_atmospheric_properties: GlobalAtmosphericProperties::default(),
             total_outgassed_mass: 0.0,
             total_redistributed_volume: 0.0,
             total_crystallized_mass: 0.0,
@@ -494,8 +1207,9 @@ impl SimOp for AtmosphericGenerationOp {
 
     fn init_sim(&mut self, _sim: &mut Simulation) {
         if self.debug_output {
-            println!("AtmosphericGenerationOp initialized:");
-            println!("  - Tracks melting lithosphere -> atmospheric gas generation");
+            println!("AtmosphericGenerationOp initialized (EVENT-DRIVEN):");
+            println!("  - Detects melting events (solid -> liquid/gas transitions)");
+            println!("  - Generates atmosphere from melting events, not static liquid state");
             println!("  - Outgassing rate: {:.3}% of melted lithosphere mass", self.outgassing_rate_multiplier * 100.0);
             println!("  - Depth attenuation: {:.3} ({}% reduction per layer depth)",
                     self.depth_attenuation_factor, ((1.0 - self.depth_attenuation_factor) * 100.0) as i32);
@@ -513,23 +1227,24 @@ impl SimOp for AtmosphericGenerationOp {
         }
 
         self.step_count += 1;
-        let mut step_outgassed = 0.0;
 
-        // Step 1: Process outgassing from melting lithosphere in all cells
-        for cell in sim.cells.values_mut() {
-            let outgassed = self.process_outgassing(cell);
-            step_outgassed += outgassed;
-        }
+        // Step 1: Detect melting events by comparing current vs previous layer phases
+        self.detect_melting_events(sim);
 
-        // Step 2: Globally redistribute all atmospheric material equally across all cells
-        let step_redistributed = self.globally_redistribute_atmosphere(sim);
+        // Step 2: Generate compounds from melting events and add to global atmosphere
+        let step_outgassed = self.generate_atmosphere_from_melting_events(sim);
+
+        // Step 3: Redistribute global atmosphere to all cells with exponential distribution
+        let step_redistributed = self.redistribute_global_atmosphere_to_cells(sim);
 
         self.total_outgassed_mass += step_outgassed;
         self.total_redistributed_volume += step_redistributed;
 
-        if self.debug_output && self.step_count % 100 == 0 {
-            println!("Step {}: Outgassed {:.2e} kg, Globally redistributed {:.2e} kg across {} cells",
-                    self.step_count, step_outgassed, step_redistributed, sim.cells.len());
+        // Only show summary every 10 steps and only for significant events
+        if self.debug_output && self.step_count % 10 == 0 && step_outgassed > 1e19 {
+            let total_global_mass: f64 = self.global_atmosphere_compounds.values().sum();
+            println!("Step {}: {:.2e} kg outgassed, {:.2e} kg global atmosphere",
+                     self.step_count, step_outgassed, total_global_mass);
         }
     }
 
