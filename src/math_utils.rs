@@ -45,7 +45,23 @@ macro_rules! assert_deviation {
     };
 }
 
+/// Calculate binomial probability: P(X = k) = C(n,k) * p^k * (1-p)^(n-k)
+pub fn binomial_probability(n: usize, k: usize, p: f64) -> f64 {
+    if k > n {
+        return 0.0;
+    }
 
+    // Calculate binomial coefficient C(n,k) = n! / (k! * (n-k)!)
+    let mut coeff = 1.0;
+    for i in 0..k {
+        coeff *= (n - i) as f64 / (i + 1) as f64;
+    }
+
+    // Calculate p^k * (1-p)^(n-k)
+    let prob_term = p.powi(k as i32) * (1.0 - p).powi((n - k) as i32);
+
+    coeff * prob_term
+}
 
 /// Linear interpolation between two values
 /// 

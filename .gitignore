@@ -2,3 +2,5 @@
 *.csv
 
 *.db/*
+/src/config/mod.rs
+/src/config/thermal_config_loader.rs

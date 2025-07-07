@@ -10,112 +10,178 @@ use glam::Vec3;
 use crate::h3o_png::{H3GraphicsGenerator, H3GraphicsConfig};
 
 use crate::h3_utils::H3Utils;
+use crate::config::{PerlinThermalConfig, ThermalConfigLoader};
 use image::Rgb;
 use std::collections::HashMap;
+use std::cell::RefCell;
+use crate::math_utils::binomial_probability;
 
-/// Calculate binomial probability: P(X = k) = C(n,k) * p^k * (1-p)^(n-k)
-fn binomial_probability(n: usize, k: usize, p: f64) -> f64 {
-    if k > n {
-        return 0.0;
-    }
-
-    // Calculate binomial coefficient C(n,k) = n! / (k! * (n-k)!)
-    let mut coeff = 1.0;
-    for i in 0..k {
-        coeff *= (n - i) as f64 / (i + 1) as f64;
-    }
-
-    // Calculate p^k * (1-p)^(n-k)
-    let prob_term = p.powi(k as i32) * (1.0 - p).powi((n - k) as i32);
-
-    coeff * prob_term
+/// Two-tier 20-bucket binomial distribution for fine-grained rare event sampling
+#[derive(Debug, Clone)]
+struct CachedBinomialDistribution {
+    primary_buckets: [usize; 20],    // Primary buckets (0-95% + trigger for secondary)
+    secondary_buckets: [usize; 20],  // Secondary buckets for fine-grained 95-100% range
 }
 
+impl CachedBinomialDistribution {
+    fn new(n: usize, p: f64) -> Self {
+        // Calculate max replacements (10% of population, minimum 1)
+        let max_k = ((n as f64 * 0.1).ceil() as usize).max(1);
 
-/// Radiance system managing thermal energy distribution
+        // Build cumulative probability distribution
+        let mut cumulative_probs = Vec::with_capacity(max_k + 1);
+        let mut cumulative_prob = 0.0;
+
+        for k in 0..=max_k {
+            let prob = binomial_probability(n, k, p);
+            cumulative_prob += prob;
+            cumulative_probs.push(cumulative_prob);
+        }
+
+        // Create primary buckets (0-95% regular, bucket 19 = trigger for secondary)
+        let mut primary_buckets = [0; 20];
+
+        for i in 0..19 {
+            // Buckets 0-18: Regular 5% slices (0-95%)
+            let bucket_center = (i as f64 + 0.5) / 20.0;  // 2.5%, 7.5%, ..., 92.5%
+
+            // Find which k this probability maps to
+            let result = cumulative_probs.iter()
+                .enumerate()
+                .find(|(_, cum_prob)| bucket_center < **cum_prob)
+                .map(|(k, _)| k)
+                .unwrap_or(0);
+            primary_buckets[i] = result;
+        }
+
+        // Create secondary buckets for fine-grained 95-100% range
+        let mut secondary_buckets = [0; 20];
+
+        for i in 0..20 {
+            // Map each secondary bucket to 95% + (i * 0.25%) ranges
+            // Bucket 0: 95.0-95.25%, Bucket 1: 95.25-95.5%, ..., Bucket 19: 99.75-100%
+            let bucket_center = 0.95 + (i as f64 + 0.5) * 0.0025;  // 95.125%, 95.375%, ..., 99.875%
+
+            // Find which k this probability maps to
+            let result = cumulative_probs.iter()
+                .enumerate()
+                .find(|(_, cum_prob)| bucket_center < **cum_prob)
+                .map(|(k, _)| k)
+                .unwrap_or(0);
+            secondary_buckets[i] = result;
+        }
+
+        Self {
+            primary_buckets,
+            secondary_buckets,
+        }
+    }
+
+    fn sample(&self) -> usize {
+        match rand::random_range(0..20) {
+            19 => {
+                // Secondary lookup for fine-grained 95-100% range
+                let secondary_index = rand::random_range(0..20);
+                self.secondary_buckets[secondary_index]
+            }
+            primary_index => self.primary_buckets[primary_index],
+        }
+    }
+}
+
+// Thread-local cache for binomial distributions to avoid recomputation
+thread_local! {
+    static BINOMIAL_CACHE: RefCell<HashMap<(usize, u32), CachedBinomialDistribution>> = RefCell::new(HashMap::new());
+}
+
 #[derive(Debug, Clone)]
 pub struct RadianceSystem {
-    /// Current Perlin noise configuration
     pub current_perlin: PerlinConfig,
-    /// Next Perlin noise configuration for transition
     pub next_perlin: PerlinConfig,
-    /// Transition progress (0.0 = current, 1.0 = next)
     pub transition_progress: f64,
-    /// Years between Perlin transitions
     pub transition_period_years: f64,
-    /// Last transition time
     pub last_transition_year: f64,
-    /// Major thermal inflows (upwells)
     pub inflows: Vec<ThermalFlow>,
-    /// Major thermal outflows (downwells)
     pub outflows: Vec<ThermalFlow>,
-    /// Configuration for thermal feature lifecycle management
     pub thermal_config: ThermalFeatureConfig,
+    pub perlin_thermal_config: PerlinThermalConfig,
 }
 
-/// Perlin noise configuration with timing
 #[derive(Debug, Clone)]
 pub struct PerlinConfig {
-    /// Perlin noise seed
     pub seed: u32,
-    /// Noise scale factor
     pub scale: f64,
-    /// Base amplitude
     pub amplitude: f64,
-    /// Wavelength in kilometers
     pub wavelength_km: f64,
-    /// Configuration creation time
     pub creation_year: f64,
 }
 
-/// Thermal flow (inflow/outflow) with lifecycle
+
+
+impl PerlinThermalConfig {
+    /// Create configuration for realistic baseline mantle flow
+    pub fn realistic_baseline() -> Self {
+        Self {
+            average_wm: 0.09,           // 0.08-0.10 W/m² baseline range center
+            variance_wm: 0.01,          // ±0.01 W/m² for subtle variation
+            scale_range: (4.0, 6.0),    // Moderate feature size variation
+            wavelength_km: 996.0,       // 3 L2 hex wavelength
+            transition_period_range: (200.0, 400.0), // Slower geological transitions
+        }
+    }
+
+    /// Create configuration for active thermal regions
+    pub fn active_thermal() -> Self {
+        Self {
+            average_wm: 0.40,           // 0.30-0.50 W/m² plume range center
+            variance_wm: 0.10,          // ±0.10 W/m² for dramatic variation
+            scale_range: (2.0, 8.0),    // Wide feature size variation
+            wavelength_km: 996.0,       // 3 L2 hex wavelength
+            transition_period_range: (50.0, 150.0), // Faster transitions for active regions
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ThermalFlow {
-    /// H3 cell location
     pub cell_index: CellIndex,
-    /// Energy rate (MW) - positive for inflows, negative for outflows
     pub rate_mw: f64,
-    /// Year this flow was created
     pub creation_year: f64,
-    /// Lifetime in years
     pub lifetime_years: f64,
-    /// Flow type
     pub flow_type: FlowType,
 }
 
-/// Type of thermal flow
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FlowType {
-    /// Thermal inflow (upwell)
     Inflow,
-    /// Thermal outflow (downwell)
     Outflow,
 }
 
 impl RadianceSystem {
-    /// Create new radiance system
     pub fn new(current_year: f64) -> Self {
+        Self::new_with_perlin_config(current_year, PerlinThermalConfig::default())
+    }
+
+    pub fn new_with_perlin_config(current_year: f64, perlin_config: PerlinThermalConfig) -> Self {
         let mut rng = rand::rng();
-        
-        // Create initial Perlin configuration
+
         let current_perlin = PerlinConfig {
             seed: rng.random(),
-            scale: 4.4, // From previous calculations
-            amplitude: 0.08, // ±0.08 variation around 0.07 base (4x more dramatic)
-            wavelength_km: 996.0, // 3 L2 hex diameter
+            scale: rng.random_range(perlin_config.scale_range.0..perlin_config.scale_range.1),
+            amplitude: perlin_config.variance_wm,
+            wavelength_km: perlin_config.wavelength_km,
             creation_year: current_year,
         };
 
-        // Create next Perlin for future transition (shorter periods for visible animation)
-        let transition_period = rng.random_range(80.0..120.0);
+        let transition_period = rng.random_range(perlin_config.transition_period_range.0..perlin_config.transition_period_range.1);
         let next_perlin = PerlinConfig {
-            seed: rng.random::<u32>().wrapping_add(12345), // Ensure dramatically different seed
-            scale: rng.random_range(3.0..8.0), // Vary scale dramatically for different patterns
-            amplitude: 0.08, // ±0.08 variation around 0.07 base (4x more dramatic)
-            wavelength_km: 996.0,
+            seed: rng.random::<u32>().wrapping_add(12345),
+            scale: rng.random_range(perlin_config.scale_range.0..perlin_config.scale_range.1),
+            amplitude: perlin_config.variance_wm,
+            wavelength_km: perlin_config.wavelength_km,
             creation_year: current_year + transition_period,
         };
-        
+
         Self {
             current_perlin,
             next_perlin,
@@ -125,6 +191,7 @@ impl RadianceSystem {
             inflows: Vec::new(),
             outflows: Vec::new(),
             thermal_config: ThermalFeatureConfig::default(),
+            perlin_thermal_config: perlin_config,
         }
     }
     
@@ -146,14 +213,20 @@ impl RadianceSystem {
             self.current_perlin = self.next_perlin.clone();
             self.last_transition_year = current_year;
             
-            // Generate new next Perlin (shorter periods for visible animation)
+            // Generate new next Perlin using configuration
             let mut rng = rand::rng();
-            self.transition_period_years = rng.random_range(80.0..120.0);
+            self.transition_period_years = rng.random_range(
+                self.perlin_thermal_config.transition_period_range.0..
+                self.perlin_thermal_config.transition_period_range.1
+            );
             self.next_perlin = PerlinConfig {
                 seed: rng.random::<u32>().wrapping_add((current_year as u32).wrapping_mul(7919)), // Ensure dramatically different seed based on time
-                scale: rng.random_range(3.0..8.0), // Vary scale dramatically for different patterns
-                amplitude: 0.08, // ±0.08 WM variation around 0.07 WM base (4x more dramatic)
-                wavelength_km: 996.0,
+                scale: rng.random_range(
+                    self.perlin_thermal_config.scale_range.0..
+                    self.perlin_thermal_config.scale_range.1
+                ), // Vary scale for different patterns
+                amplitude: self.perlin_thermal_config.variance_wm, // Use configured variance
+                wavelength_km: self.perlin_thermal_config.wavelength_km,
                 creation_year: current_year + self.transition_period_years,
             };
             self.transition_progress = 0.0;
@@ -265,8 +338,6 @@ impl RadianceSystem {
         let mut rng = rand::rng();
         cells.shuffle(&mut rng);
 
-        println!("Generating {} random thermal inflows...", count);
-
         let mut added_count = 0;
         let mut attempt_index = 0;
 
@@ -278,8 +349,6 @@ impl RadianceSystem {
 
                 match self.add_inflow(cell, rate_wm, creation_year, lifetime_years) {
                     Ok(_) => {
-                        println!("  Added upwell at cell {}: {:.3} WM, {:.0} year lifetime, created {:.0}",
-                                 cell, rate_wm, lifetime_years, creation_year);
                         added_count += 1;
                     }
                     Err(_) => {
@@ -288,10 +357,6 @@ impl RadianceSystem {
                 }
             }
             attempt_index += 1;
-        }
-
-        if added_count < count {
-            println!("  Warning: Only added {} out of {} requested inflows due to constraints", added_count, count);
         }
 
         Ok(())
@@ -581,7 +646,12 @@ impl RadianceSystem {
         total_energy.max(0.0)
     }
     
-    /// Calculate Perlin noise energy with transition using normalized XYZ coordinates
+    /// Public method to access Perlin energy calculation for testing
+    pub fn calculate_perlin_energy_at(&self, lat: f64, lng: f64) -> f64 {
+        self.calculate_perlin_energy(lat, lng)
+    }
+
+    /// Calculate Perlin noise energy with exponential scaling for sharp cooling and high ridges
     fn calculate_perlin_energy(&self, lat: f64, lng: f64) -> f64 {
         // Convert lat/lng to normalized 3D coordinates on unit sphere using Vec3
         let lat_rad = lat.to_radians();
@@ -602,8 +672,19 @@ impl RadianceSystem {
             (normalized_pos.y * self.current_perlin.scale as f32) as f64,
             (normalized_pos.z * self.current_perlin.scale as f32) as f64,
         ]);
-        // Perlin base of 0.07 WM with ±0.08 WM variation (4x more dramatic)
-        let current_energy = 0.07 + (current_value * self.current_perlin.amplitude);
+
+        // Apply exponential scaling for sharper cooling and high point ridges
+        // Convert Perlin range [-1, 1] to [0, 1] for exponential function
+        let normalized_perlin = (current_value + 1.0) / 2.0;
+
+        // Use exponential function: e^(4x) - 1 for sharp ridges and cooling
+        // This creates: low values → very low, high values → very high
+        let exponential_factor = (4.0 * normalized_perlin).exp() - 1.0;
+
+        // Scale to energy range using configured average and variance
+        let min_energy = self.perlin_thermal_config.average_wm - self.perlin_thermal_config.variance_wm;
+        let energy_range = 2.0 * self.perlin_thermal_config.variance_wm;
+        let current_energy = min_energy + (exponential_factor / (4.0_f64.exp() - 1.0)) * energy_range;
 
         if self.transition_progress <= 0.0 {
             return current_energy;
@@ -616,8 +697,11 @@ impl RadianceSystem {
             (normalized_pos.y * self.next_perlin.scale as f32) as f64,
             (normalized_pos.z * self.next_perlin.scale as f32) as f64,
         ]);
-        // Perlin base of 0.07 WM with ±0.08 WM variation (4x more dramatic)
-        let next_energy = 0.07 + (next_value * self.next_perlin.amplitude);
+
+        // Apply same exponential scaling to next Perlin using configured values
+        let normalized_next_perlin = (next_value + 1.0) / 2.0;
+        let next_exponential_factor = (4.0 * normalized_next_perlin).exp() - 1.0;
+        let next_energy = min_energy + (next_exponential_factor / (4.0_f64.exp() - 1.0)) * energy_range;
 
         // Interpolate between current and next
         current_energy * (1.0 - self.transition_progress) + next_energy * self.transition_progress
@@ -863,20 +947,19 @@ impl RadianceSystem {
 
         // Clone flow configurations to avoid borrowing issues
         let flow_configs = self.thermal_config.flows.clone();
-        let mut rng = rand::rng();
 
         // Process each flow configuration using binomial distribution
         for flow_config in &flow_configs {
-            if flow_config.is_inflow() {
-                let active_count = self.count_active_inflows(current_year);
-                let avg_lifetime = (flow_config.lifetime_range.0 + flow_config.lifetime_range.1) / 2.0;
-                let features_to_add = flow_config.calculate_features_to_add(&mut rng, active_count);
+            let avg_lifetime = (flow_config.lifetime_range.0 + flow_config.lifetime_range.1) / 2.0;
+            let features_to_add = flow_config.calculate_features_to_add();
 
-                println!("Current active {}: {}, avg_lifetime: {:.0} years, prob_per_item: {:.4}",
-                         flow_config.flow_type, active_count, avg_lifetime, 1.0 / avg_lifetime);
+            println!("Target {}: {}, avg_lifetime: {:.0} years, prob_per_item: {:.4}",
+                     flow_config.flow_type, flow_config.target_count, avg_lifetime, 1.0 / avg_lifetime);
 
-                if features_to_add > 0 {
-                    println!("Binomial replacement: adding {} new {}...", features_to_add, flow_config.flow_type);
+            if features_to_add > 0 {
+                println!("Binomial replacement: adding {} new {}...", features_to_add, flow_config.flow_type);
+
+                if flow_config.is_inflow() {
                     self.generate_random_inflows(
                         resolution,
                         features_to_add,
@@ -886,19 +969,6 @@ impl RadianceSystem {
                          current_year + flow_config.creation_year_range.1),
                     )?;
                 } else {
-                    println!("No {} replacement this year", flow_config.flow_type);
-                }
-            } else if flow_config.is_outflow() {
-                let active_count = self.count_active_outflows(current_year);
-                let avg_lifetime = (flow_config.lifetime_range.0 + flow_config.lifetime_range.1) / 2.0;
-                let features_to_add = flow_config.calculate_features_to_add(&mut rng, active_count);
-
-                println!("Current active {}: {}, avg_lifetime: {:.0} years, prob_per_item: {:.4}",
-                         flow_config.flow_type, active_count, avg_lifetime, 1.0 / avg_lifetime);
-
-                if features_to_add > 0 {
-                    println!("Binomial replacement: adding {} new {}...", features_to_add, flow_config.flow_type);
-                    // Use the negative rate range directly (already negative in config)
                     self.generate_random_outflows(
                         resolution,
                         features_to_add,
@@ -907,9 +977,9 @@ impl RadianceSystem {
                         (current_year + flow_config.creation_year_range.0,
                          current_year + flow_config.creation_year_range.1),
                     )?;
-                } else {
-                    println!("No {} replacement this year", flow_config.flow_type);
                 }
+            } else {
+                println!("No {} replacement this year", flow_config.flow_type);
             }
         }
 
@@ -967,12 +1037,7 @@ impl RadianceSystem {
         println!("Initialized {} inflows and {} outflows with sustainable lifecycle management",
                  total_inflows, total_outflows);
 
-        // Display replacement rate information for each flow type
-        println!("Replacement rates:");
-        for flow_config in &self.thermal_config.flows {
-            println!("  {}: {:.3} features/year ({:.1}% annual probability)",
-                     flow_config.flow_type, flow_config.replacement_rate, flow_config.replace_rate() * 100.0);
-        }
+
 
         Ok(())
     }
@@ -989,64 +1054,63 @@ pub struct ThermalFlowConfig {
     pub lifetime_range: (f64, f64),
     /// Creation year range for new features (relative to current year)
     pub creation_year_range: (f64, f64),
-    /// Average replacement rate (features per year) - calculated from generative data
-    pub replacement_rate: f64,
+
     /// Flow type identifier for logging
     pub flow_type: String,
+
+    /// Pre-computed cache key for binomial distribution lookup
+    cache_key: (usize, u32),
 }
 
 impl ThermalFlowConfig {
-    /// Calculate the replacement rate based on target count and average lifetime
-    /// Uses a higher multiplier to maintain stable populations rather than declining
-    pub fn calculate_replacement_rate(&mut self) {
-        let avg_lifetime = (self.lifetime_range.0 + self.lifetime_range.1) / 2.0;
-        // Use 8x multiplier to ensure stable population maintenance
-        // This accounts for probabilistic nature and ensures replacement keeps up with expiration
-        self.replacement_rate = (self.target_count as f64 / avg_lifetime) * 8.0;
-    }
+    /// Create a new ThermalFlowConfig with pre-computed cache key
+    pub fn new(
+        target_count: usize,
+        rate_range: (f64, f64),
+        lifetime_range: (f64, f64),
+        creation_year_range: (f64, f64),
+        flow_type: String,
+    ) -> Self {
+        // Pre-compute cache key for binomial distribution
+        let avg_lifetime = (lifetime_range.0 + lifetime_range.1) / 2.0;
+        let replacement_prob_per_item = 1.0 / avg_lifetime;
+        let prob_key = (replacement_prob_per_item * 10000.0).round() as u32; // 4 decimal precision
+        let cache_key = (target_count, prob_key);
 
-    /// Get the annual replacement probability (0.0 to 1.0) - percentage chance of adding new feature each year
-    pub fn replace_rate(&self) -> f64 {
-        if self.target_count == 0 {
-            0.0
-        } else {
-            self.replacement_rate / self.target_count as f64
+        Self {
+            target_count,
+            rate_range,
+            lifetime_range,
+            creation_year_range,
+            flow_type,
+            cache_key,
         }
     }
 
     /// Get the expected number of features to expire in the given time period
+    /// Based on average lifetime and current population
     pub fn expected_expirations(&self, time_period_years: f64) -> f64 {
-        self.replacement_rate * time_period_years
+        let avg_lifetime = (self.lifetime_range.0 + self.lifetime_range.1) / 2.0;
+        (self.target_count as f64 / avg_lifetime) * time_period_years
     }
 
-    /// Calculate how many new features to add using binomial distribution
-    /// For N items with average lifespan Y, probability of replacement = 1/Y per item
-    /// Uses binomial distribution to calculate expected replacements, capped at 10% of population
-    pub fn calculate_features_to_add(&self, rng: &mut impl rand::Rng, current_count: usize) -> usize {
-        if current_count == 0 {
+    /// Calculate how many new features to add using cached binomial distribution
+    /// Uses the configuration's target population and lifetime range to determine replacements
+    /// Uses pre-computed cache key for maximum efficiency
+    pub fn calculate_features_to_add(&self) -> usize {
+        if self.target_count == 0 {
             return 0;
         }
 
-        let avg_lifetime = (self.lifetime_range.0 + self.lifetime_range.1) / 2.0;
-        let replacement_prob_per_item = 1.0 / avg_lifetime;
-        let max_replacements = ((current_count as f64 * 0.1).ceil() as usize).max(1); // Cap at 10% or minimum 1
-
-        // Build probability distribution for 0 to max_replacements
-        let mut cumulative_prob = 0.0;
-        let random_value = rng.random::<f64>();
-
-        for k in 0..=max_replacements {
-            // Binomial probability: P(X = k) = C(n,k) * p^k * (1-p)^(n-k)
-            let prob = binomial_probability(current_count, k, replacement_prob_per_item);
-            cumulative_prob += prob;
-
-            if random_value < cumulative_prob {
-                return k;
-            }
-        }
-
-        // Fallback to max if we somehow exceed cumulative probability
-        max_replacements
+        // Get or create cached distribution using pre-computed cache key and sample directly
+        BINOMIAL_CACHE.with(|cache| {
+            let mut cache_ref = cache.borrow_mut();
+            cache_ref.entry(self.cache_key).or_insert_with(|| {
+                let avg_lifetime = (self.lifetime_range.0 + self.lifetime_range.1) / 2.0;
+                let replacement_prob_per_item = 1.0 / avg_lifetime;
+                CachedBinomialDistribution::new(self.target_count, replacement_prob_per_item)
+            }).sample()
+        })
     }
 
     /// Check if this config represents inflows (positive rates)
@@ -1059,88 +1123,58 @@ impl ThermalFlowConfig {
         self.rate_range.0 <= 0.0 && self.rate_range.1 <= 0.0
     }
 
-    /// Create configuration for realistic geological inflows
-    pub fn realistic_inflows() -> Self {
-        let mut config = Self {
-            target_count: 80,
-            rate_range: (0.05, 0.4),
-            lifetime_range: (200.0, 800.0),
-            creation_year_range: (-50.0, 50.0),
-            replacement_rate: 0.0,
-            flow_type: "inflows".to_string(),
-        };
-        config.calculate_replacement_rate();
-        config
+    /// Load configuration from JSON by name
+    pub fn from_config(config_name: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let config_data = ThermalConfigLoader::get_thermal_flow_config(config_name)?;
+        Ok(Self::new(
+            config_data.target_count,
+            config_data.rate_range,
+            config_data.lifetime_range,
+            config_data.creation_year_range,
+            config_data.flow_type,
+        ))
     }
 
-    /// Create configuration for realistic geological outflows
+    /// Create configuration for realistic geological inflows (plume upwells)
+    pub fn realistic_inflows() -> Self {
+        Self::from_config("realistic_inflows").unwrap_or_else(|_| {
+            Self::new(80, (0.30, 0.50), (200.0, 800.0), (-50.0, 50.0), "inflows".to_string())
+        })
+    }
+
+    /// Create configuration for realistic geological outflows (background mantle flow)
     pub fn realistic_outflows() -> Self {
-        let mut config = Self {
-            target_count: 20,
-            rate_range: (-0.15, -0.025),
-            lifetime_range: (100.0, 500.0),
-            creation_year_range: (-50.0, 50.0),
-            replacement_rate: 0.0,
-            flow_type: "outflows".to_string(),
-        };
-        config.calculate_replacement_rate();
-        config
+        Self::from_config("realistic_outflows").unwrap_or_else(|_| {
+            Self::new(20, (-0.10, -0.08), (100.0, 500.0), (-50.0, 50.0), "outflows".to_string())
+        })
     }
 
     /// Create configuration for high-activity inflows
     pub fn high_activity_inflows() -> Self {
-        let mut config = Self {
-            target_count: 150,
-            rate_range: (0.1, 0.6),
-            lifetime_range: (150.0, 600.0),
-            creation_year_range: (-25.0, 25.0),
-            replacement_rate: 0.0,
-            flow_type: "inflows".to_string(),
-        };
-        config.calculate_replacement_rate();
-        config
+        Self::from_config("high_activity_inflows").unwrap_or_else(|_| {
+            Self::new(150, (0.1, 0.6), (150.0, 600.0), (-25.0, 25.0), "inflows".to_string())
+        })
     }
 
     /// Create configuration for high-activity outflows
     pub fn high_activity_outflows() -> Self {
-        let mut config = Self {
-            target_count: 40,
-            rate_range: (-0.25, -0.05),
-            lifetime_range: (75.0, 400.0),
-            creation_year_range: (-25.0, 25.0),
-            replacement_rate: 0.0,
-            flow_type: "outflows".to_string(),
-        };
-        config.calculate_replacement_rate();
-        config
+        Self::from_config("high_activity_outflows").unwrap_or_else(|_| {
+            Self::new(40, (-0.25, -0.05), (75.0, 400.0), (-25.0, 25.0), "outflows".to_string())
+        })
     }
 
     /// Create configuration for low-activity inflows
     pub fn low_activity_inflows() -> Self {
-        let mut config = Self {
-            target_count: 40,
-            rate_range: (0.02, 0.2),
-            lifetime_range: (300.0, 1000.0),
-            creation_year_range: (-100.0, 100.0),
-            replacement_rate: 0.0,
-            flow_type: "inflows".to_string(),
-        };
-        config.calculate_replacement_rate();
-        config
+        Self::from_config("low_activity_inflows").unwrap_or_else(|_| {
+            Self::new(40, (0.02, 0.2), (300.0, 1000.0), (-100.0, 100.0), "inflows".to_string())
+        })
     }
 
     /// Create configuration for low-activity outflows
     pub fn low_activity_outflows() -> Self {
-        let mut config = Self {
-            target_count: 10,
-            rate_range: (-0.08, -0.01),
-            lifetime_range: (200.0, 800.0),
-            creation_year_range: (-100.0, 100.0),
-            replacement_rate: 0.0,
-            flow_type: "outflows".to_string(),
-        };
-        config.calculate_replacement_rate();
-        config
+        Self::from_config("low_activity_outflows").unwrap_or_else(|_| {
+            Self::new(10, (-0.08, -0.01), (200.0, 800.0), (-100.0, 100.0), "outflows".to_string())
+        })
     }
 }
 
@@ -1198,12 +1232,7 @@ impl ThermalFeatureConfig {
         }
     }
 
-    /// Calculate expected replacement rates for all flow configurations
-    pub fn calculate_replacement_rates(&mut self) {
-        for flow_config in &mut self.flows {
-            flow_config.calculate_replacement_rate();
-        }
-    }
+
 
     /// Get expected feature expirations for all flow types in the given time period
     pub fn expected_expirations(&self, time_period_years: f64) -> Vec<(String, f64)> {
@@ -1288,11 +1317,9 @@ mod tests {
         // Initialize with a smaller population for faster testing
         let mut inflow_config = ThermalFlowConfig::realistic_inflows();
         inflow_config.target_count = 20;
-        inflow_config.calculate_replacement_rate();
 
         let mut outflow_config = ThermalFlowConfig::realistic_outflows();
         outflow_config.target_count = 5;
-        outflow_config.calculate_replacement_rate();
 
         let thermal_config = ThermalFeatureConfig::custom(
             vec![inflow_config, outflow_config],
@@ -1376,67 +1403,7 @@ mod tests {
                 "Average inflow population too low: {:.1} (should be >= {:.1})",
                 avg_inflows, initial_inflows as f64 * 0.7);
 
-        // Test that replacement rates are reasonable
-        let inflow_replace_rate = radiance.thermal_config.flows[0].replace_rate();
-        let outflow_replace_rate = radiance.thermal_config.flows[1].replace_rate();
 
-        println!("Replace rates: inflows {:.3}% ({:.4}), outflows {:.3}% ({:.4})",
-                 inflow_replace_rate * 100.0, inflow_replace_rate,
-                 outflow_replace_rate * 100.0, outflow_replace_rate);
-
-        // Replace rates should be small but positive
-        assert!(inflow_replace_rate > 0.0 && inflow_replace_rate < 0.1,
-                "Inflow replace rate should be between 0% and 10%: {:.3}%", inflow_replace_rate * 100.0);
-
-        assert!(outflow_replace_rate > 0.0 && outflow_replace_rate < 0.1,
-                "Outflow replace rate should be between 0% and 10%: {:.3}%", outflow_replace_rate * 100.0);
     }
 
-    #[test]
-    fn test_high_replace_rate_halving() {
-        // Test the >33% rate halving mechanism
-        let mut config = ThermalFlowConfig {
-            target_count: 10,
-            rate_range: (0.1, 0.5),
-            lifetime_range: (20.0, 30.0), // Short lifetime = high replace rate
-            creation_year_range: (-10.0, 10.0),
-            replacement_rate: 0.0,
-            flow_type: "test_inflows".to_string(),
-        };
-
-        config.calculate_replacement_rate();
-
-        println!("High activity config:");
-        println!("  Replacement rate: {:.3} features/year", config.replacement_rate);
-        println!("  Replace rate: {:.1}% ({:.4})", config.replace_rate() * 100.0, config.replace_rate());
-
-        // With 25-year average lifetime and 10 target count:
-        // replacement_rate = 10 / 25 = 0.4 features/year
-        // replace_rate = 0.4 / 10 = 0.04 = 4%
-        let replace_rate = config.replace_rate();
-        assert!(replace_rate > 0.03 && replace_rate < 0.05,
-                "Replace rate should be around 4%: {:.3}%", replace_rate * 100.0);
-
-        // Test the halving mechanism with a mock RNG
-        let mut rng = rand::rng();
-        let mut total_added = 0;
-        let trials = 10000;
-
-        for _ in 0..trials {
-            total_added += config.calculate_features_to_add(&mut rng);
-        }
-
-        let actual_rate = total_added as f64 / trials as f64;
-        let expected_rate = config.replace_rate();
-
-        println!("Actual addition rate over {} trials: {:.4} ({:.1}%)",
-                 trials, actual_rate, actual_rate * 100.0);
-        println!("Expected rate: {:.4} ({:.1}%)", expected_rate, expected_rate * 100.0);
-
-        // Should be within 10% of expected rate
-        let rate_error = (actual_rate - expected_rate).abs() / expected_rate;
-        assert!(rate_error < 0.1,
-                "Actual rate {:.4} differs too much from expected {:.4} (error: {:.1}%)",
-                actual_rate, expected_rate, rate_error * 100.0);
-    }
 }
