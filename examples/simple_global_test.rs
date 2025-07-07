@@ -5,7 +5,7 @@ use atmo_asth_rust::sim::simulation::{Simulation, SimProps};
 use atmo_asth_rust::planet::Planet;
 use atmo_asth_rust::global_thermal::global_h3_cell::{GlobalH3CellConfig, LayerConfig};
 use atmo_asth_rust::energy_mass_composite::MaterialCompositeType;
-use atmo_asth_rust::sim::sim_op::{
+use atmo_asth_rust::sim_op::{
     SurfaceEnergyInitOp,
     SurfaceEnergyInitParams,
     PressureAdjustmentOp,
@@ -15,8 +15,8 @@ use atmo_asth_rust::sim::sim_op::{
     SpaceRadiationOpParams,
     AtmosphericGenerationOp,
 };
-use atmo_asth_rust::sim::sim_op::atmospheric_generation_op::CrystallizationParams;
-use atmo_asth_rust::sim::sim_op::SimOpHandle;
+use atmo_asth_rust::sim_op::atmospheric_generation_op::CrystallizationParams;
+use atmo_asth_rust::sim_op::SimOpHandle;
 use h3o::Resolution;
 use std::rc::Rc;
 

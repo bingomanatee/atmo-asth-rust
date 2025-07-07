@@ -1,4 +1,4 @@
-use crate::sim::sim_op::{SimOp, SimOpHandle};
+use crate::sim_op::{SimOp, SimOpHandle};
 use crate::sim::simulation::Simulation;
 use crate::temp_utils::cooling_per_cell_per_year;
 
@@ -45,7 +45,7 @@ mod tests {
     use approx::assert_abs_diff_eq;
     use crate::constants::{ASTHENOSPHERE_SURFACE_START_TEMP_K, EARTH_RADIUS_KM};
     use crate::planet::Planet;
-    use crate::sim::sim_op::SimOpHandle;
+    use crate::sim_op::SimOpHandle;
     use h3o::Resolution;
     use crate::sim::simulation::{SimProps, Simulation};
 
@@ -90,7 +90,7 @@ mod tests {
     fn test_cooling_varies_with_lithosphere_thickness() {
         use crate::material::MaterialType;
         use crate::asth_cell::AsthCellLithosphere;
-        use crate::sim::sim_op::SimOp;
+        use crate::sim_op::SimOp;
 
         // Create two simulations - one with no lithosphere, one with thick lithosphere
         let mut sim_no_lithosphere = Simulation::new(SimProps {

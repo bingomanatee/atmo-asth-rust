@@ -1,7 +1,7 @@
 use crate::asth_cell::AsthCellLithosphere;
 use crate::h3_utils::H3Utils;
 use crate::material::MaterialType;
-use crate::sim::sim_op::{SimOp, SimOpHandle};
+use crate::sim_op::{SimOp, SimOpHandle};
 use crate::sim::simulation::Simulation;
 use noise::{NoiseFn, Perlin};
 

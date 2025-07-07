@@ -3,13 +3,13 @@ s public if yu need the /// Test oscillating foundry temperature with sinusoidal
 /// with 500-year period and pseudo-random phase offset per cell
 
 use atmo_asth_rust::energy_mass_composite::MaterialCompositeType;
-use atmo_asth_rust::sim::sim_op::{
+use atmo_asth_rust::sim_op::{
     PressureAdjustmentOp, SurfaceEnergyInitOp, TemperatureReportingOp, HeatRedistributionOp,
 };
-use atmo_asth_rust::sim::sim_op::surface_energy_init_op::SurfaceEnergyInitParams;
+use atmo_asth_rust::sim_op::surface_energy_init_op::SurfaceEnergyInitParams;
 use atmo_asth_rust::global_thermal::global_h3_cell::{GlobalH3CellConfig, LayerConfig};
 use atmo_asth_rust::planet::Planet;
-use atmo_asth_rust::sim::sim_op::SimOpHandle;
+use atmo_asth_rust::sim_op::SimOpHandle;
 use atmo_asth_rust::sim::simulation::{SimProps, Simulation};
 use h3o::Resolution;
 use std::rc::Rc;

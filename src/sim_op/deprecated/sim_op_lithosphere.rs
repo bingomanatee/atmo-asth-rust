@@ -5,7 +5,7 @@ use crate::h3_utils::H3Utils;
 use crate::material::MaterialType;
 use crate::sim::Simulation;
 use crate::constants::MAX_LITHOSPHERE_LAYER_HEIGHT_KM;
-use crate::sim::sim_op::{SimOp, SimOpHandle};
+use crate::sim_op::{SimOp, SimOpHandle};
 use noise::{NoiseFn, Perlin};
 
 #[derive(Debug, Clone)]

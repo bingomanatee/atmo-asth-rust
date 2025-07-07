@@ -2,7 +2,7 @@
 // Adds Earth's core radiance energy influx to the bottom asthenosphere layer
 
 use crate::sim::simulation::Simulation;
-use crate::sim::sim_op::{SimOp, SimOpHandle};
+use crate::sim_op::{SimOp, SimOpHandle};
 use crate::energy_mass::EnergyMass;
 
 #[derive(Debug, Clone)]

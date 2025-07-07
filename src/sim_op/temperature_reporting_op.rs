@@ -1,7 +1,7 @@
 /// Temperature reporting operation
 /// Reports average surface temperature every 10% of the simulation cycle
 
-use crate::sim::sim_op::SimOp;
+use crate::sim_op::SimOp;
 use crate::energy_mass_composite::{EnergyMassComposite, MaterialPhase};
 use crate::sim::simulation::Simulation;
 

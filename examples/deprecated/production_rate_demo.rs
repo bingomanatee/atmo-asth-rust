@@ -1,6 +1,6 @@
 use atmo_asth_rust::constants::EARTH_RADIUS_KM;
 use atmo_asth_rust::planet::Planet;
-use atmo_asth_rust::sim::sim_op::{
+use atmo_asth_rust::sim_op::{
     CoreRadianceOp, CsvWriterOp, LithosphereUnifiedOp,
     ThermalDiffusionOp,
 };

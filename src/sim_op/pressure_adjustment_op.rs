@@ -1,7 +1,7 @@
 /// Pressure adjustment operation
 /// Applies pressure compaction to all layers based on overlying mass
 
-use crate::sim::sim_op::SimOp;
+use crate::sim_op::SimOp;
 use crate::sim::simulation::Simulation;
 
 pub struct PressureAdjustmentOp {

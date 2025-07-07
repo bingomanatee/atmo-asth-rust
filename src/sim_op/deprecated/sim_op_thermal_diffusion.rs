@@ -1,6 +1,6 @@
 use crate::asth_cell::AsthCellColumn;
 use crate::energy_mass::{EnergyMass, StandardEnergyMass};
-use crate::sim::sim_op::{SimOp, SimOpHandle};
+use crate::sim_op::{SimOp, SimOpHandle};
 use crate::sim::simulation::Simulation;
 
 /// Thermal Diffusion Operator with Phase Transitions

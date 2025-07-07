@@ -2,7 +2,7 @@
 // Accumulates atmospheric mass from outgassing and calculates atmospheric impedance
 
 use crate::sim::simulation::Simulation;
-use crate::sim::sim_op::{SimOp, SimOpHandle};
+use crate::sim_op::{SimOp, SimOpHandle};
 use crate::temp_utils::radiated_joules_per_year;
 
 #[derive(Debug, Clone)]

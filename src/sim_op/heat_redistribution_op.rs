@@ -2,7 +2,7 @@
 /// Implements science-backed heat diffusion between layers within each cell
 /// Based on the logic from wide_experiment and wide_experiment_with_atmosphere
 
-use crate::sim::sim_op::SimOp;
+use crate::sim_op::SimOp;
 use crate::sim::simulation::Simulation;
 use crate::sim::fourier_thermal_transfer::FourierThermalTransfer;
 use crate::constants::{SECONDS_PER_YEAR, M2_PER_KM2};

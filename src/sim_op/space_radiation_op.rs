@@ -1,4 +1,4 @@
-use crate::sim::sim_op::SimOp;
+use crate::sim_op::SimOp;
 use crate::energy_mass_composite::EnergyMassComposite;
 use crate::global_thermal::global_h3_cell::GlobalH3Cell;
 use crate::sim::simulation::Simulation;

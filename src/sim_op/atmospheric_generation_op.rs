@@ -3,7 +3,7 @@
 /// When lithosphere layers melt (transition to liquid/gas), they outgas volatile materials
 /// that are added to atmospheric layers with exponentially decreasing density (88% reduction per layer)
 
-use crate::sim::sim_op::SimOp;
+use crate::sim_op::SimOp;
 use crate::sim::simulation::Simulation;
 use crate::energy_mass_composite::{EnergyMassComposite, MaterialPhase, MaterialCompositeType};
 use crate::material_composite::get_emission_compound_ratios;
@@ -32,7 +32,7 @@ struct CompoundProperties {
 fn load_compounds_data() -> &'static HashMap<String, CompoundProperties> {
     static COMPOUNDS_DATA: OnceLock<HashMap<String, CompoundProperties>> = OnceLock::new();
     COMPOUNDS_DATA.get_or_init(|| {
-        let json_str = include_str!("../../compounds.json");
+        let json_str = include_str!("../compounds.json");
         serde_json::from_str(json_str).expect("Failed to parse compounds.json")
     })
 }

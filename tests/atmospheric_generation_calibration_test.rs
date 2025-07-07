@@ -1,7 +1,7 @@
-use atmo_asth_rust::sim::sim_op::atmospheric_generation_op::AtmosphericGenerationOp;
-use atmo_asth_rust::sim::sim_op::surface_energy_init_op::{SurfaceEnergyInitOp, SurfaceEnergyInitParams};
+use atmo_asth_rust::sim_op::atmospheric_generation_op::AtmosphericGenerationOp;
+use atmo_asth_rust::sim_op::surface_energy_init_op::{SurfaceEnergyInitOp, SurfaceEnergyInitParams};
 use atmo_asth_rust::sim::simulation::{Simulation, SimProps};
-use atmo_asth_rust::sim::sim_op::SimOp;
+use atmo_asth_rust::sim_op::SimOp;
 use atmo_asth_rust::energy_mass_composite::{EnergyMassComposite, MaterialCompositeType};
 use atmo_asth_rust::global_thermal::global_h3_cell::{GlobalH3CellConfig, LayerConfig};
 use atmo_asth_rust::planet::Planet;

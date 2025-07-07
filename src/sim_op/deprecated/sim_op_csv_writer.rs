@@ -1,4 +1,4 @@
-use crate::sim::sim_op::{SimOp, SimOpHandle};
+use crate::sim_op::{SimOp, SimOpHandle};
 use crate::sim::simulation::Simulation;
 use std::fs::OpenOptions;
 use std::io::Write;
