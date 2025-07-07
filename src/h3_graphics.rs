@@ -9,8 +9,9 @@ use imageproc::drawing::draw_polygon_mut;
 use imageproc::point::Point;
 use rand::Rng;
 use rand::seq::SliceRandom;
-use crate::h3_neighbor_cache::H3NeighborCache;
+
 use noise::{NoiseFn, Perlin};
+use crate::h3_utils::H3Utils;
 
 /// Configuration for H3 graphics generation
 #[derive(Debug, Clone)]
@@ -573,42 +574,39 @@ impl H3GraphicsGenerator {
         generator.calculate_individual_hotspot_propagation_histogram()
     }
 
-    /// Analyze individual hotspot energy propagation with RocksDB neighbor cache
+    /// Analyze individual hotspot energy propagation using H3 grid neighbors
     pub fn analyze_individual_hotspot_propagation_cached(
         l3_resolution: Resolution,
         points_per_degree: u32,
-        cache_path: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let config = H3GraphicsConfig::new(l3_resolution, points_per_degree);
         let mut generator = H3GraphicsGenerator::new(config);
         generator.load_cells();
-        generator.calculate_individual_hotspot_propagation_histogram_cached(cache_path)
+        generator.calculate_individual_hotspot_propagation_histogram()
     }
 
-    /// Generate L2 heat map PNG using cached neighbor data
+    /// Generate L2 heat map PNG using H3 grid neighbors
     pub fn generate_l2_heat_map_png(
         l2_resolution: Resolution,
         points_per_degree: u32,
-        cache_path: &str,
         filename: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let config = H3GraphicsConfig::new(l2_resolution, points_per_degree);
         let mut generator = H3GraphicsGenerator::new(config);
         generator.load_cells();
-        generator.create_l2_heat_map_visualization(cache_path, filename)
+        generator.create_l2_heat_map_visualization(filename)
     }
 
     /// Generate L2 heat map with Perlin noise overlay
     pub fn generate_l2_perlin_heat_map_png(
         l2_resolution: Resolution,
         points_per_degree: u32,
-        cache_path: &str,
         filename: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let config = H3GraphicsConfig::new(l2_resolution, points_per_degree);
         let mut generator = H3GraphicsGenerator::new(config);
         generator.load_cells();
-        generator.create_l2_perlin_heat_map_visualization(cache_path, filename)
+        generator.create_l2_perlin_heat_map_visualization(filename)
     }
 
 
@@ -1776,39 +1774,7 @@ struct HotspotCell {
 
 /// Individual hotspot energy propagation calculation
 impl H3GraphicsGenerator {
-    /// Calculate individual hotspot energy propagation and generate histogram
-    pub fn calculate_individual_hotspot_propagation_histogram(&self) -> Result<(), Box<dyn std::error::Error>> {
-        println!("=== Individual Hotspot Energy Propagation Analysis ===");
-        println!("Each hotspot propagates energy individually through neighbor network");
 
-        // Step 1: Generate hotspots with 3D positions
-        let hotspots = self.generate_3d_hotspots()?;
-        println!("Generated {} hotspots with 3D positions", hotspots.len());
-
-        // Step 2: Build neighbor cache for all L3 cells
-        let neighbor_cache = self.build_neighbor_cache();
-        println!("Built neighbor cache for {} cells", neighbor_cache.len());
-
-        // Step 3: Calculate L3 cell radius for distance scaling
-        let l3_radius = self.estimate_l3_radius();
-        println!("Estimated L3 radius: {:.6}", l3_radius);
-
-        // Step 4: Initialize energy array
-        let mut cell_energies = vec![0.0; self.cells.len()];
-
-        // Step 5: Process each hotspot individually
-        for (i, hotspot) in hotspots.iter().enumerate() {
-            if i % 500 == 0 {
-                println!("Processing hotspot {}/{}", i + 1, hotspots.len());
-            }
-            self.propagate_hotspot_energy(hotspot, &mut cell_energies, &neighbor_cache, l3_radius);
-        }
-
-        // Step 6: Generate histogram
-        self.generate_individual_hotspot_histogram(&cell_energies, &hotspots);
-
-        Ok(())
-    }
 
     /// Generate hotspots with 3D positions
     fn generate_3d_hotspots(&self) -> Result<Vec<Hotspot3D>, Box<dyn std::error::Error>> {
@@ -2074,67 +2040,47 @@ struct Hotspot3D {
 /// Individual hotspot energy propagation with RocksDB caching
 impl H3GraphicsGenerator {
     /// Calculate individual hotspot energy propagation with RocksDB neighbor cache
-    pub fn calculate_individual_hotspot_propagation_histogram_cached(&self, cache_path: &str) -> Result<(), Box<dyn std::error::Error>> {
-        println!("=== Individual Hotspot Energy Propagation Analysis (Cached) ===");
-        println!("Using RocksDB neighbor cache for fast neighbor lookups");
+    pub fn calculate_individual_hotspot_propagation_histogram(&self) -> Result<(), Box<dyn std::error::Error>> {
+        println!("=== Individual Hotspot Energy Propagation Analysis ===");
+        println!("Using H3 grid neighbors for fast neighbor lookups");
 
-        // Step 1: Initialize RocksDB neighbor cache
-        let neighbor_threshold = 2.0; // degrees
-        let cache = H3NeighborCache::new(cache_path, neighbor_threshold)?;
-
-        // Step 2: Prepare cell data for cache
+        // Prepare cell data for neighbor lookups
         let cell_data: Vec<(CellIndex, f64, f64)> = self.cells.iter()
             .map(|cell| {
                 (cell.cell_index, cell.center.latitude, cell.center.longitude)
             })
             .collect();
 
-        // Step 3: Check if cache exists for this resolution, populate if needed
-        let resolution = self.config.resolution;
-        if !cache.has_cache_for_resolution(resolution)? {
-            println!("Cache not found for resolution {:?}, building cache...", resolution);
-            cache.populate_cache_for_resolution(resolution, &cell_data)?;
-        } else {
-            println!("Using existing cache for resolution {:?}", resolution);
-        }
-
-        // Step 4: Display cache statistics
-        let stats = cache.get_cache_stats()?;
-        if let Some(&count) = stats.get(&format!("resolution_{}", resolution as u8)) {
-            println!("Cache contains {} neighbor entries for resolution {:?}", count, resolution);
-        }
-
-        // Step 5: Generate hotspots with 3D positions
+        // Step 4: Generate hotspots with 3D positions
         let hotspots = self.generate_3d_hotspots()?;
         println!("Generated {} hotspots with 3D positions", hotspots.len());
 
-        // Step 6: Calculate L3 cell radius for distance scaling
+        // Step 5: Calculate L3 cell radius for distance scaling
         let l3_radius = self.estimate_l3_radius();
         println!("Estimated L3 radius: {:.6}", l3_radius);
 
-        // Step 7: Initialize energy array
+        // Step 6: Initialize energy array
         let mut cell_energies = vec![0.0; self.cells.len()];
 
-        // Step 8: Process each hotspot individually using cached neighbors
+        // Step 7: Process each hotspot individually using H3 grid neighbors
         for (i, hotspot) in hotspots.iter().enumerate() {
             if i % 500 == 0 {
                 println!("Processing hotspot {}/{}", i + 1, hotspots.len());
             }
-            self.propagate_hotspot_energy_cached(hotspot, &mut cell_energies, &cache, &cell_data, l3_radius)?;
+            self.propagate_hotspot_energy_h3(hotspot, &mut cell_energies, &cell_data, l3_radius)?;
         }
 
-        // Step 9: Generate histogram
+        // Step 8: Generate histogram
         self.generate_individual_hotspot_histogram(&cell_energies, &hotspots);
 
         Ok(())
     }
 
-    /// Propagate energy from a single hotspot using cached neighbors
-    fn propagate_hotspot_energy_cached(
+    /// Propagate energy from a single hotspot using H3 grid neighbors
+    fn propagate_hotspot_energy_h3(
         &self,
         hotspot: &Hotspot3D,
         cell_energies: &mut [f64],
-        cache: &H3NeighborCache,
         cell_data: &[(CellIndex, f64, f64)],
         l3_radius: f64
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -2165,22 +2111,25 @@ impl H3GraphicsGenerator {
                     continue; // Stop propagating if energy too low
                 }
 
-                // Get cached neighbors
+                // Get H3 grid neighbors
                 let cell_index_h3 = cell_data[cell_index].0;
-                let neighbors = cache.get_neighbors(cell_index_h3, cell_data)?;
+                let neighbor_cell_indices = H3Utils::neighbors_for(cell_index_h3);
 
                 // Add energy to all unvisited neighbors
-                for &neighbor_index in &neighbors {
-                    if neighbor_index < cell_energies.len() && !visited_cells.contains(&neighbor_index) {
-                        // Calculate distance-based energy contribution
-                        let distance_to_neighbor = self.calculate_hotspot_to_cell_distance(hotspot, neighbor_index);
-                        let neighbor_energy = self.calculate_exponential_energy_contribution(
-                            propagated_energy, distance_to_neighbor, l3_radius
-                        );
+                for neighbor_cell_index in neighbor_cell_indices {
+                    // Find the usize index for this CellIndex
+                    if let Some(neighbor_index) = cell_data.iter().position(|(cell_idx, _, _)| *cell_idx == neighbor_cell_index) {
+                        if neighbor_index < cell_energies.len() && !visited_cells.contains(&neighbor_index) {
+                            // Calculate distance-based energy contribution
+                            let distance_to_neighbor = self.calculate_hotspot_to_cell_distance(hotspot, neighbor_index);
+                            let neighbor_energy = self.calculate_exponential_energy_contribution(
+                                propagated_energy, distance_to_neighbor, l3_radius
+                            );
 
-                        cell_energies[neighbor_index] += neighbor_energy;
-                        visited_cells.insert(neighbor_index);
-                        next_wave.push((neighbor_index, neighbor_energy));
+                            cell_energies[neighbor_index] += neighbor_energy;
+                            visited_cells.insert(neighbor_index);
+                            next_wave.push((neighbor_index, neighbor_energy));
+                        }
                     }
                 }
             }
@@ -2196,15 +2145,11 @@ impl H3GraphicsGenerator {
     }
 
     /// Create L2 heat map visualization
-    pub fn create_l2_heat_map_visualization(&self, cache_path: &str, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn create_l2_heat_map_visualization(&self, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
         println!("=== Creating L2 Heat Map Visualization ===");
         println!("Generating thermal heat map for L2 resolution cells");
 
-        // Initialize RocksDB neighbor cache
-        let neighbor_threshold = 400.0; // km
-        let cache = H3NeighborCache::new(cache_path, neighbor_threshold)?;
-
-        // Prepare cell data for cache
+        // Prepare cell data for thermal calculations
         let cell_data: Vec<(CellIndex, f64, f64)> = self.cells.iter()
             .map(|cell| {
                 (cell.cell_index, cell.center.latitude, cell.center.longitude)
@@ -2323,15 +2268,11 @@ impl H3GraphicsGenerator {
     }
 
     /// Create L2 heat map with Perlin noise overlay
-    pub fn create_l2_perlin_heat_map_visualization(&self, cache_path: &str, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn create_l2_perlin_heat_map_visualization(&self, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
         println!("=== Creating L2 Heat Map with Perlin Noise Overlay ===");
         println!("Generating thermal heat map with 3D Perlin noise (3 L2 hex wavelength)");
 
-        // Initialize RocksDB neighbor cache
-        let neighbor_threshold = 400.0; // km
-        let _cache = H3NeighborCache::new(cache_path, neighbor_threshold)?;
-
-        // Prepare cell data for cache
+        // Prepare cell data for thermal calculations
         let cell_data: Vec<(CellIndex, f64, f64)> = self.cells.iter()
             .map(|cell| {
                 (cell.cell_index, cell.center.latitude, cell.center.longitude)

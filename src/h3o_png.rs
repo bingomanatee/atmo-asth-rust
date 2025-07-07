@@ -145,8 +145,8 @@ impl H3CellGraphics {
 
 /// H3 Graphics Generator for creating PNG visualizations
 pub struct H3GraphicsGenerator {
-    config: H3GraphicsConfig,
-    cells: Vec<H3CellGraphics>,
+    pub config: H3GraphicsConfig,
+    pub cells: Vec<H3CellGraphics>,
 }
 
 impl H3GraphicsGenerator {
@@ -339,21 +339,35 @@ impl H3GraphicsGenerator {
         // Create random number generator
         let mut rng = rand::rng();
 
-        println!("Drawing {} hexagons with colored fills only (no boundaries)...", self.cells.len());
+        println!("Drawing {} hexagons with colored fills (filtering out broad cells)...", self.cells.len());
 
-        // Draw filled hexagons with random colors (no boundaries)
+        // Draw only coherent cells (X extent < 20% of screen width)
+        let width_threshold = (self.config.width as i32) * 20 / 100;
         let mut filled_count = 0;
-        for path in self.get_cell_boundary_paths_with_wraparound() {
-            if path.len() >= 3 {
-                // Convert to coordinate pairs and remove duplicates
-                let mut coords: Vec<(i32, i32)> = path.iter()
+
+        for cell in &self.cells {
+            // Convert cell corners to pixel coordinates
+            let pixel_coords: Vec<(i32, i32)> = cell.corners.iter()
+                .map(|corner| self.geo_to_pixel(corner.longitude, corner.latitude))
+                .collect();
+
+            if pixel_coords.is_empty() {
+                continue;
+            }
+
+            // Check X extent to filter out broad wraparound cells
+            let min_x = pixel_coords.iter().map(|(x, _)| *x).min().unwrap();
+            let max_x = pixel_coords.iter().map(|(x, _)| *x).max().unwrap();
+            let x_extent = max_x - min_x;
+
+            // Only draw cell if it's coherent (X extent < 20% of width)
+            if x_extent < width_threshold {
+                // Filter coordinates to image bounds
+                let coords: Vec<(i32, i32)> = pixel_coords.iter()
                     .filter(|(x, y)| *x >= 0 && *x < self.config.width as i32 &&
                                      *y >= 0 && *y < self.config.height as i32)
                     .cloned()
                     .collect();
-
-                // Remove consecutive duplicate points
-                coords.dedup();
 
                 if coords.len() >= 3 {
                     // Generate random color
@@ -394,19 +408,33 @@ impl H3GraphicsGenerator {
 
         println!("Drawing {} hexagons with colored fills and lat/lon grid...", self.cells.len());
 
-        // Draw filled hexagons with random colors (no boundaries)
+        // Draw only coherent cells (X extent < 20% of screen width)
+        let width_threshold = (self.config.width as i32) * 20 / 100;
         let mut filled_count = 0;
-        for path in self.get_cell_boundary_paths_with_wraparound() {
-            if path.len() >= 3 {
-                // Convert to coordinate pairs and remove duplicates
-                let mut coords: Vec<(i32, i32)> = path.iter()
+
+        for cell in &self.cells {
+            // Convert cell corners to pixel coordinates
+            let pixel_coords: Vec<(i32, i32)> = cell.corners.iter()
+                .map(|corner| self.geo_to_pixel(corner.longitude, corner.latitude))
+                .collect();
+
+            if pixel_coords.is_empty() {
+                continue;
+            }
+
+            // Check X extent to filter out broad wraparound cells
+            let min_x = pixel_coords.iter().map(|(x, _)| *x).min().unwrap();
+            let max_x = pixel_coords.iter().map(|(x, _)| *x).max().unwrap();
+            let x_extent = max_x - min_x;
+
+            // Only draw cell if it's coherent (X extent < 20% of width)
+            if x_extent < width_threshold {
+                // Filter coordinates to image bounds
+                let coords: Vec<(i32, i32)> = pixel_coords.iter()
                     .filter(|(x, y)| *x >= 0 && *x < self.config.width as i32 &&
                                      *y >= 0 && *y < self.config.height as i32)
                     .cloned()
                     .collect();
-
-                // Remove consecutive duplicate points
-                coords.dedup();
 
                 if coords.len() >= 3 {
                     // Generate random color
@@ -616,19 +644,36 @@ impl H3GraphicsGenerator {
 
         println!("Drawing {} hexagons using 3D projection (should eliminate wraparound issues)...", self.cells.len());
 
-        // Draw filled hexagons with random colors using 3D approach
+        // Draw only coherent cells (X extent < 20% of screen width)
+        let width_threshold = (self.config.width as i32) * 20 / 100;
         let mut filled_count = 0;
-        for path in self.get_cell_boundary_paths_3d() {
-            if path.len() >= 3 {
+
+        for cell in &self.cells {
+            // Convert cell corners to pixel coordinates using 3D projection
+            let pixel_coords: Vec<(i32, i32)> = cell.corners.iter()
+                .map(|corner| {
+                    let point_3d = corner.to_3d();
+                    self.project_3d_to_pixel(&point_3d)
+                })
+                .collect();
+
+            if pixel_coords.is_empty() {
+                continue;
+            }
+
+            // Check X extent to filter out broad wraparound cells
+            let min_x = pixel_coords.iter().map(|(x, _)| *x).min().unwrap();
+            let max_x = pixel_coords.iter().map(|(x, _)| *x).max().unwrap();
+            let x_extent = max_x - min_x;
+
+            // Only draw cell if it's coherent (X extent < 20% of width)
+            if x_extent < width_threshold {
                 // Filter coordinates to image bounds
-                let mut coords: Vec<(i32, i32)> = path.iter()
+                let coords: Vec<(i32, i32)> = pixel_coords.iter()
                     .filter(|(x, y)| *x >= 0 && *x < self.config.width as i32 &&
                                      *y >= 0 && *y < self.config.height as i32)
                     .cloned()
                     .collect();
-
-                // Remove consecutive duplicate points
-                coords.dedup();
 
                 if coords.len() >= 3 {
                     // Generate random color
@@ -670,19 +715,33 @@ impl H3GraphicsGenerator {
 
         println!("Drawing {} hexagons with ONLY colored fills (no boundaries)...", self.cells.len());
 
-        // Draw ONLY filled hexagons with random colors (no boundaries)
+        // Draw only coherent cells (X extent < 20% of screen width)
+        let width_threshold = (self.config.width as i32) * 20 / 100;
         let mut filled_count = 0;
-        for path in self.get_cell_boundary_paths_with_wraparound() {
-            if path.len() >= 3 {
-                // Convert to coordinate pairs and remove duplicates
-                let mut coords: Vec<(i32, i32)> = path.iter()
+
+        for cell in &self.cells {
+            // Convert cell corners to pixel coordinates
+            let pixel_coords: Vec<(i32, i32)> = cell.corners.iter()
+                .map(|corner| self.geo_to_pixel(corner.longitude, corner.latitude))
+                .collect();
+
+            if pixel_coords.is_empty() {
+                continue;
+            }
+
+            // Check X extent to filter out broad wraparound cells
+            let min_x = pixel_coords.iter().map(|(x, _)| *x).min().unwrap();
+            let max_x = pixel_coords.iter().map(|(x, _)| *x).max().unwrap();
+            let x_extent = max_x - min_x;
+
+            // Only draw cell if it's coherent (X extent < 20% of width)
+            if x_extent < width_threshold {
+                // Filter coordinates to image bounds
+                let coords: Vec<(i32, i32)> = pixel_coords.iter()
                     .filter(|(x, y)| *x >= 0 && *x < self.config.width as i32 &&
                                      *y >= 0 && *y < self.config.height as i32)
                     .cloned()
                     .collect();
-
-                // Remove consecutive duplicate points
-                coords.dedup();
 
                 if coords.len() >= 3 {
                     // Generate random bright color
@@ -847,6 +906,46 @@ impl H3GraphicsGenerator {
     fn generate_voronoi_upwelling_visualization(&self, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
         // Placeholder - just use colored hexagons for now
         self.generate_colored_hexagons_png(filename)
+    }
+    
+    /// Draw a cell with specified color
+    fn draw_cell_with_color(&self, image: &mut RgbImage, cell: &H3CellGraphics, color: Rgb<u8>) {
+        // Convert cell corners to pixel coordinates
+        let pixel_coords: Vec<(i32, i32)> = cell.corners.iter()
+            .map(|corner| self.geo_to_pixel(corner.longitude, corner.latitude))
+            .collect();
+
+        if pixel_coords.len() >= 3 {
+            // Filter coordinates to image bounds
+            let coords: Vec<(i32, i32)> = pixel_coords.iter()
+                .filter(|(x, y)| *x >= 0 && *x < self.config.width as i32 &&
+                                 *y >= 0 && *y < self.config.height as i32)
+                .cloned()
+                .collect();
+
+            if coords.len() >= 3 {
+                self.fill_polygon_simple(image, &coords, color);
+            }
+        }
+    }
+
+    /// Draw thermal visualization from color map
+    pub fn draw_thermal_png_from_colors(&self, cell_colors: &Vec<Rgb<u8>>, filename: &str) -> Result<(), Box<dyn std::error::Error>> {
+        // Convert Vec to HashMap mapping cell indices to colors
+        let mut color_map = std::collections::HashMap::new();
+        for (i, cell) in self.cells.iter().enumerate() {
+            if i < cell_colors.len() {
+                color_map.insert(cell.cell_index, cell_colors[i]);
+            }
+        }
+        self.generate_coherent_cells_with_colors_png(filename, false, Some(color_map))
+    }
+
+    /// Convert thermal value to color (0.0 = black, 1.0 = white)
+    pub fn thermal_value_to_color(&self, value: f64) -> Rgb<u8> {
+        let clamped = value.max(0.0).min(1.0);
+        let intensity = (clamped * 255.0) as u8;
+        Rgb([intensity, intensity, intensity])
     }
 }
 
