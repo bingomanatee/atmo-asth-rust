@@ -54,7 +54,7 @@ pub fn run_global_thermal_radiance_integrated() {
     // Create RadianceOp parameters with Earth baseline energy injection
     let radiance_params = RadianceOpParams {
         base_core_radiance_j_per_km2_per_year: 2.52e12, // 1.0x Earth's core radiance (baseline)
-        radiance_system_multiplier: 50.0, 
+        radiance_system_multiplier: 1.0, 
         foundry_temperature_k: 3000.0, // Deep foundry reference temperature (not used for resets)
         enable_reporting: false, // Enable detailed reporting
         enable_energy_logging: false, // Disable energy flow debugging

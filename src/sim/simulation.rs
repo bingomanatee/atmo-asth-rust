@@ -5,7 +5,40 @@ use crate::sim_op::{SimOp, SimOpHandle};
 use h3o::{CellIndex, Resolution};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
+#[derive(Debug, Clone)]
+pub struct OpTiming {
+    pub op_name: String,
+    pub init_time: Duration,
+    pub total_update_time: Duration,
+    pub update_call_count: u32,
+    pub after_time: Duration,
+}
+
+impl OpTiming {
+    pub fn new(op_name: String) -> Self {
+        Self {
+            op_name,
+            init_time: Duration::ZERO,
+            total_update_time: Duration::ZERO,
+            update_call_count: 0,
+            after_time: Duration::ZERO,
+        }
+    }
+    
+    pub fn avg_update_time(&self) -> Duration {
+        if self.update_call_count > 0 {
+            self.total_update_time / self.update_call_count
+        } else {
+            Duration::ZERO
+        }
+    }
+    
+    pub fn total_time(&self) -> Duration {
+        self.init_time + self.total_update_time + self.after_time
+    }
+}
 
 pub struct Simulation {
     pub planet: Planet,
@@ -18,6 +51,7 @@ pub struct Simulation {
     pub years_per_step: u32,
     pub name: String,
     pub debug: bool,
+    pub op_timings: Vec<OpTiming>,
 }
 
 pub struct SimProps {
@@ -38,7 +72,7 @@ pub struct SimProps {
 impl Simulation {
     pub fn new(props: SimProps) -> Simulation {
         let ops = props.ops.into_iter().map(|handle| handle.op).collect();
-        let sim = Simulation {
+        let mut sim = Simulation {
             planet: props.planet,
             ops,
             resolution: props.res,
@@ -49,7 +83,14 @@ impl Simulation {
             years_per_step: props.years_per_step,
             name: props.name.to_string(),
             debug: props.debug,
+            op_timings: Vec::new(),
         };
+        
+        // Initialize timing structs for each op
+        for op in &sim.ops {
+            sim.op_timings.push(OpTiming::new(op.name().to_string()));
+        }
+        
         sim
     }
 
@@ -112,6 +153,7 @@ impl Simulation {
             }
         }
         self.simulate_end();
+        self.print_timing_report();
     }
 
     fn advance(&mut self) {
@@ -123,8 +165,11 @@ impl Simulation {
     fn simulate_init(&mut self) {
         let mut ops = std::mem::take(&mut self.ops);
 
-        for op in &mut ops {
+        for (i, op) in ops.iter_mut().enumerate() {
+            let start = Instant::now();
             op.init_sim(self);
+            let elapsed = start.elapsed();
+            self.op_timings[i].init_time = elapsed;
         }
         self.ops = ops;
     }
@@ -132,8 +177,11 @@ impl Simulation {
     fn simulate_end(&mut self) {
         let mut ops = std::mem::take(&mut self.ops);
 
-        for op in &mut ops {
+        for (i, op) in ops.iter_mut().enumerate() {
+            let start = Instant::now();
             op.after_sim(self);
+            let elapsed = start.elapsed();
+            self.op_timings[i].after_time = elapsed;
         }
         self.ops = ops;
     }
@@ -141,9 +189,50 @@ impl Simulation {
     fn simulate_step(&mut self) {
         let mut ops = std::mem::take(&mut self.ops);
 
-        for op in &mut ops {
+        for (i, op) in ops.iter_mut().enumerate() {
+            let start = Instant::now();
             op.update_sim(self);
+            let elapsed = start.elapsed();
+            self.op_timings[i].total_update_time += elapsed;
+            self.op_timings[i].update_call_count += 1;
         }
         self.ops = ops;
+    }
+    
+    pub fn print_timing_report(&self) {
+        println!("\n📊 === SIMULATION TIMING REPORT ===");
+        println!("🔄 Total steps: {}", self.sim_steps);
+        println!("⏱️  Years per step: {}", self.years_per_step);
+        println!();
+        
+        let mut total_time = Duration::ZERO;
+        for timing in &self.op_timings {
+            total_time += timing.total_time();
+        }
+        
+        println!("📈 PER-OPERATION BREAKDOWN:");
+        for timing in &self.op_timings {
+            let total_op_time = timing.total_time();
+            let percentage = if total_time.as_millis() > 0 {
+                (total_op_time.as_millis() as f64 / total_time.as_millis() as f64) * 100.0
+            } else {
+                0.0
+            };
+            
+            println!("  🔧 {:<25} | Total: {:>8.2}ms | Avg/step: {:>8.2}ms | Init: {:>6.2}ms | After: {:>6.2}ms | Share: {:>5.1}%",
+                timing.op_name,
+                total_op_time.as_millis(),
+                timing.avg_update_time().as_millis(),
+                timing.init_time.as_millis(),
+                timing.after_time.as_millis(),
+                percentage
+            );
+        }
+        
+        println!();
+        println!("⏱️  TOTAL SIMULATION TIME: {:.2}ms ({:.2}s)", total_time.as_millis(), total_time.as_secs_f64());
+        println!("🚀 Average time per step: {:.2}ms", total_time.as_millis() as f64 / self.sim_steps as f64);
+        println!("💫 Steps per second: {:.2}", self.sim_steps as f64 / total_time.as_secs_f64());
+        println!("📊 === END TIMING REPORT ===\n");
     }
 }

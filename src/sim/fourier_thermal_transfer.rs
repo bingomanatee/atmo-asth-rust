@@ -3,9 +3,10 @@ use crate::energy_mass_composite::{EnergyMassComposite, MaterialCompositeType, M
 /// Implements proper Fourier's law with material properties and geometric constraints
 /// Updated to work with new ThermalLayer arrays and (current, next) tuple structure
 use crate::global_thermal::thermal_layer::ThermalLayer;
-use std::collections::HashMap;
-use std::sync::Mutex;
-use once_cell::sync::Lazy;
+// TEMPORARY: Commented out for cache bypass testing
+// use std::collections::HashMap;
+// use std::sync::Mutex;
+// use once_cell::sync::Lazy;
 
 /// Physical constants for Fourier heat transfer calculations
 pub mod fourier_constants {
@@ -44,9 +45,10 @@ struct CachedThermalProperties {
     thermal_pressure_coefficient: f64,
 }
 
+// TEMPORARY: Disable thermal cache for performance testing
 // Global thermal properties cache
-static THERMAL_CACHE: Lazy<Mutex<HashMap<ThermalCacheKey, CachedThermalProperties>>> = 
-    Lazy::new(|| Mutex::new(HashMap::new()));
+// static THERMAL_CACHE: Lazy<Mutex<HashMap<ThermalCacheKey, CachedThermalProperties>>> = 
+//     Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone)]
 pub struct FourierThermalTransfer {
@@ -80,16 +82,7 @@ impl FourierThermalTransfer {
         energy_mass: &dyn EnergyMassComposite,
         thickness_km: f64,
     ) -> CachedThermalProperties {
-        let cache_key = self.create_cache_key(energy_mass, thickness_km);
-        
-        // Try to get from cache first
-        if let Ok(cache) = THERMAL_CACHE.lock() {
-            if let Some(cached) = cache.get(&cache_key) {
-                return cached.clone();
-            }
-        }
-        
-        // Calculate and cache new values
+        // TEMPORARY: Bypass cache completely for performance testing
         let properties = CachedThermalProperties {
             thermal_diffusivity: self.calculate_thermal_diffusivity_uncached(energy_mass),
             density_adjusted_conductivity: self.calculate_density_adjusted_conductivity_uncached(
@@ -102,11 +95,6 @@ impl FourierThermalTransfer {
                 fourier_constants::CONVECTION_THRESHOLD_K,
             ),
         };
-        
-        // Cache the result
-        if let Ok(mut cache) = THERMAL_CACHE.lock() {
-            cache.insert(cache_key, properties.clone());
-        }
         
         properties
     }
