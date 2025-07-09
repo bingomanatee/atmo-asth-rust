@@ -26,18 +26,7 @@ use std::rc::Rc;
 pub fn run_global_thermal_radiance_integrated() {
     println!("🌋 Global Thermal Simulation: Foundry Baseline + RadianceOp Enhancement");
     println!("{}", "=".repeat(70));
-    println!("🔥 Thermal System Configuration:");
-    println!("   - Foundry Temperature: Establishes baseline thermal state");
-    println!("   - RadianceOp: High energy to maintain hot asthenosphere against cooling");
-    println!("   - Base core radiance: 2.52e13 J/km²/year (10x Earth's core to overcome cooling)");
-    println!("   - Radiance system: 5x multiplier for sustained asthenosphere heat");
-    println!("   - Standard hotspots: 70 active (0.5-60 Ma lifetime)");
-    println!("   - Major plumes: 16 active (20-200 Ma lifetime)");
-    println!("   - Transient upwells: 30 active (0.5-1 Ma lifetime)");
-    println!("   - Cooling zones: 24 active (1-50 Ma lifetime)");
-    println!("   - Total: ~140 thermal features globally");
-    println!("   - Thermal peak: ~1 Ma, then exponential cooling");
-    println!();
+
 
     // Create Earth planet with L2 resolution
     let planet = Planet::earth(Resolution::Two);
@@ -62,12 +51,12 @@ pub fn run_global_thermal_radiance_integrated() {
     println!("   - Net flow rate: {:.2} MW", stats.net_flow_rate_mw);
     println!();
 
-    // Create RadianceOp parameters with foundry layers as constant heat sources
+    // Create RadianceOp parameters with Earth baseline energy injection
     let radiance_params = RadianceOpParams {
-        base_core_radiance_j_per_km2_per_year: 2.52e12 * 10.0, // 10x Earth's core radiance to overcome cooling
-        radiance_system_multiplier: 5.0, // 5x radiance system contribution for sustained heat
-        foundry_temperature_k: 2100.0, // Deep foundry layers maintained at 2100K
-        enable_reporting: true, // Enable detailed reporting
+        base_core_radiance_j_per_km2_per_year: 2.52e12, // 1.0x Earth's core radiance (baseline)
+        radiance_system_multiplier: 10.0, // 1.0x radiance system contribution (normal level)
+        foundry_temperature_k: 2100.0, // Deep foundry reference temperature (not used for resets)
+        enable_reporting: false, // Enable detailed reporting
         enable_energy_logging: false, // Disable energy flow debugging
     };
 
@@ -76,8 +65,8 @@ pub fn run_global_thermal_radiance_integrated() {
         planet: planet.clone(),
         res: Resolution::Two,
         layer_count: 24, // Will be overridden by GlobalH3Cell configuration
-        sim_steps: 100,  // Longer run to see thermal evolution
-        years_per_step: 50000, // 50,000 years per step = 5 million years total
+        sim_steps: 500,
+        years_per_step: 5000,
         name: "GlobalThermalRadianceIntegrated",
         debug: false,
         ops: vec![
@@ -86,16 +75,12 @@ pub fn run_global_thermal_radiance_integrated() {
                 surface_temp_k: 280.0,                    // 280K surface temperature
                 geothermal_gradient_k_per_km: 25.0,       // 25K per km depth (realistic gradient)
                 core_temp_k: 1800.0,                      // 1800K core temperature (realistic mantle)
-                foundry_oscillation_enabled: true,        // Enable foundry temperature oscillation
-                foundry_oscillation_period_years: 100_000.0, // 100,000 year oscillation period (geological)
-                foundry_min_multiplier: 0.8,              // 80% minimum (1440K minimum)
-                foundry_max_multiplier: 1.2,              // 120% maximum (2160K maximum)
             }))),
 
-            // RadianceOp adds incremental energy to already hot asthenosphere root
+            // RadianceOp adds energy to deepest layer (heat spiral NOT from this)
             SimOpHandle::new(Box::new(RadianceOp::new(radiance_params, radiance_system))),
 
-            // Heat redistribution spreads energy through layers
+            // Heat redistribution spreads energy through layers (energy conservation fixed)
             SimOpHandle::new(Box::new(HeatRedistributionOp::new())),
 
             // Pressure adjustment for realistic thermal dynamics (init only - not continuous)
@@ -125,10 +110,12 @@ pub fn run_global_thermal_radiance_integrated() {
     // Configure cells with Earth-like layout optimized for radiance system
     let _planet_rc = Rc::new(planet);
     sim.make_cells(|cell_index, planet| {
-        // Realistic Earth-like layer structure:
+        // Realistic Earth-like layer structure with gradual thickness transition:
         // - 4×20km atmosphere (80km total)
         // - 4×10km lithosphere (40km total - realistic continental crust thickness)
-        // - 10×25km asthenosphere (250km total - realistic asthenosphere depth)
+        // - 3×15km upper asthenosphere (45km total - gradual transition)
+        // - 3×20km middle asthenosphere (60km total - intermediate thickness)
+        // - 3×25km lower asthenosphere (75km total - deepest layers)
         let layer_schedule = vec![
             LayerConfig {
                 cell_type: MaterialCompositeType::Air,
@@ -137,13 +124,33 @@ pub fn run_global_thermal_radiance_integrated() {
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
-                cell_count: 4,
+                cell_count: 2,
                 height_km: 10.0, // 40km total lithosphere (realistic continental crust)
+            },  
+            LayerConfig {
+                cell_type: MaterialCompositeType::Silicate,
+                cell_count: 2,
+                height_km: 15.0, // 40km total lithosphere (realistic continental crust)
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
-                cell_count: 10,
-                height_km: 25.0, // 250km total asthenosphere (realistic depth)
+                cell_count: 2,
+                height_km: 20.0, // 45km upper asthenosphere (gradual transition from 10km)
+            },
+            LayerConfig {
+                cell_type: MaterialCompositeType::Silicate,
+                cell_count: 2,
+                height_km: 25.0, // 60km middle asthenosphere (intermediate thickness)
+            },
+            LayerConfig {
+                cell_type: MaterialCompositeType::Silicate,
+                cell_count: 2,
+                height_km: 30.0, // 75km lower asthenosphere (deepest layers)
+            },
+            LayerConfig {
+                cell_type: MaterialCompositeType::Silicate,
+                cell_count: 3,
+                height_km: 200.0, // 75km lower asthenosphere (deepest layers)
             },
         ];
 
@@ -154,16 +161,16 @@ pub fn run_global_thermal_radiance_integrated() {
         }
     });
 
-    println!("🚀 Starting simulation with Foundry + RadianceOp thermal system...");
-    println!("📈 Foundry establishes baseline, RadianceOp melts asthenosphere...");
-    println!("🔥 Expecting molten asthenosphere (25km layers) and solid lithosphere (10km layers)...");
-    println!("🌋 Tracking massive lithosphere melting and atmospheric generation...");
-    println!("🔧 Enhanced heat transfer for geological equilibration:");
-    println!("   - Base transfer rate: 2% per year (increased from 0.5%)");
-    println!("   - Max energy transfer: 25% per timestep (increased from 10%)");
-    println!("   - Conductivity factor: Up to 2x (increased from 1x cap)");
-    println!("   - Pressure effects: Exponentially flattened (minimal influence)");
-    println!("   - Goal: Eliminate artificial temperature clamping over geological time");
+    println!("🚀 Starting simulation with fixed energy conservation...");
+    println!("📈 SurfaceEnergyInitOp establishes baseline + RadianceOp adds energy");
+    println!("🔥 Testing thermal stability with corrected heat transfer rates");
+    println!("🌋 Tracking thermal evolution with proper energy conservation");
+    println!("🔧 Thickness-based heat transfer with natural thermal equilibrium:");
+    println!("   - Gradual thickness scaling: 10km→15km→20km→25km layers for smooth energy flow");
+    println!("   - Moderate energy injection from RadianceOp");
+    println!("   - Natural thermal gradients through heat redistribution");
+    println!("   - Surface cooling provides energy dissipation");
+    println!("   - Goal: Identify if heat spiral is from RadianceOp or other components");
     println!();
 
     // Run simulation
@@ -172,14 +179,14 @@ pub fn run_global_thermal_radiance_integrated() {
     println!();
     println!("✅ Simulation completed!");
     println!("🔬 Key observations to look for:");
-    println!("   - Foundry temperature establishing baseline thermal state");
-    println!("   - RadianceOp adding incremental energy to already hot system");
-    println!("   - Heat redistribution from asthenosphere to lithosphere");
-    println!("   - Lithosphere melting patterns enhanced by radiance hotspots");
-    println!("   - Atmospheric generation from melted lithosphere material");
+    println!("   - Stable thermal system without runaway heating");
+    println!("   - Natural thermal gradients from deep core energy to surface cooling");
+    println!("   - Controlled heat redistribution through thickness-scaled diffusion");
+    println!("   - Realistic asthenosphere temperatures without artificial resets");
+    println!("   - Moderate lithosphere heating and natural atmospheric generation");
     println!("   - Spatial variation in thermal activity based on hotspot locations");
     println!("   - Temporal evolution as hotspots peak and cool over geological time");
-    println!("   - Realistic thermal gradients from foundry baseline + radiance enhancement");
+    println!("   - Thermal equilibrium achieved through energy balance");
 }
 
 fn main() {

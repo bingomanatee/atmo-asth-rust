@@ -25,7 +25,7 @@ fn main() {
 fn test_density_adjusted_conductivity() {
     println!("\n🔬 Test 1: Density-Adjusted Conductivity");
 
-    let fourier = FourierThermalTransfer::new(SECONDS_PER_YEAR); // 1 year in seconds
+    let fourier = FourierThermalTransfer::new(1.0); // 1 year in seconds
     
     let base_conductivity = 3.2; // W/(m·K) for silicate
     let default_density = 3300.0; // kg/m³ for silicate
@@ -41,12 +41,12 @@ fn test_density_adjusted_conductivity() {
     for (description, current_density, expected_ratio) in test_cases {
         // Test conductivity OUT (should increase with density)
         let conductivity_out = fourier.calculate_density_adjusted_conductivity(
-            base_conductivity, current_density, default_density, true
+            base_conductivity, current_density, default_density
         );
         
         // Test conductivity IN (should decrease with density)
         let conductivity_in = fourier.calculate_density_adjusted_conductivity(
-            base_conductivity, current_density, default_density, false
+            base_conductivity, current_density, default_density
         );
         
         let actual_ratio = current_density / default_density;
@@ -117,7 +117,7 @@ fn test_heat_transfer_with_pressure_effects() {
     let hot_layer_low_pressure = create_compressed_test_layer(2000.0, 0.1, 2200.0); // 2000K, 0.1 GPa, low density
     let cold_layer_high_pressure = create_compressed_test_layer(1000.0, 5.0, 4400.0); // 1000K, 5.0 GPa, high density
 
-    let fourier = FourierThermalTransfer::new(SECONDS_PER_YEAR); // 1 year in seconds
+    let fourier = FourierThermalTransfer::new(1.0); // 1 year in seconds
     
     // Test heat transfer without density adjustment
     let mut hot_tuple_normal = (hot_layer_low_pressure.clone(), hot_layer_low_pressure.clone());
@@ -131,7 +131,7 @@ fn test_heat_transfer_with_pressure_effects() {
     let mut hot_tuple_adjusted = (hot_layer_low_pressure.clone(), hot_layer_low_pressure.clone());
     let mut cold_tuple_adjusted = (cold_layer_high_pressure.clone(), cold_layer_high_pressure.clone());
 
-    let adjusted_transfer = fourier.apply_heat_transfer_between_layers_with_density_adjustment(
+    let adjusted_transfer = fourier.transfer_heat_between_layer_tuples(
         &mut hot_tuple_adjusted, &mut cold_tuple_adjusted
     );
 
@@ -146,13 +146,11 @@ fn test_heat_transfer_with_pressure_effects() {
         hot_layer_low_pressure.thermal_conductivity(),
         hot_layer_low_pressure.current_density_kg_m3(),
         3300.0,
-        true
     );
     let cold_conductivity_in = fourier.calculate_density_adjusted_conductivity(
         cold_layer_high_pressure.thermal_conductivity(),
         cold_layer_high_pressure.current_density_kg_m3(),
         3300.0,
-        false
     );
 
     println!("  Debug: Hot conductivity OUT: {:.3} W/(m·K) (vs {:.3} normal)",

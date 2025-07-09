@@ -3,6 +3,7 @@
 
 use crate::sim_op::SimOp;
 use crate::sim::simulation::Simulation;
+use rayon::prelude::*;
 
 pub struct PressureAdjustmentOp {
     pub apply_during_simulation: bool,
@@ -34,6 +35,7 @@ impl SimOp for PressureAdjustmentOp {
         let mut _total_pressure_applied = 0.0;
         let mut max_pressure: f64 = 0.0;
 
+        // Process cells sequentially (parallel processing has borrowing constraints with HashMap)
         for cell in sim.cells.values_mut() {
             // Apply pressure compaction to this cell (handles tuple structure internally)
             cell.apply_pressure_compaction();
@@ -46,8 +48,6 @@ impl SimOp for PressureAdjustmentOp {
             _total_pressure_applied += cell_total_pressure;
             max_pressure = max_pressure.max(cell_max_pressure);
             _total_cells_processed += 1;
-
-            // Debug output removed for cleaner simulation output
         }
 
         // Pressure compaction complete

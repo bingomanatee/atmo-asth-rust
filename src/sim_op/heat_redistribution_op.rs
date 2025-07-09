@@ -5,36 +5,15 @@
 use crate::sim_op::SimOp;
 use crate::sim::simulation::Simulation;
 use crate::sim::fourier_thermal_transfer::FourierThermalTransfer;
-use crate::constants::{SECONDS_PER_YEAR, M2_PER_KM2};
-
-
-/// Physical constants for Fourier heat transfer calculations
-mod fourier_constants {
-    /// Minimum temperature difference for heat transfer (K)
-
-
-    /// Maximum energy transfer fraction per timestep for numerical stability
-    /// Based on wide experiment: use half the energy difference between neighboring cells
-
-
-    /// Conversion from km to m
-    pub const KM_TO_M: f64 = 1000.0;
-}
+use crate::constants::SECONDS_PER_YEAR;
+use rayon::prelude::*;
+use h3o::CellIndex;
 
 pub struct HeatRedistributionOp {
     pub apply_during_simulation: bool,
     pub debug_output: bool,
 
-    // Pre-computed constants for performance
-    time_seconds_per_step: f64,
-    surface_area_m2: f64, // Identical for all cells
-    layer_distances_m: Vec<f64>, // Distance between adjacent layers
-
-    // Step tracking for temperature profile output
     current_step: usize,
-
-    // Previous temperatures for tracking changes
-
 
     // Fourier thermal transfer utility
     fourier_transfer: Option<FourierThermalTransfer>,
@@ -45,11 +24,7 @@ impl HeatRedistributionOp {
         Self {
             apply_during_simulation: true,
             debug_output: false,
-            time_seconds_per_step: 0.0,
-            surface_area_m2: 0.0,
-            layer_distances_m: Vec::new(),
             current_step: 0,
-
             fourier_transfer: None,
         }
     }
@@ -58,16 +33,10 @@ impl HeatRedistributionOp {
         Self {
             apply_during_simulation: true,
             debug_output: true,
-            time_seconds_per_step: 0.0,
-            surface_area_m2: 0.0,
-            layer_distances_m: Vec::new(),
             current_step: 0,
-
             fourier_transfer: None,
         }
     }
-    
-
 
     /// Output temperature changes every 20 steps - comparing current vs next states
     fn output_temperature_changes(&mut self, _sim: &Simulation, step: usize) {
@@ -88,39 +57,19 @@ impl HeatRedistributionOp {
 
         
         let mut total_energy_transferred = 0.0;
-        let layer_count = cell.layers_t.len();
-        
-        if layer_count < 2 {
+
+        if cell.layers_t.len() < 2 {
             return 0.0; // Need at least 2 layers for heat transfer
         }
-        
-        // Apply heat transfer between adjacent layers
-        for i in 0..(layer_count - 1) {
-            let (_upper_temp, _upper_conductivity, _upper_height, _lower_temp, _lower_conductivity, _lower_height) = {
-                let upper_layer = &cell.layers_t[i].0; // current state
-                let lower_layer = &cell.layers_t[i + 1].0; // current state
-                
-                (
-                    upper_layer.temperature_k(),
-                    upper_layer.thermal_conductivity(),
-                    upper_layer.height_km,
-                    lower_layer.temperature_k(),
-                    lower_layer.thermal_conductivity(),
-                    lower_layer.height_km,
-                )
-            };
-            
-            // Use pre-computed distance between layer centers
-            let _distance_m = self.layer_distances_m[i];
 
-            // Calculate heat flow from upper to lower layer
-            // Calculate and apply heat flow using updated Fourier thermal transfer utility with density adjustments
-            // Use split_at_mut to avoid borrowing conflicts
+        // Apply heat transfer between adjacent layers using clean indexed iteration
+        for i in 0..(cell.layers_t.len() - 1) {
             let energy_transferred = if let Some(ref fourier) = self.fourier_transfer {
-                let (upper_layers, lower_layers) = cell.layers_t.split_at_mut(i + 1);
-                fourier.apply_heat_transfer_between_layers_with_density_adjustment(
-                    &mut upper_layers[i],
-                    &mut lower_layers[0], // This is cell.layers_t[i + 1]
+                // Split at the boundary to get mutable references to adjacent layers
+                let (upper_part, lower_part) = cell.layers_t.split_at_mut(i + 1);
+                fourier.transfer_heat_between_layer_tuples(
+                    &mut upper_part[i],
+                    &mut lower_part[0], // This is layer i+1
                 )
             } else {
                 0.0 // Fallback if Fourier transfer not initialized
@@ -139,27 +88,8 @@ impl SimOp for HeatRedistributionOp {
     }
     
     fn init_sim(&mut self, sim: &mut Simulation) {
-
-        // Pre-compute time conversion factor
-        self.time_seconds_per_step = sim.years_per_step as f64 * SECONDS_PER_YEAR;
-
         // Initialize Fourier thermal transfer utility
-        self.fourier_transfer = Some(FourierThermalTransfer::new(self.time_seconds_per_step));
-
-        // Get surface area from any cell (all identical)
-        if let Some(first_cell) = sim.cells.values().next() {
-            self.surface_area_m2 = first_cell.surface_area_km2() * M2_PER_KM2;
-
-            // Pre-compute layer distances (uniform layer structure)
-            for i in 0..(first_cell.layers_t.len() - 1) {
-                let upper_height = first_cell.layers_t[i].0.height_km;
-                let lower_height = first_cell.layers_t[i + 1].0.height_km;
-                let distance_m = (upper_height + lower_height) * 0.5 * fourier_constants::KM_TO_M;
-                self.layer_distances_m.push(distance_m);
-            }
-        }
-
-        // Heat redistribution constants pre-computed
+        self.fourier_transfer = Some(FourierThermalTransfer::new(sim.years_per_step as f64));
     }
     
     fn update_sim(&mut self, sim: &mut Simulation) {
@@ -175,15 +105,24 @@ impl SimOp for HeatRedistributionOp {
         let mut _total_energy_transferred = 0.0;
         let mut _cells_processed = 0;
         
-        // Heat redistribution step starting
+        // Heat redistribution step starting - optimized sequential processing
         
-        for cell in sim.cells.values_mut() {
-            let cell_energy_transferred = self.redistribute_heat_in_cell(cell);
-            _total_energy_transferred += cell_energy_transferred;
-            _cells_processed += 1;
-            
-            // Cell processing debug output removed
+        // Convert HashMap to Vec to enable parallel processing
+        let mut cells_vec: Vec<_> = sim.cells.drain().collect();
+        
+        // Process cells in parallel (most expensive operation)
+        cells_vec.par_iter_mut().for_each(|(_, cell)| {
+            let _energy_transferred = self.redistribute_heat_in_cell(cell);
+            // Note: individual energy tracking removed for parallel efficiency
+        });
+        
+        // Reconstruct HashMap 
+        _cells_processed = cells_vec.len();
+        for (cell_index, cell) in cells_vec {
+            sim.cells.insert(cell_index, cell);
         }
+        
+        _total_energy_transferred = 0.0; // Energy tracking removed for parallel efficiency
         
         // Heat redistribution complete
     }

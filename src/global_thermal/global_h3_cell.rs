@@ -7,7 +7,7 @@ use crate::global_thermal::thermal_layer::ThermalLayer;
 use crate::energy_mass_composite::{MaterialCompositeType, MaterialPhase};
 use crate::planet::Planet;
 use h3o::CellIndex as H3Index;
-use std::rc::Rc;
+use std::sync::Arc;
 
 /// Layer configuration for global H3 cell initialization
 #[derive(Debug, Clone)]
@@ -21,13 +21,13 @@ pub struct LayerConfig {
 #[derive(Debug, Clone)]
 pub struct GlobalH3CellConfig {
     pub h3_index: H3Index,
-    pub planet: Rc<Planet>,
+    pub planet: Arc<Planet>,
     pub layer_schedule: Vec<LayerConfig>,
 }
 
 impl GlobalH3CellConfig {
     /// Create a new config with standard Earth-like schedule
-    pub fn new_earth_like(h3_index: H3Index, planet: Rc<Planet>) -> Self {
+    pub fn new_earth_like(h3_index: H3Index, planet: Arc<Planet>) -> Self {
         Self {
             h3_index,
             planet,
@@ -36,7 +36,7 @@ impl GlobalH3CellConfig {
     }
 
     /// Create a new config with thick atmosphere schedule (Venus-like)
-    pub fn new_thick_atmosphere(h3_index: H3Index, planet: Rc<Planet>) -> Self {
+    pub fn new_thick_atmosphere(h3_index: H3Index, planet: Arc<Planet>) -> Self {
         Self {
             h3_index,
             planet,
@@ -45,7 +45,7 @@ impl GlobalH3CellConfig {
     }
 
     /// Create a new config with thin atmosphere schedule (Mars-like)
-    pub fn new_thin_atmosphere(h3_index: H3Index, planet: Rc<Planet>) -> Self {
+    pub fn new_thin_atmosphere(h3_index: H3Index, planet: Arc<Planet>) -> Self {
         Self {
             h3_index,
             planet,
@@ -56,7 +56,7 @@ impl GlobalH3CellConfig {
     /// Create a new config with custom schedule
     pub fn new_custom(
         h3_index: H3Index,
-        planet: Rc<Planet>,
+        planet: Arc<Planet>,
         layer_schedule: Vec<LayerConfig>
     ) -> Self {
         Self {
@@ -74,7 +74,7 @@ pub struct GlobalH3Cell {
     pub h3_index: H3Index,
 
     /// Shared planet reference with gravity, mass, radius, etc.
-    pub planet: Rc<Planet>,
+    pub planet: Arc<Planet>,
 
     /// Stack of thermal layers with (current, next) state tuples
     pub layers_t: Vec<(ThermalLayer, ThermalLayer)>,
@@ -93,7 +93,7 @@ impl GlobalH3Cell {
     /// Create a new global H3 cell with custom layer configuration from schedule
     pub fn new_with_schedule(
         h3_index: H3Index,
-        planet: Rc<Planet>,
+        planet: Arc<Planet>,
         layer_schedule: &[LayerConfig]
     ) -> Self {
         let mut layers = Vec::new();
@@ -159,7 +159,7 @@ impl GlobalH3Cell {
 
     /// Create a new global H3 cell with standard layer configuration
     /// 4×20km atmosphere + 10×4km lithosphere + 10×8km asthenosphere
-    pub fn new(h3_index: H3Index, planet: Rc<Planet>) -> Self {
+    pub fn new(h3_index: H3Index, planet: Arc<Planet>) -> Self {
         let standard_schedule = vec![
             LayerConfig {
                 cell_type: MaterialCompositeType::Air,

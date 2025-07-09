@@ -20,6 +20,7 @@
 pub mod atmospheric_generation_op;
 pub mod heat_redistribution_op;
 pub mod pressure_adjustment_op;
+pub mod radiance_op;
 pub mod space_radiation_op;
 pub mod surface_energy_init_op;
 pub mod temperature_reporting_op;
@@ -28,6 +29,7 @@ pub mod temperature_reporting_op;
 pub use atmospheric_generation_op::AtmosphericGenerationOp;
 pub use heat_redistribution_op::HeatRedistributionOp;
 pub use pressure_adjustment_op::PressureAdjustmentOp;
+pub use radiance_op::{RadianceOp, RadianceOpParams};
 pub use space_radiation_op::{SpaceRadiationOp, SpaceRadiationOpParams, apply_space_radiation};
 pub use surface_energy_init_op::{SurfaceEnergyInitOp, SurfaceEnergyInitParams};
 pub use temperature_reporting_op::TemperatureReportingOp;

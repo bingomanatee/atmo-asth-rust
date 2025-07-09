@@ -12,6 +12,7 @@ use h3o::CellIndex;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
+use rayon::prelude::*;
 
 /// Parameters for radiance operation
 #[derive(Debug, Clone)]
@@ -41,7 +42,7 @@ impl Default for RadianceOpParams {
 }
 
 /// Radiance operation for global thermal simulation
-/// Applies upward energy to the bottom asthenosphere layers using radiance system
+/// Injects thermal energy into the deepest asthenosphere layer using radiance system
 pub struct RadianceOp {
     params: RadianceOpParams,
     radiance_system: RadianceSystem,
@@ -93,6 +94,7 @@ impl RadianceOp {
         // Update radiance system for current year
         self.radiance_system.update(current_year);
 
+        // Process cells sequentially (parallel processing has borrowing constraints with HashMap)
         for (cell_index, cell) in cells.iter_mut() {
             let energy_added = self.apply_to_cell(*cell_index, cell, time_years, current_year);
             self.total_energy_added += energy_added;
@@ -131,22 +133,22 @@ impl RadianceOp {
             // Combine base and radiance system energies
             let total_energy = base_energy + (radiance_energy * self.params.radiance_system_multiplier);
 
-            // Reset foundry layers to fixed foundry temperature + radiance energy
-            let base_foundry_temp_k = self.params.foundry_temperature_k;
+            // Add radiance energy directly to deepest foundry layer (natural heat source)
             let mut energy_distributed = 0.0;
 
-            for (i, &layer_index) in foundry_layer_indices.iter().enumerate() {
-                // Calculate enhanced foundry temperature with radiance energy
-                let depth_weight = 2.0_f64.powi(i as i32); // 1x, 2x, 4x for layers 0, 1, 2
-                let radiance_temp_boost = (total_energy * depth_weight / 7.0) / 1e18; // Convert energy to temperature boost
-                let target_foundry_temp = base_foundry_temp_k + radiance_temp_boost;
+            if !foundry_layer_indices.is_empty() {
+                // Find the deepest (last) foundry layer to add energy to
+                let deepest_layer_index = *foundry_layer_indices.last().unwrap();
+                
+                // Add the total energy directly to the deepest layer
+                cell.layers_t[deepest_layer_index].1.add_energy(total_energy);
+                energy_distributed = total_energy;
 
-                // Reset foundry layer to target temperature (acts as constant heat source)
-                cell.layers_t[layer_index].1.energy_mass.set_temperature(target_foundry_temp);
-
-                // Calculate energy equivalent for reporting
-                let layer_energy = cell.layers_t[layer_index].1.energy_mass.energy_joules;
-                energy_distributed += layer_energy;
+                if self.params.enable_reporting && self.step_count % 1000 == 0 {
+                    let layer_temp = cell.layers_t[deepest_layer_index].1.temperature_k();
+                    println!("  Cell {:?}: Added {:.2e}J to deepest layer (index {}, now {:.0}K)",
+                        cell_index, total_energy, deepest_layer_index, layer_temp);
+                }
             }
 
             // Log energy flow for layer 14 (just above foundry zone) if logging enabled
@@ -154,10 +156,7 @@ impl RadianceOp {
                 self.log_layer_14_energy_flow(cell_index, cell);
             }
 
-            if self.params.enable_reporting && self.step_count % 1000 == 0 {
-                println!("  Cell {:?}: Base={:.2e}J, Radiance={:.2e}J, Distributed to {} foundry layers",
-                    cell_index, base_energy, radiance_energy, foundry_layer_indices.len());
-            }
+            // Additional detailed reporting for debugging (moved above to specific layer reporting)
 
             energy_distributed
         } else {
@@ -165,7 +164,7 @@ impl RadianceOp {
         }
     }
 
-    /// Find the foundry layer (single deepest asthenosphere layer as heat source)
+    /// Find the foundry layer (single deepest asthenosphere layer for energy injection)
     fn find_foundry_layers(&self, cell: &GlobalH3Cell) -> Vec<usize> {
         let mut foundry_layers = Vec::new();
 
@@ -339,12 +338,12 @@ mod tests {
     use crate::planet::Planet;
     use crate::global_thermal::global_h3_cell::GlobalH3CellConfig;
     use h3o::{Resolution, CellIndex};
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     #[test]
     fn test_radiance_op_adds_energy_to_bottom_layer() {
         // Create test planet
-        let planet = Rc::new(Planet::earth(Resolution::Two));
+        let planet = Arc::new(Planet::earth(Resolution::Two));
 
         // Create test cell
         let h3_index = CellIndex::try_from(0x821c07fffffffff).unwrap();

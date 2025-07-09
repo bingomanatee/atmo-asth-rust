@@ -4,6 +4,7 @@ use crate::global_thermal::global_h3_cell::GlobalH3Cell;
 use crate::sim::simulation::Simulation;
 use h3o::CellIndex;
 use std::collections::HashMap;
+use rayon::prelude::*;
 
 /// Parameters for space radiation operation
 #[derive(Debug, Clone)]
@@ -84,6 +85,7 @@ impl SpaceRadiationOp {
         self.total_radiated_energy = 0.0;
         self.cells_processed = 0;
 
+        // Process cells sequentially (parallel processing has borrowing constraints with HashMap)
         for cell in cells.values_mut() {
             let radiated = self.apply_to_cell(cell, time_years);
             self.total_radiated_energy += radiated;

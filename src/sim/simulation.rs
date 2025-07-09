@@ -4,7 +4,7 @@ use crate::planet::Planet;
 use crate::sim_op::{SimOp, SimOpHandle};
 use h3o::{CellIndex, Resolution};
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
 
 pub struct Simulation {
@@ -55,10 +55,10 @@ impl Simulation {
 
     pub fn make_cells<F>(&mut self, config_fn: F)
     where
-        F: Fn(CellIndex, Rc<Planet>) -> GlobalH3CellConfig
+        F: Fn(CellIndex, Arc<Planet>) -> GlobalH3CellConfig
     {
         // Create shared planet reference
-        let planet = Rc::new(self.planet.clone());
+        let planet = Arc::new(self.planet.clone());
 
         for (cell_index, _base) in H3Utils::iter_cells_with_base(self.resolution) {
             // Use the provided function to create configuration for this cell
