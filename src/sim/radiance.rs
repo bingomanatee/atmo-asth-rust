@@ -6,7 +6,7 @@
 use h3o::{CellIndex, Resolution};
 use noise::{NoiseFn, Perlin};
 use rand::Rng;
-use glam::Vec3;
+
 use crate::h3o_png::{H3GraphicsGenerator, H3GraphicsConfig};
 
 use crate::h3_utils::H3Utils;
@@ -397,8 +397,6 @@ impl RadianceSystem {
 
                 match self.add_outflow(cell, rate_wm, creation_year, lifetime_years) {
                     Ok(_) => {
-                        println!("  Added downwell at cell {}: -{:.3} WM, {:.0} year lifetime, created {:.0}",
-                                 cell, rate_wm, lifetime_years, creation_year);
                         added_count += 1;
                     }
                     Err(_) => {
@@ -410,48 +408,66 @@ impl RadianceSystem {
         }
 
         if added_count < count {
-            println!("  Warning: Only added {} out of {} requested outflows due to constraints", added_count, count);
+           // println!("  Warning: Only added {} out of {} requested outflows due to constraints", added_count, count);
         }
 
         Ok(())
     }
 
     /// Generate realistic thermal features for testing and simulation
-    /// Creates a balanced mix of inflows and outflows with realistic parameters
+    /// Creates a balanced mix of inflows and outflows with proper geological timescales
     pub fn generate_realistic_thermal_features(
         &mut self,
         resolution: h3o::Resolution,
         inflow_count: usize,
         outflow_count: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        println!("Generating realistic thermal features...");
+        println!("Generating realistic thermal features with geological timescales...");
 
-        // Generate inflows (upwells) with realistic parameters
-        // Rate: 0.05-0.4 WM (typical geothermal upwelling)
-        // Lifetime: 200-800 years (geological timescales)
-        // Creation: -300 to +5 years (recent geological activity)
+        // Split inflows into two batches following real hotspot duration patterns:
+        // Majority batch: 0.5-60 Ma (typical hotspot tracks)
+        let majority_count = (inflow_count as f64 * 0.75) as usize; // 75% majority batch
+        let major_count = inflow_count - majority_count; // 25% major plumes
+
+        // Generate majority batch: standard hotspots (0.5-60 million years)
+        // Rate: 0.30-0.50 WM (typical hotspot upwelling)
+        // Lifetime: 0.5-60 Ma (standard hotspot tracks)
+        // Creation: -1 Ma to +0.1 Ma (recent geological activity)
         self.generate_random_inflows(
             resolution,
-            inflow_count,
-            (0.05, 0.4),
-            (200.0, 800.0),
-            (-300.0, 5.0),
+            majority_count,
+            (0.30, 0.50),
+            (500_000.0, 60_000_000.0),
+            (-1_000_000.0, 100_000.0),
         )?;
 
-        // Generate outflows (downwells) with realistic parameters
-        // Rate: 0.025-0.15 WM (thermal sinks, cooler zones)
-        // Lifetime: 100-500 years (shorter than upwells)
-        // Creation: -500 to 0 years (older features)
+        // Generate small batch: major whole-mantle plumes (20-200 million years)
+        // Rate: 0.40-0.70 WM (stronger major plumes)
+        // Lifetime: 20-200 Ma (major, whole-mantle plumes)
+        // Creation: -5 Ma to +0.5 Ma (longer-term geological processes)
+        self.generate_random_inflows(
+            resolution,
+            major_count,
+            (0.40, 0.70),
+            (20_000_000.0, 200_000_000.0),
+            (-5_000_000.0, 500_000.0),
+        )?;
+
+        // Generate outflows (cooling zones) with geological timescales
+        // Rate: 0.08-0.15 WM (thermal sinks, cooler zones)
+        // Lifetime: 1-50 Ma (similar to hotspots but generally shorter)
+        // Creation: -2 Ma to 0 years (older cooling features)
         self.generate_random_outflows(
             resolution,
             outflow_count,
-            (0.025, 0.15),
-            (100.0, 500.0),
-            (-500.0, 0.0),
+            (0.08, 0.15),
+            (1_000_000.0, 50_000_000.0),
+            (-2_000_000.0, 0.0),
         )?;
 
-        println!("Generated {} inflows and {} outflows with realistic parameters",
-                 inflow_count, outflow_count);
+        println!("Generated {} total inflows ({} standard hotspots, {} major plumes) and {} outflows with geological timescales",
+                 inflow_count, majority_count, major_count, outflow_count);
+        println!("Note: Doubled populations to account for exponential cooling - most features operate at low intensity for majority of lifetime");
 
         Ok(())
     }
@@ -544,7 +560,7 @@ impl RadianceSystem {
         let mut thermal_cells: Vec<Cell> = cells.iter()
             .map(|(cell_index, lat, lng)| {
                 let mut cell = Cell::new(*cell_index, *lat, *lng);
-                cell.set_energy(self.calculate_perlin_energy(*lat, *lng));
+                cell.set_energy(self.calculate_perlin_energy(*cell_index));
                 cell
             })
             .collect();
@@ -625,15 +641,13 @@ impl RadianceSystem {
     pub fn calculate_cell_energy_with_neighbors(
         &self,
         cell_index: CellIndex,
-        lat: f64,
-        lng: f64,
         current_year: f64,
         neighbors: &[CellIndex]
     ) -> f64 {
         let mut total_energy = 0.0;
 
         // Add Perlin noise background
-        total_energy += self.calculate_perlin_energy(lat, lng);
+        total_energy += self.calculate_perlin_energy(cell_index);
 
         // Add direct inflow/outflow contribution (100% strength)
         total_energy += self.calculate_inflow_energy(cell_index, current_year);
@@ -647,23 +661,14 @@ impl RadianceSystem {
     }
     
     /// Public method to access Perlin energy calculation for testing
-    pub fn calculate_perlin_energy_at(&self, lat: f64, lng: f64) -> f64 {
-        self.calculate_perlin_energy(lat, lng)
+    pub fn calculate_perlin_energy_at(&self, cell_index: CellIndex) -> f64 {
+        self.calculate_perlin_energy(cell_index)
     }
 
     /// Calculate Perlin noise energy with exponential scaling for sharp cooling and high ridges
-    fn calculate_perlin_energy(&self, lat: f64, lng: f64) -> f64 {
-        // Convert lat/lng to normalized 3D coordinates on unit sphere using Vec3
-        let lat_rad = lat.to_radians();
-        let lng_rad = lng.to_radians();
-        let pos = Vec3::new(
-            (lat_rad.cos() * lng_rad.cos()) as f32,
-            (lat_rad.cos() * lng_rad.sin()) as f32,
-            lat_rad.sin() as f32,
-        );
-
-        // Normalize to ensure unit sphere (Vec3 provides built-in normalization)
-        let normalized_pos = pos.normalize();
+    fn calculate_perlin_energy(&self, cell_index: CellIndex) -> f64 {
+        // Get normalized 3D coordinates directly from cell_index
+        let normalized_pos = crate::h3_utils::H3Utils::cell_to_unit_sphere_point(cell_index);
 
         // Sample current Perlin using normalized coordinates
         let current_perlin = Perlin::new(self.current_perlin.seed);
@@ -731,25 +736,38 @@ impl RadianceSystem {
         0.0
     }
     
-    /// Calculate lifecycle factor with easing for first and last 15%
-    fn calculate_lifecycle_factor(&self, age: f64, lifetime: f64) -> f64 {
+    /// Calculate lifecycle factor with realistic hotspot thermal evolution
+    /// Peak at ~1 million years or 15% of lifetime (whichever is shorter)
+    /// Then exponential cooling for remainder of lifetime
+    pub fn calculate_lifecycle_factor(&self, age: f64, lifetime: f64) -> f64 {
         if age < 0.0 || age > lifetime {
             return 0.0;
         }
 
-        let progress = age / lifetime;
+        // Determine peak time: 1 million years or 15% of lifetime, whichever is shorter
+        let peak_time = 1_000_000.0_f64.min(lifetime * 0.15);
 
-        if progress < 0.15 {
-            // Ease in - first 15%
-            let ease_progress = progress / 0.15;
-            ease_progress * ease_progress // Quadratic ease in
-        } else if progress > 0.85 {
-            // Ease out - last 15%
-            let ease_progress = (1.0 - progress) / 0.15;
-            ease_progress * ease_progress // Quadratic ease out
+        if age <= peak_time {
+            // Ramp up to peak: quadratic growth to peak intensity
+            let progress = age / peak_time;
+            progress * progress // Quadratic ramp-up
         } else {
-            // Full strength - middle 70%
-            1.0
+            // Exponential cooling after peak
+            let time_since_peak = age - peak_time;
+            let remaining_lifetime = lifetime - peak_time;
+
+            if remaining_lifetime <= 0.0 {
+                return 0.0;
+            }
+
+            // Exponential decay with geological cooling rate
+            // Use decay constant that gives reasonable cooling over geological time
+            let decay_constant = 3.0 / remaining_lifetime; // 95% decay over remaining lifetime
+            let decay_factor = (-decay_constant * time_since_peak).exp();
+
+            // Ensure minimum activity level for long-lived features
+            let minimum_factor = if lifetime > 50_000_000.0 { 0.1 } else { 0.05 };
+            decay_factor.max(minimum_factor)
         }
     }
 
@@ -1135,17 +1153,39 @@ impl ThermalFlowConfig {
         ))
     }
 
-    /// Create configuration for realistic geological inflows (plume upwells)
+    /// Create configuration for realistic geological inflows (standard hotspots)
+    /// Majority batch: 0.5-60 million years (typical hotspot tracks)
+    /// Doubled population since most operate at low intensity for majority of lifetime
     pub fn realistic_inflows() -> Self {
         Self::from_config("realistic_inflows").unwrap_or_else(|_| {
-            Self::new(80, (0.30, 0.50), (200.0, 800.0), (-50.0, 50.0), "inflows".to_string())
+            Self::new(70, (0.30, 0.50), (500_000.0, 60_000_000.0), (-50.0, 50.0), "standard_hotspots".to_string())
+        })
+    }
+
+    /// Create configuration for major geological inflows (whole-mantle plumes)
+    /// Small batch: 20-200 million years (major, whole-mantle plumes)
+    /// Doubled population to account for long cooling periods
+    pub fn major_inflows() -> Self {
+        Self::from_config("major_inflows").unwrap_or_else(|_| {
+            Self::new(16, (0.40, 0.70), (20_000_000.0, 200_000_000.0), (-100.0, 100.0), "major_plumes".to_string())
+        })
+    }
+
+    /// Create configuration for transient geological inflows (small-scale upwells)
+    /// Minimum duration batch: 0.5-1 million years (transient, small-scale upwells)
+    /// Doubled population since they're only active briefly
+    pub fn transient_inflows() -> Self {
+        Self::from_config("transient_inflows").unwrap_or_else(|_| {
+            Self::new(30, (0.15, 0.35), (500_000.0, 1_000_000.0), (-25.0, 25.0), "transient_upwells".to_string())
         })
     }
 
     /// Create configuration for realistic geological outflows (background mantle flow)
+    /// Similar timescales to inflows but with cooling effects
+    /// Doubled population to balance increased inflow activity
     pub fn realistic_outflows() -> Self {
         Self::from_config("realistic_outflows").unwrap_or_else(|_| {
-            Self::new(20, (-0.10, -0.08), (100.0, 500.0), (-50.0, 50.0), "outflows".to_string())
+            Self::new(24, (-0.10, -0.08), (1_000_000.0, 50_000_000.0), (-50.0, 50.0), "cooling_zones".to_string())
         })
     }
 
@@ -1193,10 +1233,12 @@ impl Default for ThermalFeatureConfig {
     fn default() -> Self {
         Self {
             flows: vec![
-                ThermalFlowConfig::realistic_inflows(),
-                ThermalFlowConfig::realistic_outflows(),
+                ThermalFlowConfig::realistic_inflows(),    // Standard hotspots (0.5-60 Ma)
+                ThermalFlowConfig::major_inflows(),        // Major plumes (20-200 Ma)
+                ThermalFlowConfig::transient_inflows(),    // Transient upwells (0.5-1 Ma)
+                ThermalFlowConfig::realistic_outflows(),   // Cooling zones (1-50 Ma)
             ],
-            replenishment_interval: 25.0,
+            replenishment_interval: 100_000.0, // Check every 100,000 years (geological timescale)
             last_replenishment_year: 0.0,
         }
     }
@@ -1204,8 +1246,24 @@ impl Default for ThermalFeatureConfig {
 
 impl ThermalFeatureConfig {
     /// Create a configuration for realistic geological thermal features
+    /// Uses proper geological timescales with two-batch hotspot system
     pub fn realistic() -> Self {
         Self::default()
+    }
+
+    /// Create a configuration for geological thermal features with proper timescales
+    /// Explicitly shows the two-batch hotspot system
+    pub fn geological() -> Self {
+        Self {
+            flows: vec![
+                ThermalFlowConfig::realistic_inflows(),    // Standard hotspots: 0.5-60 Ma
+                ThermalFlowConfig::major_inflows(),        // Major plumes: 20-200 Ma
+                ThermalFlowConfig::transient_inflows(),    // Transient upwells: 0.5-1 Ma
+                ThermalFlowConfig::realistic_outflows(),   // Cooling zones: 1-50 Ma
+            ],
+            replenishment_interval: 100_000.0, // Check every 100,000 years
+            last_replenishment_year: 0.0,
+        }
     }
 
     /// Create a configuration for high-activity thermal features

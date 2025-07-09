@@ -9,6 +9,8 @@ pub const MAX_LITHOSPHERE_LAYER_HEIGHT_KM: f64 = 20.0; // Maximum height per lit
 pub const DENSITY_TO_TEMP_CONSTANT: f64 = 1e9;
 pub const KM3_TO_M3: f64 = 1.0e9;
 pub const TO_KELVIN: f64 = 273.15;
+pub const KM_TO_M: f64 = 1000.0;
+pub const KM2_TO_M2: f64 = 1_000_000.0;
 pub const DENSITY_TO_TEMP_CONVERSION: f64 =
     MANTLE_DENSITY_KGM3 * DENSITY_TO_TEMP_CONSTANT / SPECIFIC_HEAT_CAPACITY_MANTLE_J_PER_KG_K;
 pub const GEOTHERMAL_GRADIENT_K_PER_KM: f64 = 0.25; // convection-dominated interior

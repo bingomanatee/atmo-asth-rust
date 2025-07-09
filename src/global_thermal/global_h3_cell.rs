@@ -258,13 +258,13 @@ impl GlobalH3Cell {
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
-                cell_count: 10,
-                height_km: 4.0, // 40km lithosphere
+                cell_count: 5,
+                height_km: 2.0, // 10km lithosphere (5×2km layers) - realistic oceanic/continental crust
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
-                cell_count: 10,
-                height_km: 8.0, // 80km asthenosphere
+                cell_count: 14,
+                height_km: 20.0, // 280km asthenosphere (14×20km layers) - deep mantle to 290km
             },
         ]
     }

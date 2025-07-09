@@ -137,6 +137,25 @@ impl H3Utils {
             (planet_radius_km * sin_lat) as f32,
         )
     }
+
+    /// Convert a cell index to a normalized 3D point on the unit sphere
+    /// Returns a Vec3 representing the position on a unit sphere (radius = 1.0)
+    /// Useful for Perlin noise sampling and other spherical calculations
+    pub fn cell_to_unit_sphere_point(cell_index: CellIndex) -> Vec3 {
+        let lat_lng = LatLng::from(cell_index);
+        let lat_rad = lat_lng.lat_radians();
+        let lng_rad = lat_lng.lng_radians();
+
+        // Convert spherical coordinates to Cartesian coordinates on unit sphere
+        let (cos_lat, sin_lat) = (lat_rad.cos(), lat_rad.sin());
+        let (cos_lng, sin_lng) = (lng_rad.cos(), lng_rad.sin());
+
+        Vec3::new(
+            (cos_lat * cos_lng) as f32,
+            (cos_lat * sin_lng) as f32,
+            sin_lat as f32,
+        ).normalize() // Ensure it's exactly on unit sphere
+    }
 }
 
 /// Get the total number of H3 cells at a given resolution

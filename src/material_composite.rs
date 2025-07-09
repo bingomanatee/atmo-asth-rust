@@ -327,13 +327,13 @@ pub fn resolve_phase_from_temperature_and_pressure(material_type: &MaterialCompo
     let solid_profile = get_profile_fast(material_type, &MaterialPhase::Solid);
 
     // Pressure effect on melting point: Clausius-Clapeyron relation
-    // Enhanced for deep Earth conditions - much stronger pressure effects
+    // Geologically realistic pressure effects (5-10 K/GPa from literature)
     let pressure_melt_increase = match material_type {
-        MaterialCompositeType::Silicate => pressure_gpa * 50.0,  // 50 K/GPa (enhanced)
-        MaterialCompositeType::Basaltic => pressure_gpa * 45.0,  // 45 K/GPa
-        MaterialCompositeType::Granitic => pressure_gpa * 40.0,  // 40 K/GPa
-        MaterialCompositeType::Metallic => pressure_gpa * 60.0,  // 60 K/GPa (iron core)
-        _ => pressure_gpa * 45.0,  // Default
+        MaterialCompositeType::Silicate => pressure_gpa * 8.0,   // 8 K/GPa (realistic for peridotite)
+        MaterialCompositeType::Basaltic => pressure_gpa * 7.0,   // 7 K/GPa (realistic for basalt)
+        MaterialCompositeType::Granitic => pressure_gpa * 6.0,   // 6 K/GPa (realistic for granite)
+        MaterialCompositeType::Metallic => pressure_gpa * 12.0,  // 12 K/GPa (realistic for iron)
+        _ => pressure_gpa * 7.0,  // Default
     };
 
     // Boiling point increases much more dramatically with pressure

@@ -205,6 +205,11 @@ impl ThermalLayer {
         let pressure_gpa = pressure_pa / 1e9;
         self.energy_mass.set_pressure_gpa(pressure_gpa);
     }
+
+    /// Set pressure directly in GPa (for direct pressure updates)
+    pub fn set_pressure_gpa(&mut self, pressure_gpa: f64) {
+        self.energy_mass.set_pressure_gpa(pressure_gpa);
+    }
     
     /// Check if this layer has undergone a phase transition
     pub fn check_phase_transition(&mut self, pressure_pa: f64) -> Option<(MaterialPhase, MaterialPhase)> {
@@ -250,16 +255,13 @@ impl ThermalLayer {
         let original_volume_m3 = self.surface_area_km2 * self.height_km * 1e9;
         let compressed_volume_m3 = original_volume_m3 / compression_ratio;
 
-        // Update the energy mass with new compressed volume
+        // Update pressure directly instead of recreating the energy_mass
+        let pressure_gpa = pressure_pa / 1e9;
+        self.energy_mass.set_pressure_gpa(pressure_gpa);
+
+        // Update volume for compression (if needed for density calculations)
         let compressed_volume_km3 = compressed_volume_m3 / 1e9; // Convert back to km³
-        self.energy_mass = StandardEnergyMassComposite::new_with_params(EnergyMassParams {
-            material_type: self.energy_mass.material_composite_type(),
-            initial_phase: self.energy_mass.phase(),
-            energy_joules: self.energy_mass.energy_joules,
-            volume_km3: compressed_volume_km3,
-            height_km: self.height_km,
-            pressure_gpa: pressure_pa / 1e9, // Convert Pa to GPa
-        });
+        self.energy_mass.volume_km3 = compressed_volume_km3;
 
         // Preserve temperature during compression (adiabatic compression would increase temp slightly)
         let temp = self.temperature_k();
