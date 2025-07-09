@@ -54,8 +54,8 @@ pub fn run_global_thermal_radiance_integrated() {
     // Create RadianceOp parameters with Earth baseline energy injection
     let radiance_params = RadianceOpParams {
         base_core_radiance_j_per_km2_per_year: 2.52e12, // 1.0x Earth's core radiance (baseline)
-        radiance_system_multiplier: 10.0, // 1.0x radiance system contribution (normal level)
-        foundry_temperature_k: 2100.0, // Deep foundry reference temperature (not used for resets)
+        radiance_system_multiplier: 50.0, 
+        foundry_temperature_k: 3000.0, // Deep foundry reference temperature (not used for resets)
         enable_reporting: false, // Enable detailed reporting
         enable_energy_logging: false, // Disable energy flow debugging
     };
@@ -74,7 +74,7 @@ pub fn run_global_thermal_radiance_integrated() {
             SimOpHandle::new(Box::new(SurfaceEnergyInitOp::new_with_params(SurfaceEnergyInitParams {
                 surface_temp_k: 280.0,                    // 280K surface temperature
                 geothermal_gradient_k_per_km: 25.0,       // 25K per km depth (realistic gradient)
-                core_temp_k: 1800.0,                      // 1800K core temperature (realistic mantle)
+                core_temp_k: 2400.0,                      
             }))),
 
             // RadianceOp adds energy to deepest layer (heat spiral NOT from this)
@@ -134,18 +134,13 @@ pub fn run_global_thermal_radiance_integrated() {
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
-                cell_count: 2,
+                cell_count: 3,
                 height_km: 20.0, // 45km upper asthenosphere (gradual transition from 10km)
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
-                cell_count: 2,
+                cell_count: 3,
                 height_km: 25.0, // 60km middle asthenosphere (intermediate thickness)
-            },
-            LayerConfig {
-                cell_type: MaterialCompositeType::Silicate,
-                cell_count: 2,
-                height_km: 30.0, // 75km lower asthenosphere (deepest layers)
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,

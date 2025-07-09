@@ -1,8 +1,11 @@
-use crate::energy_mass_composite::EnergyMassComposite;
+use crate::energy_mass_composite::{EnergyMassComposite, MaterialCompositeType, MaterialPhase};
 /// Science-backed Fourier heat transfer system for thermal diffusion
 /// Implements proper Fourier's law with material properties and geometric constraints
 /// Updated to work with new ThermalLayer arrays and (current, next) tuple structure
 use crate::global_thermal::thermal_layer::ThermalLayer;
+use std::collections::HashMap;
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
 
 /// Physical constants for Fourier heat transfer calculations
 pub mod fourier_constants {
@@ -15,7 +18,7 @@ pub mod fourier_constants {
 
     /// Enhanced transfer rate per year for geological equilibration
     /// Increased to support exponential thermal pressure convection
-    pub const BASE_TRANSFER_RATE_PER_YEAR: f64 = 0.035; // 3.5% per year for enhanced convection
+    pub const BASE_TRANSFER_RATE_PER_YEAR: f64 = 0.05; // 5% per year for enhanced foundry heat transfer
     
     /// Temperature threshold for exponential convection effects (K)
     pub const CONVECTION_THRESHOLD_K: f64 = 800.0;
@@ -23,6 +26,27 @@ pub mod fourier_constants {
     /// Exponential scaling factor for high-temperature convection
     pub const CONVECTION_EXPONENTIAL_FACTOR: f64 = 2.5;
 }
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct ThermalCacheKey {
+    temp_rounded: i32,  // Temperature rounded to nearest 5K
+    material_type: MaterialCompositeType,
+    material_phase: MaterialPhase,
+    density_rounded: i32,  // Density rounded to nearest 100 kg/m³
+    thickness_rounded: i32,  // Thickness rounded to nearest km
+    pressure_rounded: i32,  // Pressure rounded to nearest 0.1 GPa
+}
+
+#[derive(Debug, Clone)]
+struct CachedThermalProperties {
+    thermal_diffusivity: f64,
+    density_adjusted_conductivity: f64,
+    thermal_pressure_coefficient: f64,
+}
+
+// Global thermal properties cache
+static THERMAL_CACHE: Lazy<Mutex<HashMap<ThermalCacheKey, CachedThermalProperties>>> = 
+    Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone)]
 pub struct FourierThermalTransfer {
@@ -32,6 +56,59 @@ pub struct FourierThermalTransfer {
 impl FourierThermalTransfer {
     pub fn new(years: f64) -> Self {
         Self { years }
+    }
+
+    /// Create cache key for thermal properties
+    fn create_cache_key(
+        &self,
+        energy_mass: &dyn EnergyMassComposite,
+        thickness_km: f64,
+    ) -> ThermalCacheKey {
+        ThermalCacheKey {
+            temp_rounded: (energy_mass.kelvin() / 5.0).round() as i32,
+            material_type: energy_mass.material_composite_type(),
+            material_phase: energy_mass.phase(),
+            density_rounded: (energy_mass.density_kgm3() / 100.0).round() as i32,
+            thickness_rounded: thickness_km.round() as i32,
+            pressure_rounded: (energy_mass.pressure_gpa() * 5.0).round() as i32, // 0.2 GPa precision
+        }
+    }
+
+    /// Get or calculate cached thermal properties
+    fn get_cached_thermal_properties(
+        &self,
+        energy_mass: &dyn EnergyMassComposite,
+        thickness_km: f64,
+    ) -> CachedThermalProperties {
+        let cache_key = self.create_cache_key(energy_mass, thickness_km);
+        
+        // Try to get from cache first
+        if let Ok(cache) = THERMAL_CACHE.lock() {
+            if let Some(cached) = cache.get(&cache_key) {
+                return cached.clone();
+            }
+        }
+        
+        // Calculate and cache new values
+        let properties = CachedThermalProperties {
+            thermal_diffusivity: self.calculate_thermal_diffusivity_uncached(energy_mass),
+            density_adjusted_conductivity: self.calculate_density_adjusted_conductivity_uncached(
+                energy_mass.thermal_conductivity(),
+                energy_mass.density_kgm3(),
+                energy_mass.material_composite_profile().density_kg_m3,
+            ),
+            thermal_pressure_coefficient: self.calculate_thermal_pressure_coefficient_uncached(
+                energy_mass.kelvin(),
+                fourier_constants::CONVECTION_THRESHOLD_K,
+            ),
+        };
+        
+        // Cache the result
+        if let Ok(mut cache) = THERMAL_CACHE.lock() {
+            cache.insert(cache_key, properties.clone());
+        }
+        
+        properties
     }
 
     /// Calculate heat flow between two EnergyMass objects using their built-in thermal methods
@@ -62,11 +139,11 @@ impl FourierThermalTransfer {
         // Apply thermal pressure directly to the base energy flow
         let temp_diff_abs = (from_energy_mass.kelvin() - to_energy_mass.kelvin()).abs();
         let thermal_pressure_factor = if temp_diff_abs > 5000.0 {
-            // Very high temperature differences: allow more transfer for foundry layers
-            0.5 // Increased from 0.3 to allow foundry heat transfer
+            // Very high temperature differences: enhanced transfer for foundry layers
+            0.75 // Increased from 0.5 to allow better foundry heat transfer
         } else if temp_diff_abs > 1000.0 {
-            // High temperature differences: gradually scale from 50% to 30%
-            0.5 - ((temp_diff_abs - 1000.0) / 4000.0) * 0.2 // 50% down to 30%
+            // High temperature differences: gradually scale from 75% to 50%
+            0.75 - ((temp_diff_abs - 1000.0) / 4000.0) * 0.25 // 75% down to 50%
         } else {
             // Low temperature differences: normal scaling
             0.3 + (temp_diff_abs / 1000.0) * 0.2 // 30% to 50% based on temp diff
@@ -113,8 +190,8 @@ impl FourierThermalTransfer {
         let exp_factor = fourier_constants::CONVECTION_EXPONENTIAL_FACTOR;
         
         // Calculate thermal pressure based on absolute temperatures
-        let upper_thermal_pressure = self.calculate_thermal_pressure_coefficient(upper_temp, convection_threshold);
-        let lower_thermal_pressure = self.calculate_thermal_pressure_coefficient(lower_temp, convection_threshold);
+        let upper_thermal_pressure = self.calculate_thermal_pressure_coefficient_uncached(upper_temp, convection_threshold);
+        let lower_thermal_pressure = self.calculate_thermal_pressure_coefficient_uncached(lower_temp, convection_threshold);
         
         // Determine convection direction and strength
         let convection_factor = if lower_temp > upper_temp {
@@ -133,9 +210,9 @@ impl FourierThermalTransfer {
         convection_factor.clamp(0.1, 30.0) // Allow up to 30x transfer rate for extreme convection
     }
     
-    /// Calculate thermal pressure coefficient based on temperature
+    /// Calculate thermal pressure coefficient based on temperature (uncached)
     /// Exponential scaling makes higher temperatures much more "pressure-active"
-    fn calculate_thermal_pressure_coefficient(&self, temp_k: f64, threshold_temp_k: f64) -> f64 {
+    fn calculate_thermal_pressure_coefficient_uncached(&self, temp_k: f64, threshold_temp_k: f64) -> f64 {
         if temp_k <= threshold_temp_k {
             // Below threshold temperature - minimal thermal pressure
             let base_factor = (temp_k / threshold_temp_k).powf(0.5); // Gentle scaling below threshold
@@ -160,10 +237,10 @@ impl FourierThermalTransfer {
         self.calculate_fourier_heat_flow_from_energy_mass(upper_energy_mass, lower_energy_mass)
     }
 
-    /// Calculate density-adjusted thermal conductivity based on pressure compaction
+    /// Calculate density-adjusted thermal conductivity based on pressure compaction (uncached)
     /// Uses 200km asthenosphere depth as baseline "norm" for heat transfer
     /// Lower pressures (vacuum effect) enhance heat transfer, higher pressures reduce it
-    pub fn calculate_density_adjusted_conductivity(
+    fn calculate_density_adjusted_conductivity_uncached(
         &self,
         base_conductivity: f64,
         current_density_kg_m3: f64,
@@ -203,8 +280,8 @@ impl FourierThermalTransfer {
         base_conductivity * conductivity_multiplier
     }
 
-    /// Calculate thermal diffusivity using α = k/(ρ × c) from existing material properties
-    fn calculate_thermal_diffusivity(
+    /// Calculate thermal diffusivity using α = k/(ρ × c) from existing material properties (uncached)
+    fn calculate_thermal_diffusivity_uncached(
         &self,
         energy_mass: &dyn crate::energy_mass_composite::EnergyMassComposite,
     ) -> f64 {
@@ -244,25 +321,25 @@ impl FourierThermalTransfer {
         let from_conductivity = from_energy_mass.thermal_conductivity();
         let to_conductivity = to_energy_mass.thermal_conductivity();
 
-        let adjusted_from_conductivity = self.calculate_density_adjusted_conductivity(
+        let adjusted_from_conductivity = self.calculate_density_adjusted_conductivity_uncached(
             from_conductivity,
             from_current_density,
             from_default_density,
         );
-        let adjusted_to_conductivity = self.calculate_density_adjusted_conductivity(
+        let adjusted_to_conductivity = self.calculate_density_adjusted_conductivity_uncached(
             to_conductivity,
             to_current_density,
             to_default_density,
         );
 
         // Use simplified thermal transfer calculation with density adjustments
-        let base_transfer_rate = 0.03; // 3% per timestep (increased to improve thermal conduction from foundry)
+        let base_transfer_rate = 0.08; // 8% per timestep (increased to improve thermal conduction from foundry)
         let thermal_energy_diff = from_energy_mass.thermal_capacity() * temp_diff;
         let base_transfer = thermal_energy_diff * base_transfer_rate;
         
-        // Apply sanity cap: limit transfer to 50% of energy difference to improve thermal conduction
-        let max_transfer = from_energy_mass.energy() * 0.50; // 50% of total energy in source layer
-        let energy_diff_cap = (from_energy_mass.energy() - to_energy_mass.energy()).abs() * 0.50; // 50% of energy difference
+        // Apply sanity cap: limit transfer to prevent instability while allowing foundry heat flow
+        let max_transfer = from_energy_mass.energy() * 0.80; // 80% of total energy in source layer (increased for foundry)
+        let energy_diff_cap = (from_energy_mass.energy() - to_energy_mass.energy()).abs() * 0.80; // 80% of energy difference
         let capped_transfer = base_transfer.min(max_transfer).min(energy_diff_cap);
 
         // Apply conductivity scaling to capped transfer
@@ -298,7 +375,7 @@ impl FourierThermalTransfer {
             let avg_temp = (upper_temp_k + lower_temp_k) / 2.0;
             if thickness_km > 100.0 && avg_temp > 1600.0 {
                 // Foundry layers get enhanced heat transfer despite thickness
-                thickness_factor.clamp(0.5, 2.0) // Allow 50% transfer rate minimum for foundry
+                thickness_factor.clamp(0.8, 3.0) // Allow 80% transfer rate minimum for foundry
             } else {
                 // Normal layers get standard clamping
                 thickness_factor.clamp(0.1, 2.0)
