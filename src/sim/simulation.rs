@@ -1,4 +1,5 @@
 use crate::global_thermal::global_h3_cell::{GlobalH3Cell, GlobalH3CellConfig};
+use crate::energy_mass_composite::EnergyMassComposite;
 use crate::h3_utils::H3Utils;
 use crate::planet::Planet;
 use crate::sim_op::{SimOp, SimOpHandle};
@@ -107,6 +108,45 @@ impl Simulation {
 
             let cell = GlobalH3Cell::new_with_config(config);
             self.cells.insert(cell_index, cell);
+        }
+        
+        // Apply pressure compaction to all cells after they're created
+        self.apply_initial_pressure_compaction();
+    }
+
+    /// Apply pressure compaction to all layers in all cells
+    /// This must be called after all cells have been created to ensure proper mass calculation
+    fn apply_initial_pressure_compaction(&mut self) {
+        for cell in self.cells.values_mut() {
+            // Apply pressure compaction to this cell's layers
+            let gravity = cell.planet.gravity_m_s2;
+            let surface_area_m2 = cell.surface_area_km2() * 1e6; // km² to m²
+            let mut cumulative_mass_kg = 0.0;
+            let mut adjusted_depth = cell.layers_t[0].0.start_depth_km; // Start from first layer
+
+            // Process each layer in order (top to bottom)
+            for (current, next) in &mut cell.layers_t {
+                // Calculate pressure at center of this layer
+                let layer_center_mass = current.mass_kg();
+                let pressure_pa = (cumulative_mass_kg + layer_center_mass * 0.5) * gravity / surface_area_m2;
+
+                // Apply pressure compaction if not atmospheric
+                if !current.energy_mass.is_atmosphere() {
+                    let original_height = current.height_km;
+                    current.apply_pressure_compaction(pressure_pa);
+                    next.apply_pressure_compaction(pressure_pa);
+                    
+                    // Update depth after compression
+                    current.start_depth_km = adjusted_depth;
+                    next.start_depth_km = adjusted_depth;
+                }
+
+                // Update depth for next layer
+                adjusted_depth += current.height_km;
+                
+                // Add this layer's mass to cumulative total
+                cumulative_mass_kg += current.mass_kg();
+            }
         }
     }
 

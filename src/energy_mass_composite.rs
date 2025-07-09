@@ -66,10 +66,13 @@ pub trait EnergyMassComposite: std::any::Any {
         self.set_kelvin(temperature_k);
     }
 
-    /// Get the mass in kg (derived from volume and density)
+    /// Get the mass in kg
     fn mass_kg(&self) -> f64;
 
-    /// Get the density in kg/m³
+    /// Set the mass in kg (updates density accordingly)
+    fn set_mass_kg(&mut self, mass_kg: f64);
+
+    /// Get the density in kg/m³ (calculated as mass/volume)
     fn density_kgm3(&self) -> f64;
 
     /// Get the specific heat in J/(kg·K)
@@ -97,6 +100,12 @@ pub trait EnergyMassComposite: std::any::Any {
 
     /// Get the current material phase (pressure-aware)
     fn phase(&self) -> MaterialPhase;
+
+    /// Check if this is an atmospheric layer (manually settable)
+    fn is_atmosphere(&self) -> bool;
+
+    /// Set whether this is an atmospheric layer
+    fn set_is_atmosphere(&mut self, is_atmosphere: bool);
 
     // material_composite() method removed - MaterialComposite struct no longer exists
 
@@ -332,6 +341,8 @@ pub struct StandardEnergyMassComposite {
     pub state_transition_bank: f64, // Energy bank for phase transitions
     pub transition_mode: TransitionMode, // Transition mode for hysteresis management
     pub pressure_gpa: f64,    // Pressure in Gigapascals (affects phase transitions)
+    pub mass_kg: f64,         // Mass in kg (settable property, density = mass/volume)
+    pub is_atmosphere: bool,  // Whether this is an atmospheric layer (manually settable)
 }
 
 impl StandardEnergyMassComposite {
@@ -394,17 +405,26 @@ impl StandardEnergyMassComposite {
         let profile = get_profile_fast(&material_type, &MaterialPhase::Gas);
         let energy_joules = minimal_mass_kg * profile.specific_heat_capacity_j_per_kg_k * temp_k;
 
-        // Create with the calculated energy (which corresponds to our minimal mass)
-        let params = EnergyMassParams {
-            material_type,
-            initial_phase: MaterialPhase::Gas, // Atmospheric layers are always gas
+        // Generate random R0 value within material's range
+        use rand::Rng;
+        let mut rng = rand::rng();
+        let r0_range = profile.thermal_transmission_r0_max - profile.thermal_transmission_r0_min;
+        let random_r0 = profile.thermal_transmission_r0_min + rng.random::<f64>() * r0_range;
+
+        // Create directly with minimal mass (not from material density)
+        Self {
             energy_joules,
             volume_km3,
             height_km,
+            material_type,
+            phase: MaterialPhase::Gas, // Atmospheric layers are always gas
+            thermal_transmission_r0: random_r0,
+            state_transition_bank: 0.0,
+            transition_mode: TransitionMode::Static,
             pressure_gpa: 0.0, // Atmospheric pressure
-        };
-
-        Self::new_with_params(params)
+            mass_kg: minimal_mass_kg,
+            is_atmosphere: true,
+        }
     }
 
     /// Add mass to an atmospheric layer while maintaining constant volume (increases density)
@@ -414,19 +434,16 @@ impl StandardEnergyMassComposite {
             return;
         }
 
-        // Calculate current mass
-        let current_mass_kg = self.mass_kg();
-        let _new_total_mass_kg = current_mass_kg + additional_mass_kg;
-
         // Calculate energy for the additional mass at the given temperature
         let profile = get_profile_fast(&self.material_type, &self.phase);
         let additional_energy_joules = additional_mass_kg * profile.specific_heat_capacity_j_per_kg_k * temp_k;
 
-        // Add the energy (this effectively adds the mass while maintaining temperature)
+        // Add the energy and mass directly
         self.energy_joules += additional_energy_joules;
+        self.mass_kg += additional_mass_kg;
 
         // Volume stays constant for atmospheric layers - density increases automatically
-        // The mass_kg() method will now return the higher mass due to increased energy
+        // The density_kgm3() method will now return the higher density due to increased mass
     }
 
     /// Calculate the actual current density based on energy content (for atmospheric layers)
@@ -464,6 +481,9 @@ impl StandardEnergyMassComposite {
         let r0_range = profile.thermal_transmission_r0_max - profile.thermal_transmission_r0_min;
         let random_r0 = profile.thermal_transmission_r0_min + rng.random::<f64>() * r0_range;
 
+        // Calculate initial mass from material density and volume
+        let initial_mass_kg = params.volume_km3 * KM3_TO_M3 * profile.density_kg_m3;
+
         Self {
             energy_joules: params.energy_joules,
             volume_km3: params.volume_km3,
@@ -474,6 +494,8 @@ impl StandardEnergyMassComposite {
             state_transition_bank: 0.0,
             transition_mode: TransitionMode::Static,
             pressure_gpa: params.pressure_gpa,
+            mass_kg: initial_mass_kg,
+            is_atmosphere: params.material_type == MaterialCompositeType::Air,
         }
     }
 
@@ -492,6 +514,9 @@ impl StandardEnergyMassComposite {
         let r0_range = profile.thermal_transmission_r0_max - profile.thermal_transmission_r0_min;
         let random_r0 = profile.thermal_transmission_r0_min + rng.random::<f64>() * r0_range;
 
+        // Calculate initial mass from material density and volume
+        let initial_mass_kg = volume_km3 * KM3_TO_M3 * profile.density_kg_m3;
+
         Self {
             energy_joules,
             volume_km3,
@@ -502,6 +527,8 @@ impl StandardEnergyMassComposite {
             state_transition_bank: 0.0,
             transition_mode: TransitionMode::Static,
             pressure_gpa: 0.0, // Default surface pressure
+            mass_kg: initial_mass_kg,
+            is_atmosphere: *material_type == MaterialCompositeType::Air,
         }
     }
 
@@ -774,14 +801,23 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
         self.height_km
     }
 
-    /// Get the mass in kg (derived from volume and density)
+    /// Get the mass in kg
     fn mass_kg(&self) -> f64 {
-        self.volume_km3 * KM3_TO_M3 * self.density_kgm3()
+        self.mass_kg
     }
 
-    /// Get the density in kg/m³
+    /// Set the mass in kg (updates density accordingly)
+    fn set_mass_kg(&mut self, mass_kg: f64) {
+        self.mass_kg = mass_kg;
+    }
+
+    /// Get the density in kg/m³ (calculated as mass/volume)
     fn density_kgm3(&self) -> f64 {
-        self.material_composite_profile().density_kg_m3
+        if self.volume_km3 <= 0.0 {
+            return 0.0;
+        }
+        let volume_m3 = self.volume_km3 * KM3_TO_M3;
+        self.mass_kg / volume_m3
     }
 
     /// Get the specific heat in J/(kg·K)
@@ -1060,6 +1096,14 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
         // Always return pressure-aware phase based on current temperature and pressure
         let temp_k = self.kelvin();
         resolve_phase_from_temperature_and_pressure(&self.material_type, temp_k, self.pressure_gpa)
+    }
+
+    fn is_atmosphere(&self) -> bool {
+        self.is_atmosphere
+    }
+
+    fn set_is_atmosphere(&mut self, is_atmosphere: bool) {
+        self.is_atmosphere = is_atmosphere;
     }
 
     fn add_energy(&mut self, energy_joules: f64) {

@@ -586,6 +586,11 @@ impl EnergyMassComposite for ThermalLayerNodeWide {
         self.energy_mass.mass_kg()
     }
 
+    /// Set the mass in kg (updates density accordingly)
+    fn set_mass_kg(&mut self, mass_kg: f64) {
+        self.energy_mass.set_mass_kg(mass_kg);
+    }
+
     /// Get the density in kg/m³
     fn density_kgm3(&self) -> f64 {
         self.energy_mass.density_kgm3()
@@ -730,6 +735,14 @@ impl EnergyMassComposite for ThermalLayerNodeWide {
     /// Get the current material phase (pressure-aware)
     fn phase(&self) -> MaterialPhase {
         self.energy_mass.phase()
+    }
+
+    fn is_atmosphere(&self) -> bool {
+        self.energy_mass.is_atmosphere()
+    }
+
+    fn set_is_atmosphere(&mut self, is_atmosphere: bool) {
+        self.energy_mass.set_is_atmosphere(is_atmosphere);
     }
 }
 

@@ -145,16 +145,11 @@ impl GlobalH3Cell {
             }
         }
 
-        let mut cell = Self {
+        Self {
             h3_index,
             planet,
             layers_t: layers,
-        };
-
-        // Apply initial pressure compaction to all solid layers
-        cell.apply_pressure_compaction();
-
-        cell
+        }
     }
 
     /// Create a new global H3 cell with standard layer configuration
@@ -414,26 +409,6 @@ impl GlobalH3Cell {
         }
     }
 
-    /// Apply pressure compaction to all layers based on overlying mass (modifies current state)
-    pub fn apply_pressure_compaction(&mut self) {
-        let gravity = self.planet.gravity_m_s2; // Use planet-specific gravity
-        let surface_area_m2 = self.surface_area_km2() * 1e6; // km² to m²
-
-        let mut cumulative_mass_kg = 0.0;
-
-        for (current, next) in &mut self.layers_t {
-            // Calculate pressure at center of this layer
-            let layer_center_mass = current.mass_kg() / 2.0;
-            let pressure_pa = (cumulative_mass_kg + layer_center_mass) * gravity / surface_area_m2;
-
-            // Apply pressure compaction to both current and next states
-            current.apply_pressure_compaction(pressure_pa);
-            next.apply_pressure_compaction(pressure_pa);
-
-            // Add this layer's mass to cumulative total
-            cumulative_mass_kg += current.mass_kg();
-        }
-    }
 
     /// Get density profile for all current layers
     pub fn get_density_profile(&self) -> Vec<f64> {

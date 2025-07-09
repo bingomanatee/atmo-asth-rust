@@ -32,8 +32,11 @@ pub struct ThermalLayer {
     pub is_atmospheric: bool,
 }
 
-impl ThermalLayer {
+const BULK_MODULUS_PA: f64 = 1e11; // 100 GPa for silicate materials
+const REFERENCE_PRESSURE_PA: f64 = 1e5; // 1 atm reference pressure
+const KGM2_TO_M2: f64 = 1e6; // km² to m²
 
+impl ThermalLayer {
     /// Create a new atmospheric layer with near-zero density that can accumulate mass through outgassing
     pub fn new_atmospheric(start_depth_km: f64, height_km: f64, surface_area_km2: f64, layer_index: usize) -> Self {
         // Calculate full layer volume (atmospheric layers maintain constant volume)
@@ -114,7 +117,7 @@ impl ThermalLayer {
             energy_joules: 0.0,
             volume_km3: surface_area_km2 * height_km, 
             height_km,
-            pressure_gpa: 0.0,
+            pressure_gpa: 1.0,
         });
 
         Self {
@@ -145,7 +148,7 @@ impl ThermalLayer {
     
     /// Check if this layer is in the atmosphere (above surface)
     pub fn is_atmospheric(&self) -> bool {
-        self.energy_mass.material_composite_type() == MaterialCompositeType::Air
+        self.energy_mass.is_atmosphere()
     }
     
     /// Check if this layer crosses the surface boundary
@@ -182,7 +185,7 @@ impl ThermalLayer {
         }
         
         // Pressure = (mass * gravity) / surface_area
-        let surface_area_m2 = self.surface_area_km2 * 1e6; // km² to m²
+        let surface_area_m2 = self.surface_area_km2 * KGM2_TO_M2; // km² to m²
         (total_mass_kg * GRAVITY) / surface_area_m2
     }
     
@@ -267,38 +270,45 @@ impl ThermalLayer {
     /// Compact this layer based on overlying pressure (for solid layers)
     pub fn apply_pressure_compaction(&mut self, pressure_pa: f64) {
         // Only compact solid materials (not atmospheric)
-        if self.is_atmospheric() {
+        if self.energy_mass.is_atmosphere() {
             return;
         }
 
         // Pressure compaction formula: density increases with pressure
         // Using bulk modulus approximation: ΔV/V = -ΔP/K
-        // where K is bulk modulus (~100 GPa for silicates)
+        // where K is bulk modulus that varies with base density
 
-        const BULK_MODULUS_PA: f64 = 1e11; // 100 GPa for silicate materials
-        const REFERENCE_PRESSURE_PA: f64 = 1e5; // 1 atm reference pressure
+        // Calculate density-dependent bulk modulus
+        let current_density_kg_m3 = self.current_density_kg_m3();
+        let material_bulk_modulus_pa = self.calculate_density_dependent_bulk_modulus(current_density_kg_m3);
 
-        // Calculate compression ratio
+        // Calculate compression ratio using material-specific bulk modulus
         let pressure_increase = pressure_pa - REFERENCE_PRESSURE_PA;
-        let compression_ratio = 1.0 + (pressure_increase / BULK_MODULUS_PA).max(0.0);
+        let compression_ratio = 1.0 + (pressure_increase / material_bulk_modulus_pa).max(0.0);
 
-        // Increase density (decrease volume) due to compression
-        // Mass stays the same, but volume decreases
-        let _original_mass = self.mass_kg();
-        let original_volume_m3 = self.surface_area_km2 * self.height_km * 1e9;
-        let compressed_volume_m3 = original_volume_m3 / compression_ratio;
-
-        // Update pressure directly instead of recreating the energy_mass
+        // Update layer height - inversely related to compression
+        // Higher compression = shorter layer height
+        let original_height_km = self.height_km;
+        let compressed_height_km = original_height_km / compression_ratio;
+        
+        // Calculate new volume with compressed height
+        let new_volume_km3 = self.surface_area_km2 * compressed_height_km;
+        
+        // Mass stays the same, but volume decreases (increasing density)
+        let current_mass_kg = self.energy_mass.mass_kg();
+        
+        // Update the energy_mass with new volume and pressure
         let pressure_gpa = pressure_pa / 1e9;
         self.energy_mass.set_pressure_gpa(pressure_gpa);
-
-        // Update volume for compression (if needed for density calculations)
-        // For now, skip volume compression for atmospheric layers as they maintain constant volume
-        // TODO: Add proper volume compression interface to EnergyMassComposite trait if needed
-
-        // Preserve temperature during compression (adiabatic compression would increase temp slightly)
-        let temp = self.temperature_k();
-        self.energy_mass.set_temperature(temp * compression_ratio.powf(0.1)); // Slight temperature increase
+        
+        // Update height and recalculate volume in energy_mass
+        self.height_km = compressed_height_km;
+        
+        // Update the volume in the energy_mass (this will affect density calculation)
+        self.energy_mass.volume_km3 = new_volume_km3;
+        
+        // Preserve mass to maintain proper density = mass/volume relationship
+        self.energy_mass.set_mass_kg(current_mass_kg);
     }
 
     /// Get current density of this layer
@@ -313,6 +323,26 @@ impl ThermalLayer {
         let standard_density = self.energy_mass.material_composite_profile().density_kg_m3;
         let current_density = self.current_density_kg_m3();
         current_density > standard_density * 1.1 // 10% increase indicates compaction
+    }
+
+    /// Calculate density-dependent bulk modulus
+    /// Lower density materials compress more easily (lower bulk modulus)
+    /// Higher density materials resist compression (higher bulk modulus)
+    fn calculate_density_dependent_bulk_modulus(&self, density_kg_m3: f64) -> f64 {
+        // Reference values for typical geological materials
+        let reference_density = 2500.0; // kg/m³ (typical silicate)
+        let reference_bulk_modulus = 1e11; // Pa (100 GPa for typical silicate)
+        
+        // Empirical relationship: bulk modulus scales with density
+        // K = K₀ * (ρ/ρ₀)^n where n ≈ 1.5-2.0 for geological materials
+        let density_ratio = density_kg_m3 / reference_density;
+        let bulk_modulus_exponent = 1.8; // Empirical value for silicates
+        
+        // Calculate density-dependent bulk modulus
+        let material_bulk_modulus = reference_bulk_modulus * density_ratio.powf(bulk_modulus_exponent);
+        
+        // Ensure minimum bulk modulus (prevent division by zero and unrealistic compression)
+        material_bulk_modulus.max(1e9) // Minimum 1 GPa
     }
 }
 

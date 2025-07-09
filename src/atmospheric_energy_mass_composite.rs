@@ -92,6 +92,14 @@ impl EnergyMassComposite for AtmosphericEnergyMass {
         volume_m3 * self.density_kgm3()
     }
 
+    fn set_mass_kg(&mut self, mass_kg: f64) {
+        // For atmospheric layers, update the custom density based on the new mass
+        if self.volume_km3 > 0.0 {
+            let volume_m3 = self.volume_km3 * 1e9;
+            self.custom_density_kg_m3 = mass_kg / volume_m3;
+        }
+    }
+
     fn density_kgm3(&self) -> f64 {
         self.custom_density_kg_m3
     }
@@ -318,6 +326,14 @@ impl EnergyMassComposite for AtmosphericEnergyMass {
     /// Get the current material phase (always gas for atmosphere)
     fn phase(&self) -> MaterialPhase {
         MaterialPhase::Gas // Atmosphere is always gaseous
+    }
+
+    fn is_atmosphere(&self) -> bool {
+        true // AtmosphericEnergyMass is always atmospheric
+    }
+
+    fn set_is_atmosphere(&mut self, _is_atmosphere: bool) {
+        // AtmosphericEnergyMass is always atmospheric - cannot be changed
     }
 }
 

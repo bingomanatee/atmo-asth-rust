@@ -10,7 +10,7 @@
 
 use atmo_asth_rust::energy_mass_composite::MaterialCompositeType;
 use atmo_asth_rust::sim_op::{
-    AtmosphericGenerationOp, PressureAdjustmentOp, RadianceOp, TemperatureReportingOp,
+    AtmosphericGenerationOp, RadianceOp, TemperatureReportingOp,
     HeatRedistributionOp, SurfaceEnergyInitOp, SurfaceEnergyInitParams,
 };
 use atmo_asth_rust::sim_op::atmospheric_generation_op::CrystallizationParams;
@@ -82,10 +82,6 @@ pub fn run_global_thermal_radiance_integrated() {
 
             // Heat redistribution spreads energy through layers (energy conservation fixed)
             SimOpHandle::new(Box::new(HeatRedistributionOp::new())),
-
-            // Pressure adjustment for realistic thermal dynamics (init only - not continuous)
-            // Note: Continuous pressure adjustment blocks heat transfer too aggressively
-            SimOpHandle::new(Box::new(PressureAdjustmentOp::new())), // Only applies during init
             
             // Atmospheric generation from lithosphere melting
             SimOpHandle::new(Box::new(AtmosphericGenerationOp::with_crystallization_params(
