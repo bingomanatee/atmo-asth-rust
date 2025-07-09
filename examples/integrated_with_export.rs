@@ -1,4 +1,4 @@
-/// Global thermal simulation with RadianceOp integration
+/// Global thermal simulation with RadianceOp integration and heat map export
 /// Replaces foundry temperature with realistic radiance system to see effects on
 /// lithosphere production/melting and atmospheric generation
 /// 
@@ -7,8 +7,9 @@
 /// - Doubled populations for adequate thermal activity
 /// - Direct cell_index to 3D coordinate conversion
 /// - Lithosphere melting and atmospheric generation
+/// - Heat map visualization export
 
-use atmo_asth_rust::energy_mass_composite::MaterialCompositeType;
+use atmo_asth_rust::energy_mass_composite::{MaterialCompositeType, EnergyMassComposite};
 use atmo_asth_rust::sim_op::{
     AtmosphericGenerationOp, RadianceOp, TemperatureReportingOp,
     HeatRedistributionOp, SurfaceEnergyInitOp, SurfaceEnergyInitParams,
@@ -17,15 +18,122 @@ use atmo_asth_rust::sim_op::atmospheric_generation_op::CrystallizationParams;
 use atmo_asth_rust::sim_op::radiance_op::RadianceOpParams;
 use atmo_asth_rust::global_thermal::global_h3_cell::{GlobalH3CellConfig, LayerConfig};
 use atmo_asth_rust::planet::Planet;
-use atmo_asth_rust::sim_op::SimOpHandle;
+use atmo_asth_rust::sim_op::{SimOp, SimOpHandle};
 use atmo_asth_rust::sim::simulation::{SimProps, Simulation};
 use atmo_asth_rust::sim::radiance::RadianceSystem;
-use h3o::Resolution;
+use h3o::{Resolution, CellIndex};
 use std::rc::Rc;
+use std::fs::File;
+use std::io::Write;
 
-pub fn run_global_thermal_radiance_integrated() {
-    println!("🌋 Global Thermal Simulation: Foundry Baseline + RadianceOp Enhancement");
-    println!("{}", "=".repeat(70));
+/// Custom visualization export operation for heat map generation
+/// Exports temperature data as a heat map image
+struct HeatMapExportOp {
+    export_interval: i32,
+    last_export_step: i32,
+}
+
+impl HeatMapExportOp {
+    pub fn new(export_interval: i32) -> Self {
+        Self {
+            export_interval,
+            last_export_step: -1,
+        }
+    }
+
+    /// Calculate mass-weighted average temperature for non-foundry, non-atmospheric layers
+    fn calculate_weighted_temperature(&self, cell: &atmo_asth_rust::global_thermal::global_h3_cell::GlobalH3Cell) -> f64 {
+        let mut total_weighted_temp = 0.0;
+        let mut total_mass = 0.0;
+
+        for (layer, _) in &cell.layers_t {
+            // Skip atmospheric layers (Air material)
+            if layer.energy_mass.material_composite_type() == MaterialCompositeType::Air {
+                continue;
+            }
+
+            // Skip foundry layers (deepest layers with very high temperatures)
+            // Consider foundry layers as those deeper than 500km
+            if layer.start_depth_km > 500.0 {
+                continue;
+            }
+
+            let mass = layer.mass_kg();
+            let temp = layer.temperature_k();
+            
+            total_weighted_temp += temp * mass;
+            total_mass += mass;
+        }
+
+        if total_mass > 0.0 {
+            total_weighted_temp / total_mass
+        } else {
+            0.0
+        }
+    }
+
+    /// Convert temperature to RGB color (0K=black, 1000K=red, 1500K=yellow, 2000K=white)
+    fn temperature_to_rgb(&self, temp_k: f64) -> (u8, u8, u8) {
+        let clamped_temp = temp_k.max(0.0).min(2000.0);
+        
+        if clamped_temp < 1000.0 {
+            // 0K to 1000K: black to red
+            let ratio = clamped_temp / 1000.0;
+            ((255.0 * ratio) as u8, 0, 0)
+        } else if clamped_temp < 1500.0 {
+            // 1000K to 1500K: red to yellow
+            let ratio = (clamped_temp - 1000.0) / 500.0;
+            (255, (255.0 * ratio) as u8, 0)
+        } else {
+            // 1500K to 2000K: yellow to white
+            let ratio = (clamped_temp - 1500.0) / 500.0;
+            (255, 255, (255.0 * ratio) as u8)
+        }
+    }
+
+    /// Export heat map data as CSV
+    fn export_heat_map(&self, sim: &Simulation, step: i32) {
+        let filename = format!("heat_map_step_{:04}.csv", step);
+        
+        if let Ok(mut file) = File::create(&filename) {
+            writeln!(file, "cell_index,temperature_k,red,green,blue").unwrap();
+            
+            for (cell_index, cell) in &sim.cells {
+                let temp = self.calculate_weighted_temperature(cell);
+                let (r, g, b) = self.temperature_to_rgb(temp);
+                
+                writeln!(file, "{:?},{:.2},{},{},{}", cell_index, temp, r, g, b).unwrap();
+            }
+            
+            println!("📊 Exported heat map: {}", filename);
+        }
+    }
+}
+
+impl SimOp for HeatMapExportOp {
+    fn name(&self) -> &str {
+        "HeatMapExport"
+    }
+
+    fn init_sim(&mut self, sim: &mut Simulation) {
+        // Export initial heat map
+        self.export_heat_map(sim, 0);
+        self.last_export_step = 0;
+    }
+
+    fn update_sim(&mut self, sim: &mut Simulation) {
+        let current_step = sim.current_step();
+        
+        if current_step - self.last_export_step >= self.export_interval {
+            self.export_heat_map(sim, current_step);
+            self.last_export_step = current_step;
+        }
+    }
+}
+
+pub fn run_global_thermal_radiance_integrated_with_export() {
+    println!("🌋 Global Thermal Simulation: Foundry Baseline + RadianceOp Enhancement + Heat Map Export");
+    println!("{}", "=".repeat(80));
 
 
     // Create Earth planet with L2 resolution
@@ -53,7 +161,7 @@ pub fn run_global_thermal_radiance_integrated() {
 
     // Create RadianceOp parameters with Earth baseline energy injection
     let radiance_params = RadianceOpParams {
-        base_core_radiance_j_per_kok I m2_per_year: 2.52e12, // 1.0x Earth's core radiance (baseline)
+        base_core_radiance_j_per_km2_per_year: 2.52e12, // 1.0x Earth's core radiance (baseline)
         radiance_system_multiplier: 1.0, 
         foundry_temperature_k: 3000.0, // Deep foundry reference temperature (not used for resets)
         enable_reporting: false, // Enable detailed reporting
@@ -97,6 +205,9 @@ pub fn run_global_thermal_radiance_integrated() {
             
             // Temperature reporting to track thermal evolution
             SimOpHandle::new(Box::new(TemperatureReportingOp::new())),
+            
+            // Heat map export for visualization (export every 50 steps)
+            SimOpHandle::new(Box::new(HeatMapExportOp::new(50))),
         ],
     };
 
@@ -162,6 +273,8 @@ pub fn run_global_thermal_radiance_integrated() {
     println!("📈 SurfaceEnergyInitOp establishes baseline + RadianceOp adds energy");
     println!("🔥 Testing thermal stability with corrected heat transfer rates");
     println!("🌋 Tracking thermal evolution with proper energy conservation");
+    println!("📊 Heat map export: CSV files with temperature visualization data");
+    println!("🌡️  Temperature color mapping: 0K=black, 1000K=red, 1500K=yellow, 2000K=white");
     println!("🔧 Thickness-based heat transfer with natural thermal equilibrium:");
     println!("   - Gradual thickness scaling: 10km→15km→20km→25km layers for smooth energy flow");
     println!("   - Moderate energy injection from RadianceOp");
@@ -187,5 +300,5 @@ pub fn run_global_thermal_radiance_integrated() {
 }
 
 fn main() {
-    run_global_thermal_radiance_integrated();
+    run_global_thermal_radiance_integrated_with_export();
 }

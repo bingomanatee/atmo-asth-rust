@@ -98,16 +98,19 @@ fn run_atmospheric_generation_test(params: &CalibrationParams) -> CalibrationRes
                 cell_type: MaterialCompositeType::Air,
                 cell_count: 2,
                 height_km: 20.0, // 40km total atmosphere
+                is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
                 cell_count: 4,
                 height_km: 10.0, // 40km total lithosphere
+                is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
                 cell_count: 4,
                 height_km: 10.0, // 40km total asthenosphere
+                is_foundry: false,
             },
         ];
 

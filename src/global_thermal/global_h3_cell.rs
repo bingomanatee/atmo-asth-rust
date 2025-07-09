@@ -15,6 +15,7 @@ pub struct LayerConfig {
     pub cell_type: MaterialCompositeType,
     pub cell_count: usize,
     pub height_km: f64,
+    pub is_foundry: bool,
 }
 
 /// Parameters for creating a new GlobalH3Cell with custom schedule
@@ -111,13 +112,36 @@ impl GlobalH3Cell {
         let mut layer_index = 0;
         let mut found_surface_layer = false;
 
-        // Create layers according to schedule with (current, next) tuples
+        // First pass: collect all non-atmospheric layer indices to identify foundry layers
+        let mut all_layers_info = Vec::new();
+        let mut temp_current_depth = current_depth;
+        let mut temp_layer_index = layer_index;
+        
+        for config in layer_schedule {
+            for _ in 0..config.cell_count {
+                let is_surface_layer = !found_surface_layer && config.cell_type != MaterialCompositeType::Air;
+                let is_non_atmospheric = config.cell_type != MaterialCompositeType::Air;
+                all_layers_info.push((temp_layer_index, is_surface_layer, is_non_atmospheric, config.clone()));
+                temp_current_depth += config.height_km;
+                temp_layer_index += 1;
+            }
+        }
+
+        // Identify foundry layers: layers explicitly marked as foundry in config
+        let foundry_layer_indices: std::collections::HashSet<usize> = all_layers_info.iter()
+            .filter(|(_, _, _, config)| config.is_foundry)
+            .map(|(index, _, _, _)| *index)
+            .collect();
+
+        // Second pass: create layers according to schedule with (current, next) tuples
         for config in layer_schedule {
             for _ in 0..config.cell_count {
                 let is_surface_layer = !found_surface_layer && config.cell_type != MaterialCompositeType::Air;
                 if is_surface_layer {
                     found_surface_layer = true;
                 }
+                let is_foundry = foundry_layer_indices.contains(&layer_index);
+                
                 let layer = if config.cell_type == MaterialCompositeType::Air {
                     // Atmospheric layers start with zero density/volume - will be filled by outgassing
                     ThermalLayer::new_atmospheric(
@@ -135,6 +159,7 @@ impl GlobalH3Cell {
                         config.cell_type,
                         layer_index,
                         is_surface_layer,
+                        is_foundry,
                     )
                 };
 
@@ -160,16 +185,19 @@ impl GlobalH3Cell {
                 cell_type: MaterialCompositeType::Air,
                 cell_count: 5,
                 height_km: 20.0, // 100 total atmosphere (4×20km layers)
+                is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
                 cell_count: 6,
                 height_km: 25.0, // 150 total lithosphere
+                is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
                 cell_count: 6,
                 height_km: 40.0, // 240 total lower lithosphere/asthenosphere
+                is_foundry: false,
             },
         ];
 
@@ -250,16 +278,19 @@ impl GlobalH3Cell {
                 cell_type: MaterialCompositeType::Air,
                 cell_count: 4,
                 height_km: 20.0, // 80km atmosphere (4×20km layers)
+                is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
                 cell_count: 5,
                 height_km: 2.0, // 10km lithosphere (5×2km layers) - realistic oceanic/continental crust
+                is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
                 cell_count: 14,
                 height_km: 20.0, // 280km asthenosphere (14×20km layers) - deep mantle to 290km
+                is_foundry: false,
             },
         ]
     }
@@ -271,16 +302,19 @@ impl GlobalH3Cell {
                 cell_type: MaterialCompositeType::Air,
                 cell_count: 4,
                 height_km: 20.0, // 80km thick atmosphere (4×20km layers)
+                is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
                 cell_count: 8,
                 height_km: 5.0, // 40km lithosphere
+                is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
                 cell_count: 8,
                 height_km: 10.0, // 80km asthenosphere
+                is_foundry: false,
             },
         ]
     }
@@ -292,16 +326,19 @@ impl GlobalH3Cell {
                 cell_type: MaterialCompositeType::Air,
                 cell_count: 4,
                 height_km: 10.0, // 40km thin atmosphere (4×10km layers)
+                is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
                 cell_count: 10,
                 height_km: 4.0, // 40km lithosphere
+                is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
                 cell_count: 10,
                 height_km: 8.0, // 80km asthenosphere
+                is_foundry: false,
             },
         ]
     }

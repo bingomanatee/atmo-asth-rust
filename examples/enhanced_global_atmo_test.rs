@@ -131,16 +131,19 @@ pub fn run_enhanced_global_atmo_test() {
                 cell_type: MaterialCompositeType::Air,
                 cell_count: 4,
                 height_km: 20.0, // 80km total atmosphere
+                is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
                 cell_count: 10,
                 height_km: 4.0, // 40km total lithosphere
+                is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
                 cell_count: 10,
                 height_km: 8.0, // 80km total asthenosphere
+                is_foundry: false,
             },
         ];
         

@@ -381,23 +381,15 @@ impl RadianceOp {
         }
     }
 
-    /// Find the foundry layer (single deepest asthenosphere layer for energy injection)
+    /// Find the foundry layer indices using the is_foundry property
     fn find_foundry_layers(&self, cell: &GlobalH3Cell) -> Vec<usize> {
         let mut foundry_layers = Vec::new();
 
-        // Find all non-atmospheric layers (depth >= 0)
-        let mut non_atmospheric_indices = Vec::new();
+        // Find all layers marked as foundry layers
         for (index, (current_layer, _)) in cell.layers_t.iter().enumerate() {
-            if current_layer.start_depth_km >= 0.0 {
-                non_atmospheric_indices.push(index);
+            if current_layer.is_foundry {
+                foundry_layers.push(index);
             }
-        }
-
-        // Take the bottom 1 layer as foundry layer (single deepest layer)
-        let foundry_count = 1.min(non_atmospheric_indices.len());
-        if foundry_count > 0 {
-            let start_index = non_atmospheric_indices.len() - foundry_count;
-            foundry_layers.extend_from_slice(&non_atmospheric_indices[start_index..]);
         }
 
         foundry_layers

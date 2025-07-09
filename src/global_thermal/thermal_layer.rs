@@ -30,6 +30,9 @@ pub struct ThermalLayer {
 
     /// Whether this layer uses atmospheric compound tracking
     pub is_atmospheric: bool,
+
+    /// Whether this layer is a foundry layer (deepest thermal reservoir)
+    pub is_foundry: bool,
 }
 
 const BULK_MODULUS_PA: f64 = 1e11; // 100 GPa for silicate materials
@@ -102,11 +105,12 @@ impl ThermalLayer {
             layer_index,
             is_surface_layer: false, // Atmospheric layers are never surface layers
             is_atmospheric: true,
+            is_foundry: false, // Atmospheric layers are never foundry layers
         }
     }
 
     /// Create a new solid layer with realistic material density (will be compacted by pressure)
-    pub fn new_solid(start_depth_km: f64, height_km: f64, surface_area_km2: f64, material_type: MaterialCompositeType, layer_index: usize, is_surface_layer: bool) -> Self {
+    pub fn new_solid(start_depth_km: f64, height_km: f64, surface_area_km2: f64, material_type: MaterialCompositeType, layer_index: usize, is_surface_layer: bool, is_foundry: bool) -> Self {
         // Calculate full volume for this layer
         let _volume_m3 = surface_area_km2 * height_km * 1e9; // km³ to m³
 
@@ -129,6 +133,7 @@ impl ThermalLayer {
             layer_index,
             is_surface_layer,
             is_atmospheric: false,
+            is_foundry,
         }
     }
 
@@ -137,7 +142,7 @@ impl ThermalLayer {
         if material_type == MaterialCompositeType::Air {
             Self::new_atmospheric(start_depth_km, height_km, surface_area_km2, 0)
         } else {
-            Self::new_solid(start_depth_km, height_km, surface_area_km2, material_type, 0, false)
+            Self::new_solid(start_depth_km, height_km, surface_area_km2, material_type, 0, false, false)
         }
     }
     

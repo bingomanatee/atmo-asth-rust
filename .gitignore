@@ -4,3 +4,4 @@
 *.db/*
 /src/config/mod.rs
 /src/config/thermal_config_loader.rs
+/examples/thermal_heat_map/*.png
