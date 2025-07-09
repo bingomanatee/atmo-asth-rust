@@ -426,9 +426,16 @@ impl AtmosphericGenerationOp {
             }
         }
 
-        let total_surface_area_m2 = sim.cells.len() as f64 * 1.0;
-        let column_mass_kg_m2 = total_global_mass / total_surface_area_m2;
         let mut total_redistributed = 0.0;
+
+        // Calculate total surface area first to avoid borrowing issues
+        let total_cells = sim.cells.len() as f64;
+        let cell_surface_area_m2 = if let Some((layer, _)) = sim.cells.values().next().and_then(|c| c.layers_t.first()) {
+            layer.surface_area_km2 * 1e6 // Convert km² to m²
+        } else {
+            return 0.0; // No layers
+        };
+        let total_surface_area_m2 = total_cells * cell_surface_area_m2;
 
         for cell in sim.cells.values_mut() {
             if let Some(atmospheric_layers) = self.atmospheric_layers_cache.get(&cell.h3_index) {
@@ -436,19 +443,26 @@ impl AtmosphericGenerationOp {
                     continue;
                 }
 
-                for &layer_index in atmospheric_layers {
-                    if let Some((current, _next)) = cell.layers_t.get_mut(layer_index) {
-                        let altitude_km = (-current.start_depth_km - current.height_km / 2.0).max(0.0);
-                        let altitude_factor = (-altitude_km / 8.0).exp(); // Pre-computed scale height
-                        let layer_mass_fraction = altitude_factor / atmospheric_layers.len() as f64;
-                        let cell_surface_area_m2 = current.surface_area_km2 * 1e6;
-                        let cell_column_mass = column_mass_kg_m2 * cell_surface_area_m2;
-                        let layer_mass_to_add = cell_column_mass * layer_mass_fraction;
+                // Calculate this cell's share of total atmospheric mass
+                let cell_total_mass = total_global_mass * (cell_surface_area_m2 / total_surface_area_m2);
 
-                        if layer_mass_to_add > 0.0 {
+                // Distribute using proper exponential atmospheric model
+                let layer_masses = self.calculate_exponential_atmospheric_distribution(
+                    cell, atmospheric_layers, cell_total_mass
+                );
+
+                // Apply the calculated masses to layers
+                for (layer_index, mass_to_add) in layer_masses {
+                    if let Some((current, _next)) = cell.layers_t.get_mut(layer_index) {
+                        if mass_to_add > 0.0 {
                             let temp_k = current.temperature_k();
-                            current.energy_mass.add_atmospheric_mass(layer_mass_to_add, temp_k);
-                            total_redistributed += layer_mass_to_add;
+                            // Add atmospheric mass using StandardEnergyMassComposite
+                            current.energy_mass.add_atmospheric_mass(mass_to_add, temp_k);
+                            
+                            // Update layer density based on mass and volume
+                            self.update_layer_density(current, mass_to_add);
+                            
+                            total_redistributed += mass_to_add;
                         }
                     }
                 }
@@ -456,6 +470,105 @@ impl AtmosphericGenerationOp {
         }
 
         total_redistributed
+    }
+
+    /// Calculate exponential atmospheric distribution following barometric formula
+    fn calculate_exponential_atmospheric_distribution(
+        &self,
+        cell: &crate::global_thermal::global_h3_cell::GlobalH3Cell,
+        atmospheric_layers: &[usize],
+        total_cell_mass: f64,
+    ) -> Vec<(usize, f64)> {
+        if atmospheric_layers.is_empty() || total_cell_mass <= 0.0 {
+            return Vec::new();
+        }
+
+        // Atmospheric parameters (Earth-like defaults)
+        let gas_constant = 8.314; // J/(mol·K)
+        let molar_mass = 0.028964; // kg/mol for dry air
+        let gravity = 9.81; // m/s²
+        let temperature = 288.0; // K (average tropospheric temperature)
+        
+        // Calculate scale height: H = (R * T) / (M * g)
+        let scale_height_m = (gas_constant * temperature) / (molar_mass * gravity);
+        
+        // Sample atmospheric distribution every 4 miles (6.44 km) up to reasonable altitude
+        let sample_interval_m = 6440.0; // 4 miles in meters
+        let max_altitude_m = scale_height_m * 5.0; // 5 scale heights covers ~99% of atmosphere
+        
+        // Calculate mass distribution at sample points
+        let mut sample_masses = Vec::new();
+        let mut total_sample_mass = 0.0;
+        
+        for i in 0..((max_altitude_m / sample_interval_m) as usize) {
+            let altitude_m = i as f64 * sample_interval_m;
+            let density_fraction = (-altitude_m / scale_height_m).exp();
+            let mass_at_sample = density_fraction * sample_interval_m; // Mass per unit area
+            sample_masses.push((altitude_m, mass_at_sample));
+            total_sample_mass += mass_at_sample;
+        }
+        
+        // Redistribute sample masses into actual atmospheric layers
+        let mut layer_masses = Vec::new();
+        
+        for &layer_index in atmospheric_layers {
+            if let Some((current_layer, _)) = cell.layers_t.get(layer_index) {
+                let layer_bottom_m = (-current_layer.start_depth_km) * 1000.0; // Convert to meters, flip sign
+                let layer_top_m = layer_bottom_m + (current_layer.height_km * 1000.0);
+                
+                // Only process layers above ground (positive altitude)
+                if layer_top_m > 0.0 {
+                    let layer_bottom_altitude = layer_bottom_m.max(0.0);
+                    let layer_top_altitude = layer_top_m.max(0.0);
+                    
+                    // Calculate mass fraction for this layer by interpolating sample points
+                    let layer_mass_fraction = self.interpolate_atmospheric_mass_fraction(
+                        &sample_masses, 
+                        layer_bottom_altitude, 
+                        layer_top_altitude,
+                        total_sample_mass
+                    );
+                    
+                    let layer_mass = total_cell_mass * layer_mass_fraction;
+                    layer_masses.push((layer_index, layer_mass));
+                }
+            }
+        }
+        
+        layer_masses
+    }
+
+    /// Interpolate atmospheric mass fraction for a layer altitude range
+    fn interpolate_atmospheric_mass_fraction(
+        &self,
+        sample_masses: &[(f64, f64)], // (altitude_m, mass_fraction)
+        layer_bottom_m: f64,
+        layer_top_m: f64,
+        total_sample_mass: f64,
+    ) -> f64 {
+        if sample_masses.is_empty() || total_sample_mass <= 0.0 {
+            return 0.0;
+        }
+        
+        let mut layer_mass = 0.0;
+        
+        // Find samples that overlap with this layer
+        for (altitude, mass_at_sample) in sample_masses {
+            if *altitude >= layer_bottom_m && *altitude < layer_top_m {
+                layer_mass += mass_at_sample;
+            }
+        }
+        
+        // Normalize to fraction of total mass
+        layer_mass / total_sample_mass
+    }
+
+    /// Update layer density based on mass and volume
+    fn update_layer_density(&self, _layer: &mut crate::global_thermal::thermal_layer::ThermalLayer, _added_mass: f64) {
+        // For StandardEnergyMassComposite atmospheric layers, density is automatically calculated
+        // from the energy content via mass_kg() / volume. The add_atmospheric_mass() method
+        // updates the energy content, which automatically updates the density calculation.
+        // No additional density update is needed.
     }
 
     /// Get cached crystallization factor with lazy computation
@@ -878,6 +991,7 @@ impl AtmosphericGenerationOp {
                     if layer_mass_to_add > 0.0 {
                         // Add mass using atmospheric mass addition (maintains constant volume)
                         let temp_k = current.temperature_k();
+                        // Add atmospheric mass using StandardEnergyMassComposite
                         current.energy_mass.add_atmospheric_mass(layer_mass_to_add, temp_k);
 
                         // Add blended atmospheric compounds to this layer
@@ -943,6 +1057,7 @@ impl AtmosphericGenerationOp {
                 // Add mass to this atmospheric layer using the new atmospheric mass addition method
                 if let Some((current, _next)) = cell.layers_t.get_mut(layer_index) {
                     let temp_k = current.temperature_k();
+                    // Add atmospheric mass using StandardEnergyMassComposite
                     current.energy_mass.add_atmospheric_mass(mass_to_add, temp_k);
 
                     // Mass is now tracked in global atmosphere

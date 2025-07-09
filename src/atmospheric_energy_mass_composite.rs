@@ -322,6 +322,35 @@ impl EnergyMassComposite for AtmosphericEnergyMass {
 }
 
 impl AtmosphericEnergyMass {
+    /// Set the custom density for this atmospheric layer
+    pub fn set_custom_density_kg_m3(&mut self, density_kg_m3: f64) {
+        self.custom_density_kg_m3 = density_kg_m3;
+    }
+
+    /// Add mass to an atmospheric layer while maintaining constant volume (increases density)
+    /// This is used for atmospheric generation where outgassed material is added to atmospheric layers
+    pub fn add_atmospheric_mass(&mut self, additional_mass_kg: f64, temp_k: f64) {
+        if additional_mass_kg <= 0.0 {
+            return;
+        }
+
+        // Calculate current mass
+        let current_mass_kg = self.mass_kg();
+        let new_total_mass_kg = current_mass_kg + additional_mass_kg;
+
+        // Calculate energy for the additional mass at the given temperature
+        let profile = get_profile_fast(&self.material_type, &self.phase);
+        let additional_energy_joules = additional_mass_kg * profile.specific_heat_capacity_j_per_kg_k * temp_k;
+
+        // Add the energy (this effectively adds the mass while maintaining temperature)
+        self.energy_joules += additional_energy_joules;
+
+        // Update density based on new mass and constant volume
+        let volume_m3 = self.volume_km3 * 1e9; // Convert km³ to m³
+        let new_density_kg_m3 = new_total_mass_kg / volume_m3;
+        self.custom_density_kg_m3 = new_density_kg_m3;
+    }
+
     /// Create atmospheric layer with realistic mass distribution
     /// Earth's total atmospheric mass: 5.15 × 10¹⁸ kg
     /// Earth's surface area: ~510,072,000 km²

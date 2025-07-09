@@ -535,8 +535,8 @@ impl RadianceOp {
             let (current_layer, next_layer) = &cell.layers_t[layer_14_index];
 
             // Calculate energy difference between current and next states
-            let current_energy = current_layer.energy_mass.energy_joules;
-            let next_energy = next_layer.energy_mass.energy_joules;
+            let current_energy = current_layer.energy_mass.energy();
+            let next_energy = next_layer.energy_mass.energy();
             let energy_delta = next_energy - current_energy;
 
             let current_temp = current_layer.temperature_k();
@@ -568,8 +568,8 @@ impl RadianceOp {
             for foundry_idx in [15, 16, 17] {
                 if foundry_idx < cell.layers_t.len() {
                     let (foundry_current, foundry_next) = &cell.layers_t[foundry_idx];
-                    let foundry_current_energy = foundry_current.energy_mass.energy_joules;
-                    let foundry_next_energy = foundry_next.energy_mass.energy_joules;
+                    let foundry_current_energy = foundry_current.energy_mass.energy();
+                    let foundry_next_energy = foundry_next.energy_mass.energy();
                     let foundry_energy_delta = foundry_next_energy - foundry_current_energy;
                     let foundry_current_temp = foundry_current.temperature_k();
                     let foundry_next_temp = foundry_next.temperature_k();

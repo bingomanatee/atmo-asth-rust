@@ -46,13 +46,46 @@ impl ThermalLayer {
         let altitude_km = (-start_depth_km + height_km / 2.0).max(0.0); // Center altitude of layer
         let atmospheric_temp_k = (surface_temp_k - altitude_km * lapse_rate_k_per_km).max(200.0); // Minimum 200K
 
-        // Create atmospheric layer with near-zero initial density
+        // Create atmospheric layer with proper exponential density distribution
+        // NOTE: layer_index 0 is the TOP of atmosphere (lowest density)
+        // but we want 0 = surface (highest density) for the decay calculation
+        // So we need to invert the layer index
+        // For now, assume 4 atmospheric layers (as per current config)
+        let total_atmospheric_layers = 4;
+        let inverted_layer_index = total_atmospheric_layers - 1 - layer_index;
+        
+        // Calculate atmospheric mass using exponential decay (0.88 decay factor)
+        let max_total_mass_per_km2 = 1.0e10; // kg per km²
+        let decay_factor: f64 = 0.88;
+        let num_layers_for_scaling = 100;
+        let finite_series_sum: f64 = (0..num_layers_for_scaling)
+            .map(|i| decay_factor.powi(i as i32))
+            .sum();
+        
+        // Base mass per layer per km² scaled to fit within maximum
+        let base_mass_per_layer_per_km2 = max_total_mass_per_km2 / finite_series_sum;
+        
+        // Calculate mass for this specific layer and scale by cell area
+        let layer_mass_per_km2 = base_mass_per_layer_per_km2 * decay_factor.powi(inverted_layer_index as i32);
+        let layer_total_mass_kg = layer_mass_per_km2 * surface_area_km2;
+        
+        // Calculate volume for the actual cell area
+        let layer_volume_km3 = height_km * surface_area_km2;
+        
+        // Calculate energy for this mass at the given temperature
+        let energy_joules = layer_total_mass_kg * 1004.0 * atmospheric_temp_k; // Air specific heat: 1004 J/kg·K
+        
+        // Create StandardEnergyMassComposite with the calculated energy
         let energy_mass = StandardEnergyMassComposite::new_atmospheric_with_near_zero_density(
             MaterialCompositeType::Air,
-            volume_km3,
+            layer_volume_km3,
             height_km,
             atmospheric_temp_k
         );
+        
+        // Add the atmospheric mass to get the correct density
+        let mut energy_mass = energy_mass;
+        energy_mass.add_atmospheric_mass(layer_total_mass_kg, atmospheric_temp_k);
 
         // Create atmospheric compound tracking system
         let atmospheric_compounds = Some(std::collections::HashMap::new());
@@ -260,8 +293,8 @@ impl ThermalLayer {
         self.energy_mass.set_pressure_gpa(pressure_gpa);
 
         // Update volume for compression (if needed for density calculations)
-        let compressed_volume_km3 = compressed_volume_m3 / 1e9; // Convert back to km³
-        self.energy_mass.volume_km3 = compressed_volume_km3;
+        // For now, skip volume compression for atmospheric layers as they maintain constant volume
+        // TODO: Add proper volume compression interface to EnergyMassComposite trait if needed
 
         // Preserve temperature during compression (adiabatic compression would increase temp slightly)
         let temp = self.temperature_k();
@@ -362,6 +395,7 @@ impl std::fmt::Display for ThermalLayer {
                self.effective_mass_kg())
     }
 }
+
 
 
 
