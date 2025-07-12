@@ -8,6 +8,7 @@ use crate::sim::simulation::Simulation;
 use crate::energy_mass_composite::{EnergyMassComposite, MaterialPhase, MaterialCompositeType};
 use crate::material_composite::{get_emission_compound_ratios, get_profile_fast};
 use std::collections::HashMap;
+use std::any::Any;
 use h3o::CellIndex;
 
 use serde::{Deserialize, Serialize};
@@ -475,7 +476,7 @@ impl AtmosphericGenerationOp {
     /// Calculate exponential atmospheric distribution following barometric formula
     fn calculate_exponential_atmospheric_distribution(
         &self,
-        cell: &crate::global_thermal::global_h3_cell::GlobalH3Cell,
+        cell: &crate::global_thermal::sim_cell::SimCell,
         atmospheric_layers: &[usize],
         total_cell_mass: f64,
     ) -> Vec<(usize, f64)> {
@@ -1020,7 +1021,7 @@ impl AtmosphericGenerationOp {
     }
 
     /// Distribute outgassed mass to atmospheric layers with crystallization
-    fn distribute_outgassed_mass_to_atmosphere(&mut self, cell: &mut crate::global_thermal::global_h3_cell::GlobalH3Cell, outgassed_mass: f64) {
+    fn distribute_outgassed_mass_to_atmosphere(&mut self, cell: &mut crate::global_thermal::sim_cell::SimCell, outgassed_mass: f64) {
         if outgassed_mass <= 0.0 {
             return;
         }
@@ -1213,7 +1214,7 @@ impl AtmosphericGenerationOp {
     }
     
     /// Check for melting lithosphere layers and generate atmospheric gas from outgassing
-    fn process_outgassing(&mut self, cell: &mut crate::global_thermal::global_h3_cell::GlobalH3Cell) -> f64 {
+    fn process_outgassing(&mut self, cell: &mut crate::global_thermal::sim_cell::SimCell) -> f64 {
         let mut total_outgassed = 0.0;
 
         // Find atmospheric and lithosphere layer ranges
@@ -1300,8 +1301,8 @@ impl AtmosphericGenerationOp {
     }
     
     /// Add outgassed material to atmospheric layers with crystallization losses
-    fn add_atmospheric_material(&mut self, cell: &mut crate::global_thermal::global_h3_cell::GlobalH3Cell,
-                               total_mass: f64, atmo_layer_count: usize) {
+    fn add_atmospheric_material(&mut self, cell: &mut crate::global_thermal::sim_cell::SimCell,
+                                total_mass: f64, atmo_layer_count: usize) {
         if atmo_layer_count == 0 {
             return;
         }
@@ -1357,7 +1358,7 @@ impl AtmosphericGenerationOp {
     }
     
     /// Redistribute atmospheric material with exponential density and volume decay
-    fn redistribute_atmosphere(&mut self, cell: &mut crate::global_thermal::global_h3_cell::GlobalH3Cell) -> f64 {
+    fn redistribute_atmosphere(&mut self, cell: &mut crate::global_thermal::sim_cell::SimCell) -> f64 {
         let mut total_redistributed = 0.0;
 
         // Find atmospheric layers
@@ -1597,6 +1598,10 @@ impl AtmosphericGenerationOp {
 impl SimOp for AtmosphericGenerationOp {
     fn name(&self) -> &str {
         "AtmosphericGeneration"
+    }
+    
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 
     fn init_sim(&mut self, _sim: &mut Simulation) {

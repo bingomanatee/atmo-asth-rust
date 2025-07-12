@@ -2,7 +2,7 @@ use atmo_asth_rust::energy_mass_composite::MaterialCompositeType;
 use atmo_asth_rust::sim_op::{
     PressureAdjustmentOp, SurfaceEnergyInitOp, TemperatureReportingOp,
 };
-use atmo_asth_rust::global_thermal::global_h3_cell::{GlobalH3CellConfig, LayerConfig};
+use atmo_asth_rust::global_thermal::sim_cell::{GlobalH3CellConfig, LayerConfig};
 use atmo_asth_rust::planet::Planet;
 use atmo_asth_rust::sim_op::SimOpHandle;
 /// Basic global thermal simulation example

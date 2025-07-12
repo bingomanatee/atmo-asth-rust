@@ -5,7 +5,11 @@
 /// between atmospheric, liquid, and solid phases based on temperature and pressure.
 
 pub mod thermal_layer;
-pub mod global_h3_cell;
+pub mod sim_cell;
+pub mod heat_plume;
+pub mod thermal_expansion;
 
 pub use thermal_layer::ThermalLayer;
-pub use global_h3_cell::GlobalH3Cell;
+pub use sim_cell::SimCell;
+pub use heat_plume::{HeatPlume, CellPlumeCollection, PlumeStats};
+pub use thermal_expansion::{ThermalExpansionCalculator, ThermalExpansionStats};

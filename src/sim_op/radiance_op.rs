@@ -5,13 +5,15 @@
 use crate::sim_op::SimOp;
 use crate::sim::simulation::Simulation;
 use crate::sim::radiance::RadianceSystem;
-use crate::global_thermal::global_h3_cell::GlobalH3Cell;
+use crate::global_thermal::sim_cell::SimCell;
+use crate::global_thermal::heat_plume::HeatPlume;
 use crate::h3_utils::H3Utils;
 use crate::energy_mass_composite::EnergyMassComposite;
 use h3o::CellIndex;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::any::Any;
 use rayon::prelude::*;
 
 /// Cached energy values for hotspot lifecycle phases
@@ -42,6 +44,12 @@ pub struct RadianceOpParams {
     pub enable_reporting: bool,
     /// Enable energy flow logging for debugging
     pub enable_energy_logging: bool,
+    /// Enable instant heat plume creation from radiance input
+    pub enable_instant_plumes: bool,
+    /// Energy threshold for instant plume creation (J per km² per year)
+    pub plume_energy_threshold_j_per_km2_per_year: f64,
+    /// Temperature threshold for instant plume creation (K)
+    pub plume_temperature_threshold_k: f64,
 }
 
 impl Default for RadianceOpParams {
@@ -52,6 +60,9 @@ impl Default for RadianceOpParams {
             foundry_temperature_k: 2100.0, // Deep mantle temperature
             enable_reporting: false,
             enable_energy_logging: false,
+            enable_instant_plumes: true, // Enable by default for immediate plume response
+            plume_energy_threshold_j_per_km2_per_year: 5.0e12, // 2x base radiance triggers plumes
+            plume_temperature_threshold_k: 1800.0, // Standard plume threshold temperature
         }
     }
 }
@@ -68,6 +79,8 @@ pub struct RadianceOp {
     hotspot_energy_cache: HashMap<CellIndex, HotspotEnergyCache>,
     energy_accumulator: f64,  // Accumulate energy for 100-year batches
     years_since_last_injection: f64,
+    plumes_created_this_step: usize, // Track instant plumes created
+    total_plumes_created: usize,     // Total plumes created by radiance
 }
 
 impl RadianceOp {
@@ -97,6 +110,8 @@ impl RadianceOp {
             hotspot_energy_cache: HashMap::new(),
             energy_accumulator: 0.0,
             years_since_last_injection: 0.0,
+            plumes_created_this_step: 0,
+            total_plumes_created: 0,
         };
         
         // Pre-compute perlin cache for all cells
@@ -160,7 +175,7 @@ impl RadianceOp {
     }
     
     /// Apply radiance energy to all cells in the simulation
-    pub fn apply(&mut self, cells: &mut HashMap<CellIndex, GlobalH3Cell>, time_years: f64, current_year: f64) {
+    pub fn apply(&mut self, cells: &mut HashMap<CellIndex, SimCell>, time_years: f64, current_year: f64) {
         // Accumulate energy for 100-year batch injection
         self.years_since_last_injection += time_years;
         
@@ -172,6 +187,7 @@ impl RadianceOp {
             self.total_energy_added = 0.0;
             self.cells_processed = 0;
             self.step_count += 1;
+            self.plumes_created_this_step = 0;
 
             // Update radiance system for current year
             self.radiance_system.update(current_year);
@@ -182,17 +198,25 @@ impl RadianceOp {
             if self.params.enable_reporting && self.step_count % 10 == 0 {
                 println!("RadianceOp Step {}: Added {:.2e} J to {} cells ({}x multiplier)", 
                     self.step_count, self.total_energy_added, self.cells_processed, energy_multiplier);
+                    
+                if self.params.enable_instant_plumes && self.plumes_created_this_step > 0 {
+                    println!("🌋 Instant Plumes: {} created this step, {} total created by radiance", 
+                        self.plumes_created_this_step, self.total_plumes_created);
+                }
             }
         }
     }
 
     /// Apply radiance energy using hotspot-focused approach for better performance
-    fn apply_hotspot_focused(&mut self, cells: &mut HashMap<CellIndex, GlobalH3Cell>, time_years: f64, current_year: f64) {
+    fn apply_hotspot_focused(&mut self, cells: &mut HashMap<CellIndex, SimCell>, time_years: f64, current_year: f64) {
         // First, apply base Perlin energy to all cells (this still needs to be done for all cells)
-        for (cell_index, cell) in cells.iter_mut() {
-            let energy_added = self.apply_base_energy_to_cell(*cell_index, cell, time_years);
-            self.total_energy_added += energy_added;
-            self.cells_processed += 1;
+        let cell_indices: Vec<CellIndex> = cells.keys().cloned().collect();
+        for cell_index in cell_indices {
+            if let Some(cell) = cells.get_mut(&cell_index) {
+                let energy_added = self.apply_base_energy_to_cell_with_plumes(cell_index, cell, time_years);
+                self.total_energy_added += energy_added;
+                self.cells_processed += 1;
+            }
         }
 
         // Then, apply hotspot energy by looping over hotspots (inflows/outflows)
@@ -200,7 +224,7 @@ impl RadianceOp {
     }
 
     /// Apply base Perlin energy to a single cell
-    fn apply_base_energy_to_cell(&self, cell_index: CellIndex, cell: &mut GlobalH3Cell, time_years: f64) -> f64 {
+    fn apply_base_energy_to_cell(&self, cell_index: CellIndex, cell: &mut SimCell, time_years: f64) -> f64 {
         // Get surface area from any layer (they all have the same surface area)
         let surface_area_km2 = if let Some((layer, _)) = cell.layers_t.first() {
             layer.surface_area_km2
@@ -229,12 +253,61 @@ impl RadianceOp {
         }
         0.0
     }
+    
+    /// Apply base Perlin energy to a single cell with instant plume creation capability
+    fn apply_base_energy_to_cell_with_plumes(&mut self, cell_index: CellIndex, cell: &mut SimCell, time_years: f64) -> f64 {
+        // Get surface area from any layer (they all have the same surface area)
+        let surface_area_km2 = if let Some((layer, _)) = cell.layers_t.first() {
+            layer.surface_area_km2
+        } else {
+            return 0.0; // No layers
+        };
+
+        // Find the foundry layer (single deepest asthenosphere layer as heat source)
+        let foundry_layer_indices = self.find_foundry_layers(cell);
+
+        if !foundry_layer_indices.is_empty() {
+            // Calculate base core radiance energy
+            let base_energy = self.params.base_core_radiance_j_per_km2_per_year * surface_area_km2 * time_years;
+
+            // Calculate Perlin noise energy contribution
+            let perlin_energy = self.get_cached_perlin_energy(cell_index) * surface_area_km2 * time_years;
+
+            // Combine base and perlin energies
+            let total_energy = base_energy + (perlin_energy * self.params.radiance_system_multiplier);
+
+            // Add energy to deepest foundry layer and check for instant plume creation
+            if let Some(&deepest_layer_index) = foundry_layer_indices.last() {
+                cell.layers_t[deepest_layer_index].1.add_energy(total_energy);
+                
+                // Check if instant plume creation should be triggered
+                if self.params.enable_instant_plumes {
+                    self.check_and_create_instant_plume(cell, deepest_layer_index, total_energy);
+                }
+                
+                return total_energy;
+            }
+        }
+        0.0
+    }
 
     /// Apply energy from hotspots (inflows/outflows) to cells and their neighbors
-    fn apply_hotspot_energy(&mut self, cells: &mut HashMap<CellIndex, GlobalH3Cell>, time_years: f64, current_year: f64) {
+    fn apply_hotspot_energy(&mut self, cells: &mut HashMap<CellIndex, SimCell>, time_years: f64, current_year: f64) {
         // Process inflows (hotspots)
-        for inflow in &self.radiance_system.inflows {
-            let inflow_energy = self.calculate_inflow_energy(inflow.cell_index, current_year, time_years);
+        let inflows = self.radiance_system.inflows.clone(); // Clone to avoid borrow checker issues
+        for inflow in &inflows {
+            // Get surface area from the cell
+            let surface_area_km2 = if let Some(cell) = cells.get(&inflow.cell_index) {
+                if let Some((layer, _)) = cell.layers_t.first() {
+                    layer.surface_area_km2
+                } else {
+                    continue; // No layers, skip this cell
+                }
+            } else {
+                continue; // Cell not found, skip
+            };
+            
+            let inflow_energy = self.calculate_inflow_energy_with_area(inflow.cell_index, current_year, time_years, surface_area_km2);
             if inflow_energy > 0.0 {
                 // Apply full energy to hotspot cell
                 if let Some(cell) = cells.get_mut(&inflow.cell_index) {
@@ -255,8 +328,20 @@ impl RadianceOp {
         }
 
         // Process outflows (cooling zones)
-        for outflow in &self.radiance_system.outflows {
-            let outflow_energy = self.calculate_outflow_energy(outflow.cell_index, current_year, time_years);
+        let outflows = self.radiance_system.outflows.clone(); // Clone to avoid borrow checker issues
+        for outflow in &outflows {
+            // Get surface area from the cell
+            let surface_area_km2 = if let Some(cell) = cells.get(&outflow.cell_index) {
+                if let Some((layer, _)) = cell.layers_t.first() {
+                    layer.surface_area_km2
+                } else {
+                    continue; // No layers, skip this cell
+                }
+            } else {
+                continue; // Cell not found, skip
+            };
+            
+            let outflow_energy = self.calculate_outflow_energy_with_area(outflow.cell_index, current_year, time_years, surface_area_km2);
             if outflow_energy != 0.0 {
                 // Apply full energy to outflow cell (negative energy for cooling)
                 if let Some(cell) = cells.get_mut(&outflow.cell_index) {
@@ -277,33 +362,90 @@ impl RadianceOp {
         }
     }
 
-    /// Apply energy to the foundry layer of a cell
-    fn apply_energy_to_foundry_layer(&self, cell: &mut GlobalH3Cell, energy: f64) {
+    /// Apply energy to the foundry layer of a cell and create instant plumes if threshold exceeded
+    fn apply_energy_to_foundry_layer(&mut self, cell: &mut SimCell, energy: f64) {
         let foundry_layer_indices = self.find_foundry_layers(cell);
         if let Some(&deepest_layer_index) = foundry_layer_indices.last() {
+            // Add energy to the layer
             cell.layers_t[deepest_layer_index].1.add_energy(energy);
+            
+            // Check if instant plume creation should be triggered
+            if self.params.enable_instant_plumes {
+                self.check_and_create_instant_plume(cell, deepest_layer_index, energy);
+            }
+        }
+    }
+    
+    /// Check if an instant plume should be created based on energy input and create it
+    fn check_and_create_instant_plume(&mut self, cell: &mut SimCell, layer_idx: usize, energy_added: f64) {
+        if let Some((foundry_layer, _)) = cell.layers_t.get(layer_idx) {
+            let surface_area_km2 = foundry_layer.surface_area_km2;
+            let energy_per_km2_per_year = energy_added / surface_area_km2;
+            
+            // Check energy threshold for plume creation
+            if energy_per_km2_per_year >= self.params.plume_energy_threshold_j_per_km2_per_year {
+                // Also check temperature threshold
+                let layer_temp = foundry_layer.temperature_k();
+                if layer_temp >= self.params.plume_temperature_threshold_k {
+                    // Check if a plume was recently created from this layer to avoid spam
+                    let recent_plumes = cell.plumes.plumes.iter()
+                        .filter(|p| p.current_layer == layer_idx && p.age < 5)
+                        .count();
+                    
+                    if recent_plumes == 0 {
+                        // Create instant plume
+                        let new_plume = HeatPlume::new_from_foundry(
+                            cell.plumes.cell_id,
+                            layer_idx,
+                            foundry_layer,
+                            cell.plumes.next_plume_id,
+                        );
+                        
+                        if self.params.enable_reporting {
+                            println!("🌋 INSTANT PLUME: Created from radiance input at layer {} (temp: {:.1}K, energy: {:.2e}J/km²/yr)", 
+                                layer_idx, layer_temp, energy_per_km2_per_year);
+                        }
+                        
+                        cell.plumes.add_plume(new_plume);
+                        self.plumes_created_this_step += 1;
+                        self.total_plumes_created += 1;
+                    }
+                }
+            }
         }
     }
 
-    /// Calculate inflow energy for a specific cell
-    fn calculate_inflow_energy(&self, cell_index: CellIndex, current_year: f64, time_years: f64) -> f64 {
+    /// Calculate inflow energy for a specific cell with given surface area
+    fn calculate_inflow_energy_with_area(&self, cell_index: CellIndex, current_year: f64, time_years: f64, surface_area_km2: f64) -> f64 {
+        const SECONDS_PER_YEAR: f64 = 365.25 * 24.0 * 3600.0; // 31,557,600 seconds/year
+        const MW_TO_WATTS: f64 = 1_000_000.0; // 1 MW = 1,000,000 watts
+        
         for inflow in &self.radiance_system.inflows {
             if inflow.cell_index == cell_index {
                 let age = current_year - inflow.creation_year;
                 let lifecycle_factor = self.calculate_lifecycle_factor(age, inflow.lifetime_years);
-                return inflow.rate_mw * lifecycle_factor * time_years;
+                
+                // Convert MW/km² × km² × years to Joules: (MW/km²) × lifecycle_factor × km² × years × conversions
+                let energy_joules = inflow.rate_mw * lifecycle_factor * surface_area_km2 * time_years * MW_TO_WATTS * SECONDS_PER_YEAR;
+                return energy_joules;
             }
         }
         0.0
     }
 
-    /// Calculate outflow energy for a specific cell
-    fn calculate_outflow_energy(&self, cell_index: CellIndex, current_year: f64, time_years: f64) -> f64 {
+    /// Calculate outflow energy for a specific cell with given surface area
+    fn calculate_outflow_energy_with_area(&self, cell_index: CellIndex, current_year: f64, time_years: f64, surface_area_km2: f64) -> f64 {
+        const SECONDS_PER_YEAR: f64 = 365.25 * 24.0 * 3600.0; // 31,557,600 seconds/year
+        const MW_TO_WATTS: f64 = 1_000_000.0; // 1 MW = 1,000,000 watts
+        
         for outflow in &self.radiance_system.outflows {
             if outflow.cell_index == cell_index {
                 let age = current_year - outflow.creation_year;
                 let lifecycle_factor = self.calculate_lifecycle_factor(age, outflow.lifetime_years);
-                return -outflow.rate_mw * lifecycle_factor * time_years; // Negative for cooling
+                
+                // Convert MW/km² × km² × years to Joules (negative for cooling)
+                let energy_joules = -outflow.rate_mw * lifecycle_factor * surface_area_km2 * time_years * MW_TO_WATTS * SECONDS_PER_YEAR;
+                return energy_joules;
             }
         }
         0.0
@@ -324,7 +466,7 @@ impl RadianceOp {
     fn apply_to_cell(
         &self,
         cell_index: CellIndex,
-        cell: &mut GlobalH3Cell,
+        cell: &mut SimCell,
         time_years: f64,
         current_year: f64,
     ) -> f64 {
@@ -382,7 +524,7 @@ impl RadianceOp {
     }
 
     /// Find the foundry layer indices using the is_foundry property
-    fn find_foundry_layers(&self, cell: &GlobalH3Cell) -> Vec<usize> {
+    fn find_foundry_layers(&self, cell: &SimCell) -> Vec<usize> {
         let mut foundry_layers = Vec::new();
 
         // Find all layers marked as foundry layers
@@ -399,7 +541,7 @@ impl RadianceOp {
     fn apply_to_cell_cached(
         &mut self,
         cell_index: CellIndex,
-        cell: &mut GlobalH3Cell,
+        cell: &mut SimCell,
         time_years: f64,
         current_year: f64,
     ) -> f64 {
@@ -519,7 +661,7 @@ impl RadianceOp {
     }
 
     /// Log energy flow for layer 14 (just above foundry zone) to track energy cliff
-    fn log_layer_14_energy_flow(&self, cell_index: CellIndex, cell: &GlobalH3Cell) {
+    fn log_layer_14_energy_flow(&self, cell_index: CellIndex, cell: &SimCell) {
         // Layer 14 is typically the layer just above the foundry zone
         let layer_14_index = 14;
 
@@ -590,11 +732,73 @@ impl RadianceOp {
             }
         }
     }
+
+    /// Get current radiance sources for visualization
+    pub fn get_radiance_sources(&self, current_year: f64) -> Vec<RadianceSource> {
+        let mut sources = Vec::new();
+        let mut active_inflows = 0;
+        let mut inactive_inflows = 0;
+        
+        // Add active inflows (energy sources)
+        for inflow in &self.radiance_system.inflows {
+            let age = current_year - inflow.creation_year;
+            if age >= 0.0 && age <= inflow.lifetime_years {
+                let lifecycle_factor = self.radiance_system.calculate_lifecycle_factor(age, inflow.lifetime_years);
+                let effective_wattage = inflow.rate_mw * lifecycle_factor;
+                
+                sources.push(RadianceSource {
+                    cell_index: inflow.cell_index,
+                    wattage: effective_wattage,
+                    source_type: RadianceSourceType::Inflow,
+                });
+                active_inflows += 1;
+            } else {
+                inactive_inflows += 1;
+            }
+        }
+        
+        
+        // Add active outflows (energy sinks)
+        for outflow in &self.radiance_system.outflows {
+            let age = current_year - outflow.creation_year;
+            if age >= 0.0 && age <= outflow.lifetime_years {
+                let lifecycle_factor = self.radiance_system.calculate_lifecycle_factor(age, outflow.lifetime_years);
+                let effective_wattage = outflow.rate_mw.abs() * lifecycle_factor;
+                
+                sources.push(RadianceSource {
+                    cell_index: outflow.cell_index,
+                    wattage: effective_wattage,
+                    source_type: RadianceSourceType::Outflow,
+                });
+            }
+        }
+        
+        sources
+    }
+}
+
+/// Radiance source data for visualization
+#[derive(Debug, Clone)]
+pub struct RadianceSource {
+    pub cell_index: CellIndex,
+    pub wattage: f64,
+    pub source_type: RadianceSourceType,
+}
+
+/// Type of radiance source for visualization
+#[derive(Debug, Clone, Copy)]
+pub enum RadianceSourceType {
+    Inflow,  // Energy source (white circles)
+    Outflow, // Energy sink (black circles)
 }
 
 impl SimOp for RadianceOp {
     fn name(&self) -> &str {
         "RadianceOp"
+    }
+    
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 
     fn update_sim(&mut self, sim: &mut Simulation) {
@@ -607,7 +811,7 @@ impl SimOp for RadianceOp {
 
 /// Convenience function to create and apply radiance operation
 pub fn apply_radiance(
-    cells: &mut HashMap<CellIndex, GlobalH3Cell>,
+    cells: &mut HashMap<CellIndex, SimCell>,
     time_years: f64,
     current_year: f64,
     params: Option<RadianceOpParams>,
@@ -623,7 +827,7 @@ pub fn apply_radiance(
 mod tests {
     use super::*;
     use crate::planet::Planet;
-    use crate::global_thermal::global_h3_cell::GlobalH3CellConfig;
+    use crate::global_thermal::sim_cell::GlobalH3CellConfig;
     use h3o::{Resolution, CellIndex};
     use std::sync::Arc;
 
@@ -635,7 +839,7 @@ mod tests {
         // Create test cell
         let h3_index = CellIndex::try_from(0x821c07fffffffff).unwrap();
         let config = GlobalH3CellConfig::new_earth_like(h3_index, planet.clone());
-        let mut cell = GlobalH3Cell::new_with_schedule(h3_index, planet, &config.layer_schedule);
+        let mut cell = SimCell::new_with_schedule(h3_index, planet, &config.layer_schedule);
 
         // Find bottom asthenosphere layer
         let bottom_layer_index = cell.layers_t.iter().enumerate().rev()

@@ -3,13 +3,13 @@
 
 use atmo_asth_rust::sim::simulation::{Simulation, SimProps};
 use atmo_asth_rust::planet::Planet;
-use atmo_asth_rust::global_thermal::global_h3_cell::{GlobalH3CellConfig, LayerConfig};
+use atmo_asth_rust::global_thermal::sim_cell::{GlobalH3CellConfig, LayerConfig};
 use atmo_asth_rust::energy_mass_composite::{MaterialCompositeType, EnergyMassComposite};
 use atmo_asth_rust::material_composite::MaterialPhase;
 use atmo_asth_rust::sim_op::{
     SurfaceEnergyInitOp,
     PressureAdjustmentOp,
-    HeatRedistributionOp,
+    ThermalConductionOp, ThermalConductionParams,
     TemperatureReportingOp,
     SpaceRadiationOp,
     AtmosphericGenerationOp,
@@ -113,7 +113,12 @@ pub fn run_enhanced_global_atmo_test() {
             SimOpHandle::new(Box::new(SpaceRadiationOp::new(
                 SpaceRadiationOpParams::with_reporting()
             ))),
-            SimOpHandle::new(Box::new(HeatRedistributionOp::new())),
+            SimOpHandle::new(Box::new(ThermalConductionOp::new_with_params(ThermalConductionParams {
+                enable_lateral_conduction: true,
+                lateral_conductivity_factor: 0.5,
+                temp_diff_threshold_k: 1.0,
+                enable_reporting: false,
+            }))),
             SimOpHandle::new(Box::new(AtmosphericGenerationOp::with_crystallization_params(crystallization_params))),
             SimOpHandle::new(Box::new(TemperatureReportingOp::with_frequency(20.0))),
         ],

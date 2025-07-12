@@ -1,4 +1,4 @@
-use crate::global_thermal::global_h3_cell::{GlobalH3Cell, GlobalH3CellConfig};
+use crate::global_thermal::sim_cell::{SimCell, GlobalH3CellConfig};
 use crate::energy_mass_composite::EnergyMassComposite;
 use crate::h3_utils::H3Utils;
 use crate::planet::Planet;
@@ -45,7 +45,7 @@ pub struct Simulation {
     pub planet: Planet,
     pub resolution: Resolution,
     pub ops: Vec<Box<dyn SimOp>>,
-    pub cells: HashMap<CellIndex, GlobalH3Cell>,
+    pub cells: HashMap<CellIndex, SimCell>,
     pub layer_count: usize,
     pub step: i32,
     pub sim_steps: i32,
@@ -106,7 +106,7 @@ impl Simulation {
             // Use the provided function to create configuration for this cell
             let config = config_fn(cell_index, planet.clone());
 
-            let cell = GlobalH3Cell::new_with_config(config);
+            let cell = SimCell::new_with_config(config);
             self.cells.insert(cell_index, cell);
         }
         

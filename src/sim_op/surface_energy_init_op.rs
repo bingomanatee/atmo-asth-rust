@@ -4,6 +4,7 @@
 use crate::sim_op::SimOp;
 use crate::energy_mass_composite::EnergyMassComposite;
 use crate::sim::simulation::Simulation;
+use std::any::Any;
 use rayon::prelude::*;
 
 
@@ -68,21 +69,20 @@ impl SurfaceEnergyInitOp {
         } else {
             // Subsurface layers get geothermal gradient
             let temp = self.params.surface_temp_k + (depth_km * self.params.geothermal_gradient_k_per_km);
-            temp.min(self.params.core_temp_k) // Cap at core temperature
+            // Cap at a reasonable mantle temperature (~2000K) to prevent unrealistic deep temperatures
+            // Foundry layers can still be heated by radiance beyond this
+            temp.min(2000.0)
         }
     }
 
 
-    /// Enforce foundry temperature at the deepest layers (simple baseline temperature)
+    /// Enforce foundry temperature at layers explicitly marked as foundry
     fn enforce_foundry_temperature(&self, sim: &mut Simulation) {
         // Process cells sequentially (parallel processing has borrowing constraints with HashMap)
         for (_cell_id, cell) in sim.cells.iter_mut() {
-            let num_layers = cell.layers_t.len();
-            if num_layers > 0 {
-                // Set foundry temperature for the last 3 layers (or all layers if fewer than 3)
-                let start_index = if num_layers >= 3 { num_layers - 3 } else { 0 };
-                
-                for layer_tuple in &mut cell.layers_t[start_index..] {
+            for layer_tuple in &mut cell.layers_t {
+                // Only set temperature for layers explicitly marked as foundry
+                if layer_tuple.0.is_foundry {
                     layer_tuple.0.energy_mass.set_temperature(self.params.core_temp_k);
                     layer_tuple.1.energy_mass.set_temperature(self.params.core_temp_k);
                 }
@@ -94,6 +94,10 @@ impl SurfaceEnergyInitOp {
 impl SimOp for SurfaceEnergyInitOp {
     fn name(&self) -> &str {
         "SurfaceEnergyInit"
+    }
+    
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 
     fn init_sim(&mut self, sim: &mut Simulation) {
@@ -124,13 +128,14 @@ impl SimOp for SurfaceEnergyInitOp {
         }
 
         // Ensure foundry temperature is enforced at deepest layers
-        self.enforce_foundry_temperature(sim);
+        // Temporarily disabled to allow radiance-driven temperatures
+        // self.enforce_foundry_temperature(sim);
 
         // Surface energy initialization complete
     }
 
     fn update_sim(&mut self, sim: &mut Simulation) {
-        // Enforce foundry temperature at deepest layers every step
-        self.enforce_foundry_temperature(sim);
+        // No longer enforce foundry temperature every step - let radiance drive temperatures
+        // self.enforce_foundry_temperature(sim);
     }
 }

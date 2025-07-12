@@ -4,6 +4,7 @@
 use crate::sim_op::SimOp;
 use crate::energy_mass_composite::{EnergyMassComposite, MaterialPhase};
 use crate::sim::simulation::Simulation;
+use std::any::Any;
 
 
 pub struct TemperatureReportingOp {
@@ -150,6 +151,10 @@ impl TemperatureReportingOp {
 impl SimOp for TemperatureReportingOp {
     fn name(&self) -> &str {
         "TemperatureReporting"
+    }
+    
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 
     fn init_sim(&mut self, sim: &mut Simulation) {

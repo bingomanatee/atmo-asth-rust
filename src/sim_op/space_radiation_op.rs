@@ -1,9 +1,10 @@
 use crate::sim_op::SimOp;
 use crate::energy_mass_composite::EnergyMassComposite;
-use crate::global_thermal::global_h3_cell::GlobalH3Cell;
+use crate::global_thermal::sim_cell::SimCell;
 use crate::sim::simulation::Simulation;
 use h3o::CellIndex;
 use std::collections::HashMap;
+use std::any::Any;
 use rayon::prelude::*;
 
 /// Parameters for space radiation operation
@@ -80,7 +81,7 @@ impl SpaceRadiationOp {
     }
     
     /// Apply space radiation to all cells in the simulation
-    pub fn apply(&mut self, cells: &mut HashMap<CellIndex, GlobalH3Cell>, time_years: f64) {
+    pub fn apply(&mut self, cells: &mut HashMap<CellIndex, SimCell>, time_years: f64) {
         // Space radiation operation starting
         self.total_radiated_energy = 0.0;
         self.cells_processed = 0;
@@ -94,7 +95,7 @@ impl SpaceRadiationOp {
     }
 
     /// Apply space radiation to a single cell
-    pub fn apply_to_cell(&self, cell: &mut GlobalH3Cell, time_years: f64) -> f64 {
+    pub fn apply_to_cell(&self, cell: &mut SimCell, time_years: f64) -> f64 {
         let mut total_radiated = 0.0;
         let surface_area_km2 = cell.surface_area_km2();
 
@@ -193,6 +194,10 @@ impl SimOp for SpaceRadiationOp {
     fn name(&self) -> &str {
         "SpaceRadiation"
     }
+    
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 
     fn init_sim(&mut self, _sim: &mut Simulation) {
         // Space radiation initialized
@@ -214,7 +219,7 @@ impl SimOp for SpaceRadiationOp {
 
 /// Convenience function to create and apply space radiation operation
 pub fn apply_space_radiation(
-    cells: &mut HashMap<CellIndex, GlobalH3Cell>,
+    cells: &mut HashMap<CellIndex, SimCell>,
     time_years: f64,
     params: Option<SpaceRadiationOpParams>,
 ) -> f64 {

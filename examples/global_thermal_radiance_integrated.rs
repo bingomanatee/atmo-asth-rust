@@ -11,11 +11,11 @@
 use atmo_asth_rust::energy_mass_composite::MaterialCompositeType;
 use atmo_asth_rust::sim_op::{
     AtmosphericGenerationOp, RadianceOp, TemperatureReportingOp,
-    HeatRedistributionOp, SurfaceEnergyInitOp, SurfaceEnergyInitParams,
+    ThermalConductionOp, ThermalConductionParams, SurfaceEnergyInitOp, SurfaceEnergyInitParams,
 };
 use atmo_asth_rust::sim_op::atmospheric_generation_op::CrystallizationParams;
 use atmo_asth_rust::sim_op::radiance_op::RadianceOpParams;
-use atmo_asth_rust::global_thermal::global_h3_cell::{GlobalH3CellConfig, LayerConfig};
+use atmo_asth_rust::global_thermal::sim_cell::{GlobalH3CellConfig, LayerConfig};
 use atmo_asth_rust::planet::Planet;
 use atmo_asth_rust::sim_op::SimOpHandle;
 use atmo_asth_rust::sim::simulation::{SimProps, Simulation};
@@ -53,11 +53,14 @@ pub fn run_global_thermal_radiance_integrated() {
 
     // Create RadianceOp parameters with Earth baseline energy injection
     let radiance_params = RadianceOpParams {
-        base_core_radiance_j_per_kok I m2_per_year: 2.52e12, // 1.0x Earth's core radiance (baseline)
+        base_core_radiance_j_per_km2_per_year: 2.52e12, // 1.0x Earth's core radiance (baseline)
         radiance_system_multiplier: 1.0, 
         foundry_temperature_k: 3000.0, // Deep foundry reference temperature (not used for resets)
         enable_reporting: false, // Enable detailed reporting
         enable_energy_logging: false, // Disable energy flow debugging
+        enable_instant_plumes: false, // Disable instant plumes for this example
+        plume_energy_threshold_j_per_km2_per_year: 5.0e12,
+        plume_temperature_threshold_k: 1800.0,
     };
 
     // Create simulation properties with RadianceOp instead of foundry
@@ -81,7 +84,12 @@ pub fn run_global_thermal_radiance_integrated() {
             SimOpHandle::new(Box::new(RadianceOp::new(radiance_params, radiance_system))),
 
             // Heat redistribution spreads energy through layers (energy conservation fixed)
-            SimOpHandle::new(Box::new(HeatRedistributionOp::new())),
+            SimOpHandle::new(Box::new(ThermalConductionOp::new_with_params(ThermalConductionParams {
+                enable_lateral_conduction: true,
+                lateral_conductivity_factor: 0.5,
+                temp_diff_threshold_k: 1.0,
+                enable_reporting: false,
+            }))),
             
             // Atmospheric generation from lithosphere melting
             SimOpHandle::new(Box::new(AtmosphericGenerationOp::with_crystallization_params(

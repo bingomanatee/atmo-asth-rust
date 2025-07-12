@@ -3,7 +3,7 @@ use atmo_asth_rust::sim_op::surface_energy_init_op::{SurfaceEnergyInitOp, Surfac
 use atmo_asth_rust::sim::simulation::{Simulation, SimProps};
 use atmo_asth_rust::sim_op::SimOp;
 use atmo_asth_rust::energy_mass_composite::{EnergyMassComposite, MaterialCompositeType};
-use atmo_asth_rust::global_thermal::global_h3_cell::{GlobalH3CellConfig, LayerConfig};
+use atmo_asth_rust::global_thermal::sim_cell::{GlobalH3CellConfig, LayerConfig};
 use atmo_asth_rust::planet::Planet;
 use h3o::Resolution;
 use std::rc::Rc;
@@ -125,14 +125,10 @@ fn run_atmospheric_generation_test(params: &CalibrationParams) -> CalibrationRes
     let mut atmo_gen_op = AtmosphericGenerationOp::new();
 
     // Create surface energy operation with reduced temperature range
-    let surface_energy_params = SurfaceEnergyInitParams::with_foundry_oscillation(
+    let surface_energy_params = SurfaceEnergyInitParams::with_temperatures(
         1200.0, // surface_temp_k
         25.0,   // geothermal_gradient_k_per_km
         1200.0, // core_temp_k
-        true,   // oscillation_enabled
-        500.0,  // period_years
-        0.5,    // min_multiplier (50%)
-        1.5,    // max_multiplier (150%)
     );
     let mut surface_energy_op = SurfaceEnergyInitOp::new_with_params(surface_energy_params);
 

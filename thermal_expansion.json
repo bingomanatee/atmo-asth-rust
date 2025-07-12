@@ -1,0 +1,52 @@
+{
+  "basalt": {
+    "solid": {
+      
+      "thermal_expansivity": 1.0e-5     
+    },
+    "liquid": {
+      
+      "thermal_expansivity": 2.0e-5     
+    }
+  },
+  "granite": {
+    "solid": {
+      
+      "thermal_expansivity": 7.5e-6     
+    },
+    "liquid": {
+      
+      "thermal_expansivity": 1.5e-5     
+    }
+  },
+  "silicate": {
+    "solid": {
+      
+      "thermal_expansivity": 1.2e-5     
+    },
+    "liquid": {
+      
+      "thermal_expansivity": 2.2e-5     
+    }
+  },
+  "steel": {
+    "solid": {
+      
+      "thermal_expansivity": 1.2e-5     
+    },
+    "liquid": {
+      
+      "thermal_expansivity": 2.0e-5     
+    }
+  },
+  "water": {
+    "solid": {
+      
+      "thermal_expansivity": 5.0e-5     
+    },
+    "liquid": {
+      
+      "thermal_expansivity": 2.1e-4     
+    }
+  }
+}

@@ -105,6 +105,34 @@ impl H3Utils {
         neighbors
     }
     
+    /// Calculate the great circle distance between two H3 cells in meters
+    /// Uses the haversine formula for accurate distance calculation
+    pub fn cell_distance_m(cell_a: CellIndex, cell_b: CellIndex, planet_radius_km: f64) -> f64 {
+        let lat_lng_a = LatLng::from(cell_a);
+        let lat_lng_b = LatLng::from(cell_b);
+        
+        let lat1 = lat_lng_a.lat_radians();
+        let lon1 = lat_lng_a.lng_radians();
+        let lat2 = lat_lng_b.lat_radians();
+        let lon2 = lat_lng_b.lng_radians();
+        
+        // Haversine formula
+        let dlat = lat2 - lat1;
+        let dlon = lon2 - lon1;
+        
+        let a = (dlat / 2.0).sin().powi(2) + lat1.cos() * lat2.cos() * (dlon / 2.0).sin().powi(2);
+        let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+        
+        // Distance in meters
+        planet_radius_km * c * 1000.0
+    }
+    
+    /// Calculate the great circle distance between two H3 cells in meters (Earth radius)
+    /// Convenience method using Earth's radius
+    pub fn cell_distance_earth_m(cell_a: CellIndex, cell_b: CellIndex) -> f64 {
+        Self::cell_distance_m(cell_a, cell_b, EARTH_RADIUS_KM)
+    }
+    
     /// Get the area of a cell at the given resolution for a planet with the given radius
     /// Scales the Earth-based area by the ratio of planet radius to Earth radius squared
     /// Uses cached Earth areas to avoid recomputation

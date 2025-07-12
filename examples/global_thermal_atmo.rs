@@ -4,7 +4,7 @@ use atmo_asth_rust::sim_op::{
 };
 use atmo_asth_rust::sim_op::atmospheric_generation_op::CrystallizationParams;
 use atmo_asth_rust::sim_op::surface_energy_init_op::SurfaceEnergyInitParams;
-use atmo_asth_rust::global_thermal::global_h3_cell::{GlobalH3CellConfig, LayerConfig};
+use atmo_asth_rust::global_thermal::sim_cell::{GlobalH3CellConfig, LayerConfig};
 use atmo_asth_rust::planet::Planet;
 use atmo_asth_rust::sim_op::SimOpHandle;
 /// Global thermal simulation with atmospheric generation

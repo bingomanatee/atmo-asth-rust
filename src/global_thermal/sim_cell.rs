@@ -1,9 +1,11 @@
+use std::f64::consts::PI;
 /// Global H3 cell with unified thermal layers
 ///
 /// Each cell contains a stack of thermal layers that can naturally transition
 /// between atmospheric, liquid, and solid phases based on temperature and pressure.
 
 use crate::global_thermal::thermal_layer::ThermalLayer;
+use crate::global_thermal::heat_plume::CellPlumeCollection;
 use crate::energy_mass_composite::{MaterialCompositeType, MaterialPhase};
 use crate::planet::Planet;
 use h3o::CellIndex as H3Index;
@@ -32,7 +34,7 @@ impl GlobalH3CellConfig {
         Self {
             h3_index,
             planet,
-            layer_schedule: GlobalH3Cell::create_earth_like_schedule(),
+            layer_schedule: SimCell::create_earth_like_schedule(),
         }
     }
 
@@ -41,7 +43,7 @@ impl GlobalH3CellConfig {
         Self {
             h3_index,
             planet,
-            layer_schedule: GlobalH3Cell::create_thick_atmosphere_schedule(),
+            layer_schedule: SimCell::create_thick_atmosphere_schedule(),
         }
     }
 
@@ -50,7 +52,7 @@ impl GlobalH3CellConfig {
         Self {
             h3_index,
             planet,
-            layer_schedule: GlobalH3Cell::create_thin_atmosphere_schedule(),
+            layer_schedule: SimCell::create_thin_atmosphere_schedule(),
         }
     }
 
@@ -70,7 +72,7 @@ impl GlobalH3CellConfig {
 
 /// Global H3 hexagonal cell containing unified thermal layers
 #[derive(Debug, Clone)]
-pub struct GlobalH3Cell {
+pub struct SimCell {
     /// H3 hexagonal index for this cell
     pub h3_index: H3Index,
 
@@ -79,9 +81,23 @@ pub struct GlobalH3Cell {
 
     /// Stack of thermal layers with (current, next) state tuples
     pub layers_t: Vec<(ThermalLayer, ThermalLayer)>,
+    
+    /// Collection of heat plumes spanning across layers
+    pub plumes: CellPlumeCollection,
 }
 
-impl GlobalH3Cell {
+impl SimCell {
+    pub fn lateral_area(&self) -> f64 {
+        self.surface_area_km2()  * self.height_km()
+    }
+
+    pub fn height_km(&self) -> f64 {
+        match self.layers_t.first() {
+            Some((first, _)) => first.height_km,
+            None => 0.0,
+        }
+    }
+
     /// Create a new global H3 cell with custom configuration
     pub fn new_with_config(config: GlobalH3CellConfig) -> Self {
         Self::new_with_schedule(
@@ -89,6 +105,18 @@ impl GlobalH3Cell {
             config.planet,
             &config.layer_schedule
         )
+    }
+
+    pub fn cell_radius(&self) -> f64 {
+        match self.layers_t.first() {
+            Some(cell) => {
+                match cell[0] {
+                    Some(layer) => (layer.surface_area_km2 / PI).sqrt(),
+                    None => 0.0,
+                }
+            },
+            None => 0.0,
+        }
     }
 
     /// Create a new global H3 cell with custom layer configuration from schedule
@@ -174,6 +202,7 @@ impl GlobalH3Cell {
             h3_index,
             planet,
             layers_t: layers,
+            plumes: CellPlumeCollection::new(h3_index),
         }
     }
 
@@ -462,7 +491,7 @@ impl GlobalH3Cell {
     }
 }
 
-impl std::fmt::Display for GlobalH3Cell {
+impl std::fmt::Display for SimCell {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "GlobalH3Cell[{:?}, {}, {:.1}km², {} layers, {:.0}K surface, {:.2}m/s² gravity]",
                self.h3_index,

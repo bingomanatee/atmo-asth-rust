@@ -3,13 +3,13 @@
 
 use atmo_asth_rust::sim::simulation::{Simulation, SimProps};
 use atmo_asth_rust::planet::Planet;
-use atmo_asth_rust::global_thermal::global_h3_cell::{GlobalH3CellConfig, LayerConfig};
+use atmo_asth_rust::global_thermal::sim_cell::{GlobalH3CellConfig, LayerConfig};
 use atmo_asth_rust::energy_mass_composite::MaterialCompositeType;
 use atmo_asth_rust::sim_op::{
     SurfaceEnergyInitOp,
     SurfaceEnergyInitParams,
     PressureAdjustmentOp,
-    HeatRedistributionOp,
+    ThermalConductionOp, ThermalConductionParams,
     TemperatureReportingOp,
     SpaceRadiationOp,
     SpaceRadiationOpParams,
@@ -41,7 +41,12 @@ pub fn run_simple_global_test() {
             SimOpHandle::new(Box::new(SpaceRadiationOp::new(
                 SpaceRadiationOpParams::with_reporting()
             ))), // Radiate heat from surface layers to space FIRST
-            SimOpHandle::new(Box::new(HeatRedistributionOp::new())), // Heat redistribution between layers AFTER radiation
+            SimOpHandle::new(Box::new(ThermalConductionOp::new_with_params(ThermalConductionParams {
+                enable_lateral_conduction: true,
+                lateral_conductivity_factor: 0.5,
+                temp_diff_threshold_k: 1.0,
+                enable_reporting: false,
+            }))), // Thermal conduction (vertical + lateral) AFTER radiation
             SimOpHandle::new(Box::new(TemperatureReportingOp::with_frequency(20.0))), // Report at start, middle, and end
         ],
     };

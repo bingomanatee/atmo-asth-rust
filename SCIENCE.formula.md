@@ -90,7 +90,47 @@ matters; all the other formula only care about surface area.
   ```
   where **thermal_diffusivity_of_material** = conductivity / (density * specific_heat_capacity) (m²/s).
 
+## Thermal Expansion
+```text
+density = referenceDensity × (1 − thermalExpansivity × ( currentTemperature − referenceTemperature ))
 
+```
+
+## Raileigh number 
+```text
+
+RayleighNumber = ( Gravity 
+                   × ThermalExpansivity 
+                   × TemperatureContrast 
+                   × LayerWidth³ ) 
+                 / ( KinematicViscosity 
+                  yes.    × ThermalDiffusivity )
+
+KinematicViscosity = DynamicViscosity / Density
+
+boundaryLayerThickness = LayerWidth
+                         × ( RayleighNumber )^(–1/4)
+            
+          Using your 200 km depth and typical mantle numbers:
+
+Quantity	Value
+LayerWidth	200 000 m
+Gravity	9.8 m/s²
+ThermalExpansivity	1×10⁻⁵ 1/K
+TemperatureContrast	500 K
+DynamicViscosity	1×10²¹ Pa·scan 
+Density	3300 kg/m³
+ThermalDiffusivity	1×10⁻⁶ m²/s
+
+KinematicViscosity = 1×10²¹ Pa·s ÷ 3300 kg/m³ ≈ 3×10¹⁷ m²/s
+
+RayleighNumber ≈ 9.8×10⁻⁵×500×(2×10⁵)³ ÷ (3×10¹⁷×1×10⁻⁶) ≈ 1.3×10³
+
+boundaryLayerThickness = 2×10⁵ m × (1.3×10³)^(–¼) ≈ 3.3×10⁴ m ≈ 33 km
+
+So you’d expect plume diameters on the order of 30 km in that setup.  
+                         
+```
 ## Choosing Between Conduction and Radiation
 
 Use conduction and radiation in complementary contexts based on where and how heat is moving:

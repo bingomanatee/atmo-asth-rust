@@ -39,11 +39,18 @@ struct MaterialPhaseProperties {
     latent_heat_vapor: f64,
     #[serde(default = "default_gas_interference_factor")]
     gas_interference_factor: f64,
+    #[serde(default = "default_thermal_conduction_modifier")]
+    thermal_conduction_modifier: f64,
 }
 
 /// Default gas interference factor for materials that don't specify it
 fn default_gas_interference_factor() -> f64 {
     0.5 // Default moderate gas trapping ability
+}
+
+/// Default thermal conduction modifier for materials that don't specify it
+fn default_thermal_conduction_modifier() -> f64 {
+    1.0 // Default baseline thermal conductivity
 }
 
 /// Material phase state
@@ -117,6 +124,9 @@ pub struct MaterialStateProfile {
     
     // Gas crystallization properties
     pub gas_interference_factor: f64,  // How well this material traps rising gases (0.0-1.0)
+    
+    // Thermal conduction modifier
+    pub thermal_conduction_modifier: f64,  // Material-specific thermal conductivity modifier
 }
 
 /// Load material profiles directly from JSON into the lookup table
@@ -144,6 +154,7 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
         boil_temp: 0.0,
         latent_heat_vapor: 0.0,
         gas_interference_factor: 0.5,
+        thermal_conduction_modifier: 1.0,
     }; MaterialCompositeType::COUNT * MaterialPhase::COUNT];
 
     // Helper function to populate profiles from JSON data directly into table
@@ -174,6 +185,7 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
             boil_temp: data.solid.boil_temp,
             latent_heat_vapor: data.solid.latent_heat_vapor,
             gas_interference_factor: data.solid.gas_interference_factor,
+            thermal_conduction_modifier: data.solid.thermal_conduction_modifier,
         };
 
         // Calculate melt_temp from min/max if not provided
@@ -200,6 +212,7 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
             boil_temp: data.liquid.boil_temp,
             latent_heat_vapor: data.liquid.latent_heat_vapor,
             gas_interference_factor: data.liquid.gas_interference_factor,
+            thermal_conduction_modifier: data.liquid.thermal_conduction_modifier,
         };
 
         // Calculate melt_temp from min/max if not provided
@@ -226,6 +239,7 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
             boil_temp: data.gas.boil_temp,
             latent_heat_vapor: data.gas.latent_heat_vapor,
             gas_interference_factor: data.gas.gas_interference_factor,
+            thermal_conduction_modifier: data.gas.thermal_conduction_modifier,
         };
     };
 
@@ -253,6 +267,7 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
         boil_temp: 77.36,  // Nitrogen boiling point
         latent_heat_vapor: 199000.0,  // Nitrogen latent heat of vaporization
         gas_interference_factor: 0.01,  // Air minimal trapping
+        thermal_conduction_modifier: 0.1,  // Air poor thermal conduction
     };
 
     // Air liquid phase (liquid nitrogen)
@@ -269,6 +284,7 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
         boil_temp: 77.36,
         latent_heat_vapor: 199000.0,
         gas_interference_factor: 0.01,  // Air minimal trapping
+        thermal_conduction_modifier: 0.15,  // Air poor thermal conduction
     };
 
     // Air gas phase (normal atmospheric conditions)
@@ -285,6 +301,7 @@ fn load_profiles_from_json() -> [MaterialStateProfile; MaterialCompositeType::CO
         boil_temp: 77.36,
         latent_heat_vapor: 199000.0,
         gas_interference_factor: 0.01,  // Air minimal trapping
+        thermal_conduction_modifier: 0.1,  // Air poor thermal conduction
     };
 
     table
