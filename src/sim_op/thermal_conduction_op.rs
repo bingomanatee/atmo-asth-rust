@@ -134,44 +134,6 @@ impl LayerGeometry {
     }
 }
 
-/// Cache of geometric properties organized by layer depth
-#[derive(Debug, Clone)]
-struct GeometryCache {
-    /// Pre-calculated geometry for each layer depth
-    layer_geometries: Vec<LayerGeometry>,
-    /// Planet radius used for calculations
-    planet_radius_km: f64,
-    /// H3 resolution
-    resolution: h3o::Resolution,
-}
-
-impl GeometryCache {
-    fn new(resolution: h3o::Resolution, planet_radius_km: f64, max_layers: usize) -> Self {
-        // Pre-calculate geometry for all possible layer depths
-        let mut layer_geometries = Vec::with_capacity(max_layers);
-
-        // At planetary scale, geometry is practically identical for all depths
-        // within +/- 500km, so we can use the same geometry for all layers
-        let base_geometry = LayerGeometry::new(resolution, planet_radius_km);
-
-        for _ in 0..max_layers {
-            layer_geometries.push(base_geometry.clone());
-        }
-
-        Self {
-            layer_geometries,
-            planet_radius_km,
-            resolution,
-        }
-    }
-
-    fn get_layer_geometry(&self, layer_index: usize) -> &LayerGeometry {
-        self.layer_geometries
-            .get(layer_index)
-            .unwrap_or(&self.layer_geometries[0])
-    }
-}
-
 /// Thermal conduction operation
 pub struct ThermalConductionOp {
     params: ThermalConductionParams,
@@ -181,9 +143,7 @@ pub struct ThermalConductionOp {
     current_step: usize,
     total_vertical_energy_transferred: f64,
     total_lateral_energy_transferred: f64,
-    neighbor_topology: NeighborTopology,
-    geometry_cache: Option<GeometryCache>,
-}
+ }
 
 struct PotentialTransfer {
     neighbor: NeighborType,
@@ -216,8 +176,6 @@ impl ThermalConductionOp {
             current_step: 0,
             total_vertical_energy_transferred: 0.0,
             total_lateral_energy_transferred: 0.0,
-            neighbor_topology: NeighborTopology::new(),
-            geometry_cache: None,
         }
     }
 
@@ -230,8 +188,6 @@ impl ThermalConductionOp {
             current_step: 0,
             total_vertical_energy_transferred: 0.0,
             total_lateral_energy_transferred: 0.0,
-            neighbor_topology: NeighborTopology::new(),
-            geometry_cache: None,
         }
     }
 
@@ -333,6 +289,7 @@ impl ThermalConductionOp {
         source_cell_index: CellIndex,
         source_layer_index: usize,
         neighbor: &NeighborType,
+        sim: &Simulation,
     ) -> f64 {
         // Get the source cell and layer
         let source_cell = match cells.get(&source_cell_index) {
@@ -373,11 +330,13 @@ impl ThermalConductionOp {
         // Use FourierThermalTransfer with proper physics-based calculations
         if let Some(ref fourier) = self.fourier_transfer {
             match neighbor {
-                NeighborType::VerticalLayer { .. } => {
-                    // For vertical transfers, use the standard layer tuple method
-
-                    fourier.calculate_potential_heat_flow(&temp_source, &temp_target)
-                }
+                NeighborType::VerticalLayer { .. } => fourier.calculate_potential_heat_flow_simple(
+                    &temp_source,
+                    &temp_target,
+                    source_cell.surface_area_km2(),
+                    source_cell.height_km() + target_cell.height_km(),
+                    sim.years_per_step as f64,
+                ),
                 NeighborType::LateralCell { .. } => {
                     // For lateral transfers, use cached distance calculation
                     let distance_km = target_cell.cell_radius() * 2.0;

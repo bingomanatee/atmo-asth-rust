@@ -187,8 +187,8 @@ impl FourierThermalTransfer {
 
     /// Create cache key for directional heat flow
     fn create_directional_heat_flow_cache_key(
-        from_energy_mass: &dyn EnergyMassComposite,
-        to_energy_mass: &dyn EnergyMassComposite,
+        from_energy_mass: &dyn crate::energy_mass_composite::EnergyMassComposite,
+        to_energy_mass: &dyn crate::energy_mass_composite::EnergyMassComposite,
         temp_diff: f64,
     ) -> DirectionalHeatFlowCacheKey {
         DirectionalHeatFlowCacheKey {
@@ -205,8 +205,8 @@ impl FourierThermalTransfer {
     /// Get cached directional heat flow factors
     fn get_cached_directional_heat_flow(
         &self,
-        from_energy_mass: &dyn EnergyMassComposite,
-        to_energy_mass: &dyn EnergyMassComposite,
+        from_energy_mass: &dyn crate::energy_mass_composite::EnergyMassComposite,
+        to_energy_mass: &dyn crate::energy_mass_composite::EnergyMassComposite,
         temp_diff: f64,
     ) -> CachedDirectionalHeatFlow {
         let cache_key = Self::create_directional_heat_flow_cache_key(from_energy_mass, to_energy_mass, temp_diff);
@@ -232,8 +232,8 @@ impl FourierThermalTransfer {
     /// Calculate directional heat flow factors without caching
     fn calculate_directional_heat_flow_uncached(
         &self,
-        from_energy_mass: &dyn EnergyMassComposite,
-        to_energy_mass: &dyn EnergyMassComposite,
+        from_energy_mass: &dyn crate::energy_mass_composite::EnergyMassComposite,
+        to_energy_mass: &dyn crate::energy_mass_composite::EnergyMassComposite,
         temp_diff: f64,
     ) -> CachedDirectionalHeatFlow {
         // Use cached density-adjusted conductivity for performance
@@ -268,7 +268,7 @@ impl FourierThermalTransfer {
     /// Get cached density-adjusted conductivity for a material type, phase, and current density
     fn get_cached_density_adjusted_conductivity(
         &self,
-        energy_mass: &dyn EnergyMassComposite,
+        energy_mass: &dyn crate::energy_mass_composite::EnergyMassComposite,
     ) -> f64 {
         let cache_key = DensityAdjustedConductivityCacheKey {
             material_type: energy_mass.material_composite_type(),
@@ -308,8 +308,8 @@ impl FourierThermalTransfer {
     /// Returns energy transfer magnitude in Joules (always positive)
     fn calculate_directional_heat_flow(
         &self,
-        from_energy_mass: &dyn EnergyMassComposite,
-        to_energy_mass: &dyn EnergyMassComposite,
+        from_energy_mass: &dyn crate::energy_mass_composite::EnergyMassComposite,
+        to_energy_mass: &dyn crate::energy_mass_composite::EnergyMassComposite,
         temp_diff: f64,
     ) -> f64 {
         // Use cached directional heat flow factors for performance
@@ -334,8 +334,8 @@ impl FourierThermalTransfer {
     /// Returns energy transfer in Joules (positive = energy flows from upper to lower)
     pub fn heat_flow_between_energy_masses_with_thickness(
         &self,
-        upper_energy_mass: &dyn EnergyMassComposite,
-        lower_energy_mass: &dyn EnergyMassComposite,
+        upper_energy_mass: &dyn crate::energy_mass_composite::EnergyMassComposite,
+        lower_energy_mass: &dyn crate::energy_mass_composite::EnergyMassComposite,
         avg_thickness_km: Option<f64>,
     ) -> f64 {
         let upper_temp_k = upper_energy_mass.kelvin();
@@ -432,6 +432,15 @@ impl FourierThermalTransfer {
         }
     }
 
+    /// Transfer heat between layer tuples (wrapper for backward compatibility)
+    pub fn transfer_heat_between_layer_tuples(
+        &self,
+        upper_layer_tuple: &mut (ThermalLayer, ThermalLayer),
+        lower_layer_tuple: &mut (ThermalLayer, ThermalLayer),
+    ) -> f64 {
+        self.apply_heat_transfer_between_layers(upper_layer_tuple, lower_layer_tuple)
+    }
+
     /// Calculate potential heat flow between layer tuples without applying the transfer
     /// Used for energy distribution calculations in multi-neighbor systems
     pub fn calculate_potential_heat_flow(
@@ -493,6 +502,83 @@ impl FourierThermalTransfer {
 
 #[cfg(test)]
 mod tests {
+    use crate::energy_mass_composite::{
+        EnergyMassComposite, EnergyMassParams, MaterialCompositeType, MaterialPhase,
+        StandardEnergyMassComposite,
+    };
+    use crate::global_thermal::ThermalLayer;
+    use crate::fourier_thermal_transfer::FourierThermalTransfer;
+    use std::f64::consts::PI;
+
+    #[test]
+    fn test_thermal_transfer() {
+        const SURFACE_RAD: f64 = 120.0;
+        const AREA: f64 = PI as f64 * SURFACE_RAD * SURFACE_RAD;
+        let mut thermal_layer = ThermalLayer::new(
+            0.0,  // start_depth_km
+            10.0, // height_km
+            AREA, // surface_area_km2
+            MaterialCompositeType::Silicate,
+        );
+
+        thermal_layer.energy_mass.set_kelvin(1200.0);
+
+        let mut thermal_layer_tuples = (thermal_layer.clone(), thermal_layer.clone());
+
+        let mut thermal_layer2 = ThermalLayer::new(
+            10.0, // start_depth_km
+            10.0, // height_km
+            AREA, // surface_area_km2
+            MaterialCompositeType::Silicate,
+        );
+
+        thermal_layer2.energy_mass.set_kelvin(1000.0);
+
+        let mut thermal_layer_tuples2 = (thermal_layer2.clone(), thermal_layer2.clone());
+
+        let mut thermal_layer3 = ThermalLayer::new(
+            10.0, // start_depth_km
+            10.0, // height_km
+            AREA, // surface_area_km2
+            MaterialCompositeType::Silicate,
+        );
+
+        thermal_layer3.energy_mass.set_kelvin(2000.0);
+
+        let mut thermal_layer_tuples3 = (thermal_layer3.clone(), thermal_layer3.clone());
+
+        let fourier = FourierThermalTransfer::new(200.0);
+        let transfer = fourier.transfer_heat_between_layer_tuples(
+            &mut thermal_layer_tuples,
+            &mut thermal_layer_tuples2,
+        );
+        println!(
+            "Transfer: {:.2e} from {:.2e} ({:.1} K) to {:.2e} ({:.1} K): {:.8}% for a diff of {:.2e}",
+            transfer,
+            thermal_layer.energy_mass.energy(),
+            thermal_layer.energy_mass.kelvin(),
+            thermal_layer2.energy_mass.energy(),
+            thermal_layer2.energy_mass.kelvin(),
+            transfer / thermal_layer.energy_mass.energy() * 100.0,
+            thermal_layer.energy_mass.energy() - thermal_layer2.energy_mass.energy(),
+        );
+
+        let transfer3 = fourier.transfer_heat_between_layer_tuples(
+            &mut thermal_layer_tuples,
+            &mut thermal_layer_tuples3,
+        );
+        println!(
+            "Transfer: {:.2e} from {:.2e} ({:.1} K) to {:.2e} ({:.1} K): {:.8}% for a diff of {:.2e}",
+            transfer3,
+            thermal_layer.energy_mass.energy(),
+            thermal_layer.energy_mass.kelvin(),
+            thermal_layer3.energy_mass.energy(),
+            thermal_layer3.energy_mass.kelvin(),
+            transfer3 / thermal_layer3.energy_mass.energy() * 100.0,
+            thermal_layer.energy_mass.energy() - thermal_layer2.energy_mass.energy(),
+        );
 
 
+        assert!(transfer > 0.0);
+    }
 }
