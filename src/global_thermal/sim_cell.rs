@@ -109,12 +109,7 @@ impl SimCell {
 
     pub fn cell_radius(&self) -> f64 {
         match self.layers_t.first() {
-            Some(cell) => {
-                match cell[0] {
-                    Some(layer) => (layer.surface_area_km2 / PI).sqrt(),
-                    None => 0.0,
-                }
-            },
+            Some((layer, _)) => (layer.surface_area_km2 / PI).sqrt(),
             None => 0.0,
         }
     }

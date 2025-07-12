@@ -616,7 +616,6 @@ impl RadianceSystem {
 
                 // Get immediate neighbors using H3 grid structure (excluding source cell)
                 let neighbors = H3Utils::neighbors_for(outflow.cell_index);
-                let immediate_neighbors: std::collections::HashSet<CellIndex> = neighbors.iter().cloned().collect();
 
                 for neighbor in &neighbors {
                     if *neighbor != outflow.cell_index { // Exclude source cell

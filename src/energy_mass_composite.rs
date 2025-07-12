@@ -5,7 +5,7 @@ pub use crate::material_composite::{
     MaterialCompositeType, MaterialPhase, MaterialStateProfile, get_profile_fast,
 };
 use crate::material_property_cache::{
-    MaterialPropertyCache, CachedMaterialProperties, CachedPhaseTransition,
+    MaterialPropertyCache, CachedPhaseTransition,
 };
 use serde::{Deserialize, Serialize};
 
@@ -1099,26 +1099,22 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
         // Always return pressure-aware phase based on current temperature and pressure
         // Use caching for performance optimization
         let temp_k = self.kelvin();
-        let cache_key = MaterialPropertyCache::create_phase_key(
-            self.material_type,
-            temp_k,
-            self.pressure_gpa,
-        );
+
         
-        let cached_phase = MaterialPropertyCache::get_or_calculate_phase(
-            cache_key,
-            || {
-                let phase = resolve_phase_from_temperature_and_pressure(&self.material_type, temp_k, self.pressure_gpa);
-                CachedPhaseTransition {
-                    phase,
-                    melting_point_k: self.material_composite_profile().melt_temp,
-                    boiling_point_k: self.material_composite_profile().boil_temp,
-                    is_transitioning: false,
-                }
-            },
-        );
+        // For now, just calculate directly without caching
+        let phase = resolve_phase_from_temperature_and_pressure(&self.material_type, temp_k, self.pressure_gpa);
+        let _cached_phase = CachedPhaseTransition {
+            from_phase: phase,
+            to_phase: phase,
+            temperature: temp_k,
+            pressure: self.pressure_gpa,
+            phase,
+            melting_point_k: self.material_composite_profile().melt_temp,
+            boiling_point_k: self.material_composite_profile().boil_temp,
+            is_transitioning: false,
+        };
         
-        cached_phase.phase
+        phase
     }
 
     fn is_atmosphere(&self) -> bool {

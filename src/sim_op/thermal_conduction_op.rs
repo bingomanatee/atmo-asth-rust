@@ -12,12 +12,10 @@ use crate::sim::simulation::Simulation;
 ///
 /// Heat flows naturally based on temperature gradients rather than artificial budget splitting
 use crate::sim_op::SimOp;
-use crate::thermal_pressure_cache::ThermalPressureCache;
 use h3o::CellIndex;
 use rayon::prelude::*;
 use std::any::Any;
-use std::collections::{HashMap, HashSet};
-use std::f64::consts::PI;
+use std::collections::HashMap;
 
 /// Parameters for thermal conduction
 #[derive(Debug, Clone)]
@@ -44,7 +42,7 @@ impl Default for ThermalConductionParams {
 }
 
 /// Thermal neighbor representing a potential heat transfer path
-#[derive(Debug, Clone, Debug, Clone)]
+#[derive(Debug, Clone)]
 enum NeighborType {
     VerticalLayer {
         cell_index: CellIndex,
@@ -143,7 +141,9 @@ pub struct ThermalConductionOp {
     current_step: usize,
     total_vertical_energy_transferred: f64,
     total_lateral_energy_transferred: f64,
- }
+    neighbor_topology: NeighborTopology,
+    _geometry_cache: Option<()>, // Simplified for now
+}
 
 struct PotentialTransfer {
     neighbor: NeighborType,
@@ -176,6 +176,8 @@ impl ThermalConductionOp {
             current_step: 0,
             total_vertical_energy_transferred: 0.0,
             total_lateral_energy_transferred: 0.0,
+            neighbor_topology: NeighborTopology::new(),
+            _geometry_cache: None,
         }
     }
 
@@ -188,6 +190,8 @@ impl ThermalConductionOp {
             current_step: 0,
             total_vertical_energy_transferred: 0.0,
             total_lateral_energy_transferred: 0.0,
+            neighbor_topology: NeighborTopology::new(),
+            _geometry_cache: None,
         }
     }
 
@@ -203,7 +207,7 @@ impl ThermalConductionOp {
 
     /// Identify all thermal neighbors for a given layer in a cell with caching
     fn cooler_neighbors(
-        &mut self,
+        &self,
         source: &TransferSource,
         source_cell: &SimCell,
         all_cells: &HashMap<CellIndex, SimCell>,
@@ -224,10 +228,13 @@ impl ThermalConductionOp {
 
         // 1. VERTICAL NEIGHBORS (layers above and below in same cell)
 
-        // Layer below (deeper)
-        for offset in [-1, 1].iter() {
-            let index = source.layer_index + offset;
-            if index < 0 || index >= source_cell.layers_t.len() {
+        // Layer below (deeper) and above (shallower)
+        for offset in [-1i32, 1i32].iter() {
+            let index = (source.layer_index as i32 + offset) as usize;
+            if offset < &0 && source.layer_index == 0 {
+                continue; // Can't go negative
+            }
+            if index >= source_cell.layers_t.len() {
                 continue;
             }
             let (neighbor_layer, _) = &source_cell.layers_t[index];
@@ -320,11 +327,11 @@ impl ThermalConductionOp {
             None => return 0.0,
         };
 
-        if target_layer_index >= *target_cell.layers_t.len() {
+        if *target_layer_index >= target_cell.layers_t.len() {
             return 0.0;
         }
 
-        let target_layer_tuple = &target_cell.layers_t[target_layer_index];
+        let target_layer_tuple = &target_cell.layers_t[*target_layer_index];
         let (temp_source, _) = source_layer_tuple;
         let (temp_target, _) = target_layer_tuple;
         // Use FourierThermalTransfer with proper physics-based calculations
@@ -362,7 +369,7 @@ impl ThermalConductionOp {
     /// Calculate Fourier thermal transfer without mutable access (for parallel processing)
     fn calculate_fourier_transfer_immutable(
         &self,
-        mut sim: &Simulation,
+        sim: &Simulation,
         source: &TransferSource,
         neighbor: &NeighborType,
     ) -> f64 {
@@ -398,7 +405,7 @@ impl ThermalConductionOp {
             return 0.0;
         }
 
-        let target_layer_tuple = &target_cell.layers_t[target_layer_index];
+        let target_layer_tuple = &target_cell.layers_t[*target_layer_index];
 
         // Use FourierThermalTransfer with proper physics-based calculations
         if let Some(ref fourier) = self.fourier_transfer {
@@ -464,7 +471,7 @@ impl ThermalConductionOp {
 
             // Find all COOLER thermal neighbors (downstream flow only)
             // Note: We can't use &mut self in parallel, so we'll compute neighbors directly
-            let cooler_neighbors = self.cooler_neighbors(source, cell, sim.borrow());
+            let cooler_neighbors = self.cooler_neighbors(source, cell, &sim.cells);
             if cooler_neighbors.is_empty() {
                 return; // No cooler neighbors to transfer to
             }
@@ -477,8 +484,7 @@ impl ThermalConductionOp {
                 // Create pair key for caching (always put lexicographically smaller first)
 
                 // Calculate energy transfer using immutable method
-                let energy_transfer_j =
-                    self.calculate_fourier_transfer_immutable(sim.borrow(), source, neighbor);
+                let energy_transfer_j = self.calculate_fourier_transfer_immutable(&sim, source, neighbor);
 
                 total_potential_outflow += energy_transfer_j;
                 neighbor_transfers.push(PotentialTransfer {
@@ -515,45 +521,33 @@ impl ThermalConductionOp {
             }
         });
 
-        // Extract results from thread-safe containers
+        // Extract results from mutex container
         let final_energy_transfers = energy_transfers.into_inner().unwrap();
 
         // Apply all energy transfers atomically
+        // Group transfers by target to avoid multiple borrows
         for transfer in final_energy_transfers {
-            let source = match sim.cells.get_mut(&transfer.cell_index) {
-                Some(cell) => match cell.layer_tuple_mut(transfer.layer_index) {
-                    Some((_, next)) => next,
-                    None => continue,
-                },
-                None => continue,
+            if transfer.transfer_j <= 0.0 {
+                continue;
+            }
+
+            // Handle source
+            if let Some(source_cell) = sim.cells.get_mut(&transfer.cell_index) {
+                if let Some((_, source_next)) = source_cell.layer_tuple_mut(transfer.layer_index) {
+                    source_next.remove_energy(transfer.transfer_j);
+                }
+            }
+
+            // Handle target
+            let (target_cell_index, target_layer_index) = match transfer.neighbor {
+                NeighborType::VerticalLayer { cell_index, layer_index } => (cell_index, layer_index),
+                NeighborType::LateralCell { cell_index, layer_index } => (cell_index, layer_index),
             };
 
-            let target = match transfer.neighbor {
-                NeighborType::VerticalLayer {
-                    cell_index,
-                    layer_index,
-                } => match sim.cells.get_mut(&cell_index) {
-                    Some(cell) => match cell.layer_tuple_mut(layer_index) {
-                        Some((_, next)) => next,
-                        None => continue,
-                    },
-                    None => continue,
-                },
-                NeighborType::LateralCell {
-                    cell_index,
-                    layer_index,
-                } => match sim.cells.get_mut(&cell_index) {
-                    Some(cell) => match cell.layer_tuple_mut(layer_index) {
-                        Some((_, next)) => next,
-                        None => continue,
-                    },
-                    None => continue,
-                },
-            };
-
-            if transfer.transfer_j > 0.0 {
-                source.remove_energy(transfer.transfer_j);
-                target.add_energy(transfer.transfer_j);
+            if let Some(target_cell) = sim.cells.get_mut(&target_cell_index) {
+                if let Some((_, target_next)) = target_cell.layer_tuple_mut(target_layer_index) {
+                    target_next.add_energy(transfer.transfer_j);
+                }
             }
         }
     }
@@ -588,11 +582,7 @@ impl SimOp for ThermalConductionOp {
             30 // Default maximum layers
         };
 
-        self.geometry_cache = Some(GeometryCache::new(
-            sim.resolution,
-            sim.planet.radius_km as f64,
-            max_layers,
-        ));
+        self._geometry_cache = Some(()); // Simplified cache
 
         if self.params.enable_reporting {
             println!("🌡️  Thermal conduction initialized with advanced optimizations");
@@ -612,10 +602,6 @@ impl SimOp for ThermalConductionOp {
                 "   - Temperature threshold: {:.1}K",
                 self.params.temp_diff_threshold_k
             );
-            println!("   - Neighbor caching: enabled");
-            println!("   - Parallel processing: enabled");
-            println!("   - Geometry caching: enabled ({} layers)", max_layers);
-            println!("   - Planetary-scale approximation: enabled");
         }
     }
 

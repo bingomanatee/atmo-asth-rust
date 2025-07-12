@@ -19,7 +19,7 @@ pub use thermal_conduction_op::{ThermalConductionOp, ThermalConductionParams};
 use crate::sim::simulation::Simulation;
 use std::any::Any;
 
-pub trait SimOp {
+pub trait SimOp: Send + Sync {
     /// The name of this operator (for identification and lookup)
     fn name(&self) -> &str;
     

@@ -773,7 +773,6 @@ impl AtmosphericGenerationOp {
 
             // Analyze each layer above the melting depth - keep them individually
             for (current, _next) in &cell.layers_t {
-                let layer_top = current.start_depth_km;
                 let layer_bottom = current.start_depth_km + current.height_km;
 
                 // Only count layers above the melting depth AND skip atmospheric layers

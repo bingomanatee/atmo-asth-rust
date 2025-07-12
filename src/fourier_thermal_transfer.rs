@@ -27,7 +27,7 @@ use crate::constants::{KM_TO_M, SECONDS_PER_YEAR};
     pub const CONVECTION_THRESHOLD_K: f64 = 800.0;
     
     /// Exponential scaling factor for high-temperature convection
-    pub const CONVECTION_EXPONENTIAL_FACTOR: f64 = 2.5;
+    pub const CONVECTION_EXPONENTIAL_FACTOR: f64 = 1.5;
 
 
 
@@ -48,23 +48,6 @@ struct DensityAdjustedConductivityCacheKey {
     phase: MaterialPhase,
     current_density_rounded: i32,  // Current density rounded to nearest 0.1 kg/m³
 }
-
-
-#[derive(Debug, Clone)]
-struct CachedDirectionalHeatFlow {
-    energy_transfer_factor: f64,  // Pre-calculated factor for energy transfer
-    conductivity_factor: f64,     // Pre-calculated conductivity factor
-    thermal_pressure_factor: f64, // Pre-calculated thermal pressure factor
-}
-
-
-/// Global directional heat flow cache for performance optimization
-static DIRECTIONAL_HEAT_FLOW_CACHE: Lazy<Mutex<HashMap<DirectionalHeatFlowCacheKey, CachedDirectionalHeatFlow>>> = 
-    Lazy::new(|| Mutex::new(HashMap::new()));
-
-/// Global density-adjusted conductivity cache for performance optimization
-static DENSITY_CONDUCTIVITY_CACHE: Lazy<Mutex<HashMap<DensityAdjustedConductivityCacheKey, f64>>> = 
-    Lazy::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Debug, Clone)]
 pub struct FourierThermalTransfer {
@@ -90,14 +73,18 @@ impl FourierThermalTransfer {
     
     /// Calculate thermal pressure enhancement factor based on temperature difference
     /// Uses the ratio of thermal pressures for a simpler, more intuitive approach
-    fn calculate_exponential_thermal_pressure(
+    pub fn calculate_exponential_thermal_pressure(
         &self,
-        higher_temp: f64,
         lower_temp: f64,
+        higher_temp: f64,
     ) -> f64 {
+
+        if (higher_temp - lower_temp).abs() < 2.0 {
+            return 1.0;
+        }
         // Calculate thermal pressure for both temperatures
-        let higher_thermal_pressure = self.calculate_thermal_pressure_coefficient_uncached(higher_temp, CONVECTION_THRESHOLD_K);
-        let lower_thermal_pressure = self.calculate_thermal_pressure_coefficient_uncached(lower_temp, CONVECTION_THRESHOLD_K);
+        let higher_thermal_pressure = self.calculate_thermal_pressure_coefficient_uncached(higher_temp);
+        let lower_thermal_pressure = self.calculate_thermal_pressure_coefficient_uncached(lower_temp);
         
         // Use the ratio of thermal pressures as the enhancement factor
         // Higher temperature differences create stronger pressure gradients
@@ -108,7 +95,7 @@ impl FourierThermalTransfer {
         };
         
         // Apply reasonable bounds to prevent numerical instability
-        pressure_ratio.clamp(0.1, 10.0)
+        pressure_ratio.clamp(0.1, 4.0)
     }
     
     /// Calculate thermal pressure coefficient based on temperature (uncached)
@@ -202,56 +189,6 @@ impl FourierThermalTransfer {
         }
     }
 
-    /// Get cached directional heat flow factors
-    fn get_cached_directional_heat_flow(
-        &self,
-        from_energy_mass: &dyn EnergyMassComposite,
-        to_energy_mass: &dyn EnergyMassComposite,
-        temp_diff: f64,
-    ) -> CachedDirectionalHeatFlow {
-        let cache_key = Self::create_directional_heat_flow_cache_key(from_energy_mass, to_energy_mass, temp_diff);
-        
-        // Try to get from cache first
-        if let Ok(cache) = DIRECTIONAL_HEAT_FLOW_CACHE.try_lock() {
-            if let Some(cached) = cache.get(&cache_key) {
-                return cached.clone();
-            }
-        }
-        
-        // Calculate if not in cache
-        let cached_flow = self.calculate_directional_heat_flow_uncached(from_energy_mass, to_energy_mass, temp_diff);
-        
-        // Cache the result
-        if let Ok(mut cache) = DIRECTIONAL_HEAT_FLOW_CACHE.try_lock() {
-            cache.insert(cache_key, cached_flow.clone());
-        }
-        
-        cached_flow
-    }
-
-    /// Calculate directional heat flow factors without caching
-    fn calculate_directional_heat_flow_uncached(
-        &self,
-        from_energy_mass: &dyn EnergyMassComposite,
-        to_energy_mass: &dyn EnergyMassComposite,
-        temp_diff: f64,
-    ) -> CachedDirectionalHeatFlow {
-        // Use cached density-adjusted conductivity for performance
-        let adjusted_from_conductivity = self.get_cached_density_adjusted_conductivity(from_energy_mass);
-        let adjusted_to_conductivity = self.get_cached_density_adjusted_conductivity(to_energy_mass);
-
-        // Calculate factors
-        let base_transfer_rate = 0.08; // 8% per timestep (increased to improve thermal conduction from foundry)
-        let avg_conductivity = (adjusted_from_conductivity + adjusted_to_conductivity) / 2.0;
-        let conductivity_factor = avg_conductivity / 2.0;
-        let thermal_pressure_factor = self.calculate_thermal_pressure_factor_uncached(temp_diff.abs());
-
-        CachedDirectionalHeatFlow {
-            energy_transfer_factor: base_transfer_rate,
-            conductivity_factor,
-            thermal_pressure_factor,
-        }
-    }
 
     /// Calculate thermal pressure factor without caching
     fn calculate_thermal_pressure_factor_uncached(&self, temp_diff_abs: f64) -> f64 {
@@ -265,172 +202,6 @@ impl FourierThermalTransfer {
         }
     }
 
-    /// Get cached density-adjusted conductivity for a material type, phase, and current density
-    fn get_cached_density_adjusted_conductivity(
-        &self,
-        energy_mass: &dyn EnergyMassComposite,
-    ) -> f64 {
-        let cache_key = DensityAdjustedConductivityCacheKey {
-            material_type: energy_mass.material_composite_type(),
-            phase: energy_mass.phase(),
-            current_density_rounded: (energy_mass.density_kgm3() * 10.0).round() as i32,  // Round to nearest 0.1
-        };
-        
-        // Try to get from cache first
-        if let Ok(cache) = DENSITY_CONDUCTIVITY_CACHE.try_lock() {
-            if let Some(cached) = cache.get(&cache_key) {
-                return *cached;
-            }
-        }
-        
-        // Calculate if not in cache
-        let base_conductivity = energy_mass.thermal_conductivity();
-        let current_density = energy_mass.density_kgm3();
-        let default_density = energy_mass.material_composite_profile().density_kg_m3;
-        
-        let adjusted_conductivity = self.calculate_density_adjusted_conductivity_uncached(
-            base_conductivity,
-            current_density,
-            default_density,
-            None, // No thermal layer available in this context
-        );
-        
-        // Cache the result
-        if let Ok(mut cache) = DENSITY_CONDUCTIVITY_CACHE.try_lock() {
-            cache.insert(cache_key, adjusted_conductivity);
-        }
-        
-        adjusted_conductivity
-    }
-
-
-    /// Calculate directional heat flow between two EnergyMass objects (helper function)
-    /// Returns energy transfer magnitude in Joules (always positive)
-    fn calculate_directional_heat_flow(
-        &self,
-        from_energy_mass: &dyn EnergyMassComposite,
-        to_energy_mass: &dyn EnergyMassComposite,
-        temp_diff: f64,
-    ) -> f64 {
-        // Use cached directional heat flow factors for performance
-        let cached_factors = self.get_cached_directional_heat_flow(from_energy_mass, to_energy_mass, temp_diff);
-
-        // Calculate thermal energy difference
-        let thermal_energy_diff = from_energy_mass.thermal_capacity() * temp_diff;
-        let base_transfer = thermal_energy_diff * cached_factors.energy_transfer_factor;
-        
-        // Apply sanity cap: limit transfer to prevent instability while allowing foundry heat flow
-        let max_transfer = from_energy_mass.energy() * 0.80; // 80% of total energy in source layer (increased for foundry)
-        let energy_diff_cap = (from_energy_mass.energy() - to_energy_mass.energy()).abs() * 0.80; // 80% of energy difference
-        let capped_transfer = base_transfer.min(max_transfer).min(energy_diff_cap);
-
-        // Apply cached conductivity and thermal pressure factors
-        let scaled_transfer = capped_transfer * cached_factors.conductivity_factor * cached_factors.thermal_pressure_factor;
-
-        scaled_transfer
-    }
-
-    /// Calculate bidirectional heat flow between two EnergyMass objects with thickness-based diffusivity scaling
-    /// Returns energy transfer in Joules (positive = energy flows from upper to lower)
-    pub fn heat_flow_between_energy_masses_with_thickness(
-        &self,
-        upper_energy_mass: &dyn EnergyMassComposite,
-        lower_energy_mass: &dyn EnergyMassComposite,
-        avg_thickness_km: Option<f64>,
-    ) -> f64 {
-        let upper_temp_k = upper_energy_mass.kelvin();
-        let lower_temp_k = lower_energy_mass.kelvin();
-
-        // Calculate thickness scaling factor if thickness is provided
-        let thickness_scaling = if let Some(thickness_km) = avg_thickness_km {
-            // For layer-to-layer heat transfer, thermal resistance scales linearly with thickness
-            // Use a simple linear relationship: thicker layers = proportionally slower transfer
-            let baseline_thickness_km = 10.0; // Reference thickness (10km layers transfer at 1.0x rate)
-            let thickness_factor = baseline_thickness_km / thickness_km;
-            
-            // Special handling for foundry layers (very thick, high-temperature layers)
-            // If this is a very thick layer (>100km) with high temperature (>1600K), 
-            // it's likely a foundry layer that needs enhanced heat transfer
-            let avg_temp = (upper_temp_k + lower_temp_k) / 2.0;
-            if thickness_km > 100.0 && avg_temp > 1600.0 {
-                // Foundry layers get enhanced heat transfer despite thickness
-                thickness_factor.clamp(0.8, 3.0) // Allow 80% transfer rate minimum for foundry
-            } else {
-                // Normal layers get standard clamping
-                thickness_factor.clamp(0.1, 2.0)
-            }
-        } else {
-            1.0 // No thickness scaling
-        };
-
-        if upper_temp_k > lower_temp_k {
-            // Heat flows from upper to lower (positive)
-            let temp_diff = upper_temp_k - lower_temp_k;
-            let heat_flow = self.calculate_directional_heat_flow(upper_energy_mass, lower_energy_mass, temp_diff);
-            heat_flow * thickness_scaling
-        } else if lower_temp_k > upper_temp_k {
-            // Heat flows from lower to upper (negative)
-            let temp_diff = lower_temp_k - upper_temp_k;
-            let heat_flow = self.calculate_directional_heat_flow(lower_energy_mass, upper_energy_mass, temp_diff);
-            -(heat_flow * thickness_scaling)
-        } else {
-            // Temperatures equal, no heat flow
-            0.0
-        }
-    }
-
-
-
-    /// Apply heat transfer between adjacent thermal layer tuples with directional attenuation and thickness scaling
-    /// Modifies the 'next' state of both layers based on calculated heat flow
-    /// Returns the amount of energy transferred (positive = upper to lower)
-    pub fn apply_heat_transfer_between_layers(
-        &self,
-        upper_layer_tuple: &mut (ThermalLayer, ThermalLayer),
-        lower_layer_tuple: &mut (ThermalLayer, ThermalLayer),
-    ) -> f64 {
-        // Calculate average layer thickness for diffusivity scaling
-        let avg_thickness_km = (upper_layer_tuple.0.height_km + lower_layer_tuple.0.height_km) / 2.0;
-
-        // Calculate heat flow using current state with thickness scaling
-        let heat_flow = self.heat_flow_between_energy_masses_with_thickness(
-            &upper_layer_tuple.0.energy_mass,
-            &lower_layer_tuple.0.energy_mass,
-            Some(avg_thickness_km)
-        );
-
-        if heat_flow.abs() > 0.0 {
-            // Apply energy transfer to next state with directional attenuation rules
-            let upper_capacity = upper_layer_tuple.0.energy_mass.thermal_capacity();
-            let lower_capacity = lower_layer_tuple.0.energy_mass.thermal_capacity();
-
-            // Apply thermal pressure directly to the heat flow for layer-to-layer transfer
-            let upper_temp = upper_layer_tuple.0.temperature_k();
-            let lower_temp = lower_layer_tuple.0.temperature_k();
-
-            // Exponential temperature-pressure dynamics for faster convection at higher temperatures
-            let thermal_pressure_factor = self.calculate_exponential_thermal_pressure(
-                upper_temp.max(lower_temp), upper_temp.min(lower_temp)
-            );
-
-            // Apply thermal pressure to the base heat flow
-            let limited_transfer = heat_flow.abs() * thermal_pressure_factor;
-
-            if heat_flow > 0.0 {
-                // Heat flows from upper to lower (downward)
-                upper_layer_tuple.1.remove_energy(limited_transfer);
-                lower_layer_tuple.1.add_energy(limited_transfer);
-                limited_transfer
-            } else {
-                // Heat flows from lower to upper (upward)
-                lower_layer_tuple.1.remove_energy(limited_transfer);
-                upper_layer_tuple.1.add_energy(limited_transfer);
-                limited_transfer
-            }
-        } else {
-            0.0
-        }
-    }
 
     /// Calculate potential heat flow between layer tuples without applying the transfer
     /// Used for energy distribution calculations in multi-neighbor systems
@@ -454,7 +225,7 @@ impl FourierThermalTransfer {
     }
     
     /// Calculate potential heat flow with custom geometry and conductivity
-    /// Used for lateral transfers between cells where distance and area need to be specified
+    /// note- because used for LATERAL and VERTICAL transfer the area andd distance must be passed in
     pub fn calculate_potential_heat_flow_simple(
         &self,
         source_layer: &ThermalLayer,

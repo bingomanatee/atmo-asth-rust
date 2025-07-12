@@ -11,7 +11,6 @@ use crate::h3_utils::H3Utils;
 use crate::energy_mass_composite::EnergyMassComposite;
 use h3o::CellIndex;
 use std::collections::HashMap;
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::any::Any;
 use rayon::prelude::*;
@@ -134,7 +133,7 @@ impl RadianceOp {
     fn initialize_perlin_cache(&mut self) {
         // Cache perlin values for all H3 cells at resolution 2 (typical simulation resolution)
         let resolution = h3o::Resolution::Two;
-        let mut cells: Vec<_> = h3o::CellIndex::base_cells()
+        let cells: Vec<_> = h3o::CellIndex::base_cells()
             .flat_map(|base| base.children(resolution))
             .collect();
             

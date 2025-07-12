@@ -132,7 +132,6 @@ impl Simulation {
 
                 // Apply pressure compaction if not atmospheric
                 if !current.energy_mass.is_atmosphere() {
-                    let original_height = current.height_km;
                     current.apply_pressure_compaction(pressure_pa);
                     next.apply_pressure_compaction(pressure_pa);
                     
