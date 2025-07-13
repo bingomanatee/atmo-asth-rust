@@ -49,6 +49,7 @@ pub struct RadianceOpParams {
     pub plume_energy_threshold_j_per_km2_per_year: f64,
     /// Temperature threshold for instant plume creation (K)
     pub plume_temperature_threshold_k: f64,
+    pub resolution: h3o::Resolution,
 }
 
 impl Default for RadianceOpParams {
@@ -62,6 +63,7 @@ impl Default for RadianceOpParams {
             enable_instant_plumes: true, // Enable by default for immediate plume response
             plume_energy_threshold_j_per_km2_per_year: 5.0e12, // 2x base radiance triggers plumes
             plume_temperature_threshold_k: 1800.0, // Standard plume threshold temperature
+            resolution: h3o::Resolution::Three,
         }
     }
 }
@@ -80,6 +82,7 @@ pub struct RadianceOp {
     years_since_last_injection: f64,
     plumes_created_this_step: usize, // Track instant plumes created
     total_plumes_created: usize,     // Total plumes created by radiance
+    resolution: h3o::Resolution,
 }
 
 impl RadianceOp {
@@ -96,7 +99,7 @@ impl RadianceOp {
                 writeln!(file, "# Step, Cell, Layer, Depth, CurrentEnergy, NextEnergy, DeltaEnergy, CurrentTemp, NextTemp, DeltaTemp, Phase").ok();
             }
         }
-
+        let resolution = params.resolution.clone();
         let mut op = Self {
             params,
             radiance_system,
@@ -111,6 +114,7 @@ impl RadianceOp {
             years_since_last_injection: 0.0,
             plumes_created_this_step: 0,
             total_plumes_created: 0,
+            resolution
         };
         
         // Pre-compute perlin cache for all cells
@@ -132,7 +136,7 @@ impl RadianceOp {
     /// Initialize perlin cache for all cells at resolution
     fn initialize_perlin_cache(&mut self) {
         // Cache perlin values for all H3 cells at resolution 2 (typical simulation resolution)
-        let resolution = h3o::Resolution::Two;
+        let resolution = self.resolution;
         let cells: Vec<_> = h3o::CellIndex::base_cells()
             .flat_map(|base| base.children(resolution))
             .collect();

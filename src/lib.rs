@@ -16,7 +16,5 @@ pub mod h3_graphics;
 pub mod config;
 pub mod h3o_png;
 pub mod sim_op;
-pub mod material_property_cache;
-pub mod thermal_pressure_cache;
 pub mod fourier_thermal_transfer;
 pub mod fast_fourier_transfer;

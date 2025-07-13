@@ -5,3 +5,5 @@
 /src/config/mod.rs
 /src/config/thermal_config_loader.rs
 /examples/thermal_heat_map/*.png
+/examples/thermal_heat_map_r2/*.png
+/examples/thermal_heat_map_r3/*.png

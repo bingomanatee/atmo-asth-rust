@@ -23,9 +23,9 @@ use export_heat_map::ThermalHeatMapExportOp;
 mod export_heat_map;
 mod radiance_visualization_op;
 
-pub fn run_global_thermal_radiance_with_heat_map() {
+pub fn run_global_thermal_radiance_with_heat_map_hi_res() {
     // Create Earth planet with L2 resolution
-    let planet = Planet::earth(Resolution::Two);
+    let planet = Planet::earth(Resolution::Three);
 
     // Create radiance system with NO perlin noise - only upwells
     let perlin_config = PerlinThermalConfig {
@@ -53,12 +53,15 @@ pub fn run_global_thermal_radiance_with_heat_map() {
         enable_instant_plumes: false,  // Disable instant plumes for this example
         plume_energy_threshold_j_per_km2_per_year: 5.0e12,
         plume_temperature_threshold_k: 1800.0,
+        resolution: RESOLUTION,
     };
+
+    const RESOLUTION: Resolution = Resolution::Three;
 
     // Create simulation properties with RadianceOp and PNG heat map export
     let sim_props = SimProps {
         planet: planet.clone(),
-        res: Resolution::Two,
+        res: RESOLUTION,
         layer_count: 24, // Will be overridden by GlobalH3Cell configuration
         sim_steps: 500,  // Very short test to check radiance circles
         years_per_step: 5000,
@@ -100,10 +103,10 @@ pub fn run_global_thermal_radiance_with_heat_map() {
             SimOpHandle::new(Box::new(TemperatureReportingOp::new())),
             // PNG heat map export for visualization (export every step at 3 ppd)
             SimOpHandle::new(Box::new(ThermalHeatMapExportOp::new(
-                Resolution::Two,
-                1,
+                RESOLUTION,
+                8,
                 false,
-                "thermal_heat_map_r2"
+                "thermal_heat_map_r3"
             ))),
             // Radiance-specific visualization export to subfolder (foundry layer focus)
             // SimOpHandle::new(Box::new(RadianceVisualizationOp::new(Resolution::Two, 3, true))),
@@ -127,30 +130,30 @@ pub fn run_global_thermal_radiance_with_heat_map() {
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
                 cell_count: 2,
-                height_km: 10.0, // 40km total lithosphere (realistic continental crust)
-                is_foundry: false,
-            },
-            LayerConfig {
-                cell_type: MaterialCompositeType::Silicate,
-                cell_count: 2,
                 height_km: 15.0, // 40km total lithosphere (realistic continental crust)
                 is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
-                cell_count: 3,
-                height_km: 20.0, // 45km upper asthenosphere (gradual transition from 10km)
+                cell_count: 2,
+                height_km: 20.0, // 40km total lithosphere (realistic continental crust)
                 is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
-                cell_count: 3,
-                height_km: 25.0, // 60km middle asthenosphere (intermediate thickness)
+                cell_count: 2,
+                height_km: 30.0, // 45km upper asthenosphere (gradual transition from 10km)
                 is_foundry: false,
             },
             LayerConfig {
                 cell_type: MaterialCompositeType::Silicate,
-                cell_count: 3,
+                cell_count: 2,
+                height_km: 40.0, // 60km middle asthenosphere (intermediate thickness)
+                is_foundry: false,
+            },
+            LayerConfig {
+                cell_type: MaterialCompositeType::Silicate,
+                cell_count: 2,
                 height_km: 200.0, // 75km lower asthenosphere (deepest layers)
                 is_foundry: true,
             },
@@ -170,5 +173,5 @@ pub fn run_global_thermal_radiance_with_heat_map() {
 }
 
 fn main() {
-    run_global_thermal_radiance_with_heat_map();
+    run_global_thermal_radiance_with_heat_map_hi_res();
 }

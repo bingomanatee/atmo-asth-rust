@@ -5,10 +5,6 @@ use crate::energy_mass_composite::{EnergyMassComposite, MaterialCompositeType, M
 /// Enhanced with thermal expansion effects for density-dependent thermal conductivity
 use crate::global_thermal::thermal_layer::ThermalLayer;
 use crate::global_thermal::thermal_expansion::ThermalExpansionCalculator;
-use crate::thermal_pressure_cache::ThermalPressureCache;
-use std::collections::HashMap;
-use std::sync::Mutex;
-use once_cell::sync::Lazy;
 use crate::constants::{KM_TO_M, SECONDS_PER_YEAR};
 
 /// Physical constants for Fourier heat transfer calculations
@@ -53,18 +49,13 @@ struct DensityAdjustedConductivityCacheKey {
 pub struct FourierThermalTransfer {
     pub years: f64,
     thermal_expansion_calculator: ThermalExpansionCalculator,
-    thermal_pressure_cache: ThermalPressureCache,
 }
 
 impl FourierThermalTransfer {
     pub fn new(years: f64) -> Self {
-        let thermal_pressure_cache = ThermalPressureCache::new(years);
-        thermal_pressure_cache.initialize_cache();
-        
         Self { 
             years,
             thermal_expansion_calculator: ThermalExpansionCalculator::new(),
-            thermal_pressure_cache,
         }
     }
 

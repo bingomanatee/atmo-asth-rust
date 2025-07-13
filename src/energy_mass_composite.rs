@@ -4,9 +4,6 @@ use crate::material_composite::resolve_phase_from_temperature_and_pressure;
 pub use crate::material_composite::{
     MaterialCompositeType, MaterialPhase, MaterialStateProfile, get_profile_fast,
 };
-use crate::material_property_cache::{
-    MaterialPropertyCache, CachedPhaseTransition,
-};
 use serde::{Deserialize, Serialize};
 
 /// Transition mode for managing phase transitions with hysteresis
@@ -1103,16 +1100,6 @@ impl EnergyMassComposite for StandardEnergyMassComposite {
         
         // For now, just calculate directly without caching
         let phase = resolve_phase_from_temperature_and_pressure(&self.material_type, temp_k, self.pressure_gpa);
-        let _cached_phase = CachedPhaseTransition {
-            from_phase: phase,
-            to_phase: phase,
-            temperature: temp_k,
-            pressure: self.pressure_gpa,
-            phase,
-            melting_point_k: self.material_composite_profile().melt_temp,
-            boiling_point_k: self.material_composite_profile().boil_temp,
-            is_transitioning: false,
-        };
         
         phase
     }
